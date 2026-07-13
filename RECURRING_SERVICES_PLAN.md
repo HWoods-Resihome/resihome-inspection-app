@@ -1189,3 +1189,70 @@ on each created Service to enforce idempotency.
   PPW_TEST_MARKER), `lib/ppwAccess.ts` (server `ppwEnabled` admin gate) and the
   `PpwEnvBadge`. Deploy isolated from resiwalk.com; HubSpot kept on production per
   owner. Still PLANNING — no product code yet.
+
+---
+
+## Community Grass-Cut Billing Split (community = individual house cuts) — 2026-07-13
+
+**Status: PLANNING (spec approved for review; no product code yet).**
+
+### Concept
+A **community + Landscaping + Grass Cut** service is a **master** in the ResiWALK
+UI (one card, one photo set, one submit) but bills as **individual per-property
+cuts**. On close-out the master **splits** into one Service Work Order per covered
+property in HubSpot; the UI rolls those children back up to the master.
+(Community + **Common Areas** is the opposite — a single community line, no split.)
+
+### Eligibility — `rrqc_pass_date` (Property object)
+- A property is in the week's cut if it has **any** `rrqc_pass_date` (passed RRQC).
+- `rrqc_pass_date` is added as a **selectable enrollment criterion** in the Rules
+  Engine (NOT hard-coded) — a date field with an "is known / has any date"
+  operator. **Auto-added by default** when a rule is community + Landscaping +
+  Grass Cut, with the option to add/remove other criteria.
+- Re-evaluated every generation → the covered set is dynamic week to week.
+
+### Decisions (owner)
+1. Eligibility = **any** `rrqc_pass_date`.
+2. **Vendor** sees the **street-address list** of covered homes while the master is
+   **Assigned**. **Reviewer can add/drop addresses** during review (e.g. after
+   reading vendor notes saying they cut more/fewer homes than listed).
+3. Per-property price is set **in the contract and on the rule** (uniform per-rule rate).
+4. Children **reference the master's photos** — never duplicated.
+5. Creation is **purely rule-driven** — no new creation logic; reuse the generator.
+
+### Data model (additive fields)
+- **Service:** `for_billing` (bool), `master_service_id` (text), `covered_property_ids`
+  (JSON), `covered_property_count` (number), `per_property_rate` (number), `split_at` (datetime).
+- **Rule:** per-property rate = existing `vendor_cost`; enrollment uses
+  `enroll_field = rrqc_pass_date` + "is known".
+- **Property:** read `rrqc_pass_date` (exists).
+
+### Lifecycle
+1. **Generate (weekly):** rule fires → query community properties → keep those with
+   `rrqc_pass_date` → snapshot `covered_property_ids`/count → master
+   `vendor_cost = count × per_property_rate`, `for_billing = Yes`.
+2. **Assigned:** vendor sees the covered street-address list on the master.
+3. **Submit → Review:** reviewer can add/drop addresses (adjusts covered set/count/price).
+4. **Approve → Completed → SPLIT:** create one property SWO per covered property
+   (`scope=property`, `property_id_ref`, `vendor_cost = per_property_rate`,
+   `master_service_id`, `for_billing = Yes`, evidence = pointer to master photos).
+5. **Billing flip:** master `for_billing → No`; children `for_billing = Yes`.
+   Billing exports filter `for_billing = Yes` (no aggregate double-count).
+
+### UI rollup
+- List **hides records with a `master_service_id`** → one master card.
+- Master page: covered address list (vendor + reviewer), later a read-only
+  "split into N" drill-down.
+
+### New subtype
+- **Landscaping ▸ Common Areas** — seed its Form Builder questions by **mirroring
+  Grass Cut** initially. (Common Areas stays a single community line; only Grass
+  Cut splits.)
+
+### Phases
+- P0 (prep, low risk): add **Common Areas** subtype (+ mirrored form); add
+  `rrqc_pass_date` enrollment criterion (auto-default for community landscaping grass-cut).
+- P1: fields + generator snapshot/pricing by `rrqc_pass_date`.
+- P2: reviewer add/drop covered addresses; split on close-out; billing flags.
+- P3: UI rollup (hide children; master drill-down).
+- P4: `for_billing = Yes` billing view/export.
