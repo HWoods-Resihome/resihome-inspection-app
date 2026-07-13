@@ -25,6 +25,7 @@ export const WORKTYPES: WorktypeDef[] = [
     defaultDescription: 'Complete the landscaping scope for this visit — leave the property clean, edged, and blown off with all debris removed.',
     subtypes: [
       { id: 'cut', label: 'Grass Cut', defaultRate: 45, description: 'Mow all turf areas, edge walkways and beds, and blow off all hard surfaces. Remove all clippings and debris and leave the property clean.' },
+      { id: 'common_areas', label: 'Common Areas', description: 'Mow and maintain the community common areas — edge, blow off hard surfaces, and remove all clippings and debris.' },
       { id: 'flowers', label: 'Flowers', description: 'Install/refresh seasonal annuals in the designated beds, water in, and remove all spent material and debris.' },
       { id: 'tree_trimming', label: 'Tree Trimming', description: 'Trim trees and shrubs to shape and clearance, remove deadwood, and haul off all cuttings and debris.' },
       { id: 'mulch_pine_straw', label: 'Mulch / Pine Straw', description: 'Refresh mulch/pine straw to an even depth across all beds; edge as needed and remove any debris.' },

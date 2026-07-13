@@ -108,6 +108,13 @@ const ADDITIONAL: Record<string, ServiceQuestion[]> = {
     Q(GRASSCUT_AREAS_QID, 'Which areas were cut?', 'multi', { opts: GRASSCUT_AREA_LABELS }),
     Q('gc_blown', 'Edged, blown off, and debris removed?', 'yesno'),
   ],
+  // Common Areas mirrors the Grass Cut questions as a starting point (admin-editable
+  // in the Form Builder). Unlike community Grass Cut, this stays a single line.
+  'landscaping:common_areas': [
+    Q('grass_height', 'Grass height at arrival', 'single', { opts: ['Standard (under 6 in)', 'Overgrown (6-12 in)', 'Heavy (over 12 in)'] }),
+    Q(GRASSCUT_AREAS_QID, 'Which areas were cut?', 'multi', { opts: GRASSCUT_AREA_LABELS }),
+    Q('gc_blown', 'Edged, blown off, and debris removed?', 'yesno'),
+  ],
   'landscaping:flowers': [
     Q('flower_variety', 'Flower type / variety installed', 'text'),
     Q('beds_count', 'Number of beds serviced', 'number'),
