@@ -47,7 +47,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const p = rec.props;
     const common = {
       serviceId: recordId, vendorEmail: email, vendorName: p.vendor_name || '', force: true,
-      address: p.address_snapshot || p.service_name || 'a property',
+      address: p.address_snapshot || p.service_name || 'a property', locality: p.locality_snapshot,
       worktypeLabel: worktypeLabel(String(p.worktype || '')), subtypeLabel: subtypeLabel(String(p.worktype || ''), String(p.subtype || '')),
       dueDate: normDate(p.due_date), baseUrl,
     };

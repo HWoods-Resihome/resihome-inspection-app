@@ -274,7 +274,7 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         if (recordId && vendor) {
           notifyPromises.push(notifyServiceAssigned({
             serviceId: recordId, vendorEmail: vendorEmail(vendor), vendorName: vendor,
-            address: t.address, worktypeLabel: wtLabel(worktype), subtypeLabel: subLabel(worktype, subtype),
+            address: t.address, locality: t.locality, worktypeLabel: wtLabel(worktype), subtypeLabel: subLabel(worktype, subtype),
             dueDate, baseUrl: notifyBase,
           }));
         }

@@ -119,7 +119,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (decision !== 'reject') {
       await notifyServiceCompleted({
         serviceId: id, vendorEmail: p.vendor_email, vendorName: p.vendor_name,
-        address: p.address_snapshot || p.service_name || 'your service',
+        address: p.address_snapshot || p.service_name || 'your service', locality: p.locality_snapshot,
         worktypeLabel: worktypeLabel(String(p.worktype || '')), subtypeLabel: subtypeLabel(String(p.worktype || ''), String(p.subtype || '')),
         baseUrl: appBaseUrl(req),
       });

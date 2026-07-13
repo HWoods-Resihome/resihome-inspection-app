@@ -44,7 +44,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const pr = rec.props;
     await notifyServiceAssigned({
       serviceId: id, vendorEmail: vendor.email, vendorName: vendor.name,
-      address: pr.address_snapshot || pr.service_name || 'a property',
+      address: pr.address_snapshot || pr.service_name || 'a property', locality: pr.locality_snapshot,
       worktypeLabel: worktypeLabel(String(pr.worktype || '')), subtypeLabel: subtypeLabel(String(pr.worktype || ''), String(pr.subtype || '')),
       dueDate: String(pr.due_date || '').slice(0, 10), baseUrl: appBaseUrl(req),
     });
