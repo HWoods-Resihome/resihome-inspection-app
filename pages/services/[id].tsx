@@ -242,11 +242,12 @@ interface DecisionPayload { decision: 'approve' | 'modify' | 'reject'; vendorCos
 // a days-until-due). Three options in one row (Approve / Modify / Reject) with
 // short one-line hints; Modify shows a borderless mini-table of New / Original /
 // Difference across Vendor · Markup · Client. All decisions require a note.
-function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
+function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false }: {
   kind: 'review' | 'bid';
   orig: { vendor: number; markup: number; client: number };
   busy: boolean; error: string;
   onSubmit: (p: DecisionPayload) => void;
+  allowReissue?: boolean;   // Re-Issue only offered when the service wasn't completed
 }) {
   const [decision, setDecision] = useState<'' | 'approve' | 'modify' | 'reject'>('');
   const [vc, setVc] = useState(orig.vendor ? orig.vendor.toFixed(2) : '0.00');
@@ -293,7 +294,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
   return (
     <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
-        className={`${SECTION_HEAD} ${open ? '' : '!mb-0'} w-full flex items-center justify-between gap-2 text-left`}>
+        className={`${SECTION_HEAD} ${open ? '' : '!mb-0'} w-[calc(100%+2rem)] flex items-center justify-between gap-2 text-left`}>
         <span>Decision</span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
       </button>
@@ -362,9 +363,10 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
         </div>
       )}
 
-      {/* Re-Issue Service — review only. The original closes out per the decision;
-          a fresh service (same requirements/property/community/vendor) is created. */}
-      {kind === 'review' && (
+      {/* Re-Issue Service — review only, and only when the service was marked NOT
+          completed (a completed service has nothing to redo). The original closes
+          out per the decision; a fresh service (same requirements) is created. */}
+      {kind === 'review' && allowReissue && (
         <div className="border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[13px] font-heading font-semibold text-ink">Re-Issue Service?</span>
@@ -401,7 +403,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
       </div>
 
       <button type="button" disabled={!canSubmit}
-        onClick={() => canSubmit && onSubmit({ decision: decision as DecisionPayload['decision'], vendorCost: Number(vc || '0'), markupPct: Number(mk || '0'), dueDays: Number(days || '0'), notes, reissue: kind === 'review' && reissue, reissueDays: Number(reissueDays || '0'), reissueNote })}
+        onClick={() => canSubmit && onSubmit({ decision: decision as DecisionPayload['decision'], vendorCost: Number(vc || '0'), markupPct: Number(mk || '0'), dueDays: Number(days || '0'), notes, reissue: kind === 'review' && allowReissue && reissue, reissueDays: Number(reissueDays || '0'), reissueNote })}
         className={`w-full rounded-xl py-3 font-heading font-bold text-sm ${
           !canSubmit ? 'bg-gray-200 text-gray-400'
             : decision === 'reject' ? 'bg-red-600 text-white' : decision === 'modify' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}`}>
@@ -689,6 +691,17 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const markupPct = svc.markupPct ?? 0;
   const origClient = svc.clientCost ?? Math.round(origCost * (1 + markupPct / 100) * 100) / 100;
   const [deciding, setDeciding] = useState(false);
+
+  // Was the service marked NOT completed? (svc_completed=No, an answered Bill Trip
+  // Fee, or "able to access"=No). Only then does Re-Issue make sense in review.
+  const svcNotCompleted = useMemo(() => {
+    const a = svc.answers || {};
+    const byLabel = (re: RegExp) => { const q = form.find((x) => re.test(x.label)); return q ? a[q.id] : undefined; };
+    const completed = a['svc_completed'] ?? byLabel(/service\s*completed/i);
+    const access = byLabel(/able to access|access the property/i);
+    const bill = a['bill_trip_fee'] ?? byLabel(/trip\s*fee/i);
+    return String(completed) === 'no' || String(access) === 'no' || bill === 'yes' || bill === 'no';
+  }, [svc.answers, form]);
 
   const submitReview = async (p: DecisionPayload) => {
     setDeciding(true); setError('');
@@ -1193,7 +1206,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 )}
 
                 {canReview && (
-                  <DecisionPanel kind="review" orig={{ vendor: origCost, markup: markupPct, client: origClient }} busy={deciding} error={error} onSubmit={submitReview} />
+                  <DecisionPanel kind="review" orig={{ vendor: origCost, markup: markupPct, client: origClient }} busy={deciding} error={error} onSubmit={submitReview} allowReissue={svcNotCompleted} />
                 )}
 
                 {!canReview && underReview && (
