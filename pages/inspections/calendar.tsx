@@ -206,6 +206,12 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
     const h = d.getHours() % 12 || 12;
     return `${h}:${String(d.getMinutes()).padStart(2, '0')} ${ap}`;
   };
+  // Overall pass/fail for a COMPLETED inspection: QC re-inspects carry qcVerdict;
+  // 1099 / Vacancy carry inspectionResult. null when not completed or not scored.
+  const resultOf = (i: InspectionSummary): 'pass' | 'fail' | null => {
+    if (statusKey(i.status) !== 'completed') return null;
+    return i.qcVerdict || i.inspectionResult || null;
+  };
   // Day/week ordering: completed first (by time, the route order), then open (by address).
   const dayOrder = (a: InspectionSummary, b: InspectionSummary) => {
     const ca = statusKey(a.status) === 'completed', cb = statusKey(b.status) === 'completed';
@@ -530,7 +536,17 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
                       <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: metaOf(i)?.hex || '#9ca3af' }} />
                     )}
                     <div className="min-w-0 flex-1">
-                      <div className="font-heading font-bold text-ink text-sm truncate">{i.propertyAddressSnapshot || i.inspectionName || 'Inspection'}</div>
+                      <div className="font-heading font-bold text-ink text-sm truncate flex items-center gap-1.5">
+                        <span className="truncate">{i.propertyAddressSnapshot || i.inspectionName || 'Inspection'}</span>
+                        {(() => {
+                          const r = resultOf(i);
+                          return r ? (
+                            <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold border ${r === 'pass' ? 'bg-green-100 text-green-800 border-green-300' : 'bg-brand/10 text-brand border-brand/30'}`}>
+                              {r === 'pass' ? 'PASS' : 'FAIL'}
+                            </span>
+                          ) : null;
+                        })()}
+                      </div>
                       <div className="text-[12px] text-gray-500 truncate">{prettyType(i.templateType) || 'Inspection'} · {metaOf(i)?.label || i.status}</div>
                     </div>
                     <span className="text-[12px] text-gray-500 shrink-0">{i.inspectorName || <span className="text-brand font-semibold">Unassigned</span>}</span>
