@@ -10,6 +10,9 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { isCompletedStatus } from '@/lib/userAccess';
 import { recordAuditEvent } from '@/lib/auditLog';
+import { templateLabel } from '@/lib/templateLabels';
+import { notifyInspectionCompleted } from '@/lib/notifications/triggers';
+import { appBaseUrl } from '@/lib/notifications/send';
 
 /**
  * Finalize an existing inspection. All answers should already be saved via
@@ -350,6 +353,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       actorName: session.name,
       detail: isRateCard ? 'Submitted for approval' : 'Submitted (completed)',
     });
+
+    // Notify the inspector their completed inspection is done (non-rate-card:
+    // rate cards CC the inspector on the finalize email instead). Best-effort.
+    if (!isRateCard && inspection) {
+      await notifyInspectionCompleted({
+        inspectionId: id,
+        inspectorEmail: inspection.inspectorEmail,
+        templateLabel: templateLabel(inspection.templateType),
+        address: inspection.propertyAddressSnapshot || inspection.inspectionName || 'the property',
+        pdfUrl: inspection.pdfMasterUrl || inspection.pdfUrl,
+        baseUrl: appBaseUrl(req),
+      });
+    }
 
     return res.status(200).json({
       success: true,

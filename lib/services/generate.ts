@@ -24,6 +24,8 @@
 import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties } from '@/lib/hubspot';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { vendorEmail } from './vendors';
+import { notifyServiceAssigned } from '@/lib/notifications/triggers';
+import { appBaseUrl } from '@/lib/notifications/send';
 
 const parseArr = (s: any): any[] => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 // enroll_value: one plain string, or a JSON array when the operator is "is any of".
@@ -158,6 +160,12 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
     return _commIdMap.get(name) || '';
   };
 
+  // Assigned-vendor emails, collected across all creates and awaited at the end
+  // (only on apply — a dry-run creates nothing). appBaseUrl() with no request
+  // uses APP_PUBLIC_URL (this runs in the nightly cron).
+  const notifyPromises: Promise<void>[] = [];
+  const notifyBase = appBaseUrl();
+
   const result: GenerateResult = {
     mode: apply ? 'apply' : 'dry-run', today: todayISO, configured: true,
     rulesActive: 0, rulesSkipped: 0, wouldCreate: 0, created: 0, skippedExisting: 0, errors: 0,
@@ -262,6 +270,14 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         openKeys.add(enrollmentKey); // guard against duplicate targets within a single run
         result.created++;
         result.items.push({ ...base, action: 'created', recordId: recordId || undefined });
+        // Email the assigned vendor (best-effort, collected + awaited at the end).
+        if (recordId && vendor) {
+          notifyPromises.push(notifyServiceAssigned({
+            serviceId: recordId, vendorEmail: vendorEmail(vendor), vendorName: vendor,
+            address: t.address, worktypeLabel: wtLabel(worktype), subtypeLabel: subLabel(worktype, subtype),
+            dueDate, baseUrl: notifyBase,
+          }));
+        }
       } catch (e: any) {
         result.errors++;
         result.items.push({ ...base, action: 'error', error: String(e?.message || e).slice(0, 300) });
@@ -269,5 +285,6 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
     }
   }
 
+  if (notifyPromises.length) await Promise.allSettled(notifyPromises);
   return result;
 }

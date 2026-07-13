@@ -24,6 +24,9 @@ import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder } 
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { defaultRateFor } from '@/lib/services/worktypes';
 import { isCommunityCutMaster, splitMasterCommunityCut } from '@/lib/services/split';
+import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
+import { notifyServiceCompleted } from '@/lib/notifications/triggers';
+import { appBaseUrl } from '@/lib/notifications/send';
 import { easternTodayISO } from '@/lib/services/sampleData';
 
 /** Add whole days to a YYYY-MM-DD date, returned as YYYY-MM-DD (UTC-safe). */
@@ -109,6 +112,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           console.warn('[services/review-decision] community-cut split failed:', e?.message || e);
         }
       }
+    }
+
+    // Notify the vendor their service completed (approve/modify only — a
+    // rejection denies payment, so it isn't a "completed" outcome to celebrate).
+    if (decision !== 'reject') {
+      await notifyServiceCompleted({
+        serviceId: id, vendorEmail: p.vendor_email, vendorName: p.vendor_name,
+        address: p.address_snapshot || p.service_name || 'your service',
+        worktypeLabel: worktypeLabel(String(p.worktype || '')), subtypeLabel: subtypeLabel(String(p.worktype || ''), String(p.subtype || '')),
+        baseUrl: appBaseUrl(req),
+      });
     }
 
     // Re-Issue: the reviewer wants the work redone. Spin up a fresh service with

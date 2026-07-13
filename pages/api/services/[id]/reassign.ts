@@ -11,6 +11,9 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
 import { SERVICE_VENDORS } from '@/lib/services/vendors';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
+import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
+import { notifyServiceAssigned } from '@/lib/notifications/triggers';
+import { appBaseUrl } from '@/lib/notifications/send';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -36,6 +39,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     await patchServiceWorkOrder(id, { vendor_name: vendor.name, vendor_email: vendor.email });
     void recordServiceAudit({ serviceId: id, action: 'reassign', actorEmail: email, actorName: session?.name, detail: `Vendor reassigned: ${from} → ${vendor.name}` });
+    // Notify the newly-assigned vendor (open orders only — completed/canceled
+    // already returned above).
+    const pr = rec.props;
+    await notifyServiceAssigned({
+      serviceId: id, vendorEmail: vendor.email, vendorName: vendor.name,
+      address: pr.address_snapshot || pr.service_name || 'a property',
+      worktypeLabel: worktypeLabel(String(pr.worktype || '')), subtypeLabel: subtypeLabel(String(pr.worktype || ''), String(pr.subtype || '')),
+      dueDate: String(pr.due_date || '').slice(0, 10), baseUrl: appBaseUrl(req),
+    });
     return res.status(200).json({ ok: true, id, vendorName: vendor.name });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });
