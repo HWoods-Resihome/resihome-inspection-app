@@ -107,6 +107,8 @@ export interface GenerateResult {
     action: 'CREATE' | 'created' | 'skip-open' | 'error'; recordId?: string; error?: string;
   }[];
   notes: string[];
+  // For a single community grass-cut rule: how many properties the master covers.
+  masterCoverage?: number;
 }
 
 /**
@@ -169,6 +171,23 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         continue;
       }
 
+      // Community + Landscaping + Grass Cut = a MASTER of individual house cuts.
+      // Resolve the eligible property snapshot up front (used by BOTH the dry-run
+      // coverage count and the apply pricing). Other community services stay a
+      // single line. Eligibility is driven by the rule's enrollment criterion
+      // (defaults to "RRQC Pass Date is known") — not hard-coded.
+      const isCommunityCut = t.scope === 'community' && worktype === 'landscaping' && subtype === 'cut';
+      let commId = '';
+      let eligibleIds: string[] = [];
+      if (t.scope === 'community') commId = await communityIdByName(t.community || t.address);
+      if (isCommunityCut) {
+        const rrqcGate = /rrqc/i.test(String(p.enroll_field || ''));
+        const all = commId ? await fetchCommunityProperties(commId) : [];
+        eligibleIds = (rrqcGate ? all.filter((x) => x.rrqcPassDate) : all).map((x) => x.id);
+        if (!eligibleIds.length) { result.items.push({ ...base, action: 'skip-open' }); result.skippedExisting++; continue; }
+        result.masterCoverage = eligibleIds.length;   // for the single-rule "would create" preview
+      }
+
       if (!apply) {
         result.wouldCreate++;
         result.items.push({ ...base, action: 'CREATE' });
@@ -188,33 +207,18 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
       if (t.community) orderProps.community_name = t.community;
       if (Number.isFinite(markupPct)) orderProps.markup_pct = markupPct;
       if (t.scope === 'property') orderProps.property_id_ref = t.id;
+      if (t.scope === 'community' && commId) orderProps.community_id_ref = commId;
 
-      // Community + Landscaping + Grass Cut = a MASTER of individual house cuts.
-      // Snapshot the eligible properties (those with an rrqc_pass_date) and price
-      // the master at count × per-property rate; it splits into per-house records
-      // on close-out (P2). Other community services stay a single line.
-      const isCommunityCut = t.scope === 'community' && worktype === 'landscaping' && subtype === 'cut';
-      if (t.scope === 'community') {
-        const commId = await communityIdByName(t.community || t.address);
-        if (commId) orderProps.community_id_ref = commId;
-        if (isCommunityCut) {
-          // Eligibility is driven by the rule's enrollment criterion (defaults to
-          // "RRQC Pass Date is known" for community grass-cut) — not hard-coded.
-          const rrqcGate = /rrqc/i.test(String(p.enroll_field || ''));
-          const all = commId ? await fetchCommunityProperties(commId) : [];
-          const eligible = rrqcGate ? all.filter((x) => x.rrqcPassDate) : all;
-          if (!eligible.length) { result.items.push({ ...base, action: 'skip-open' }); result.skippedExisting++; continue; }
-          const perRate = Number.isFinite(vendorCost) ? vendorCost : 0;   // rule cost = per-property rate
-          const masterVendor = Math.round(eligible.length * perRate * 100) / 100;
-          orderProps.covered_property_ids = JSON.stringify(eligible.map((x) => x.id));
-          orderProps.covered_property_count = eligible.length;
-          orderProps.per_property_rate = perRate;
-          orderProps.for_billing = 'true';
-          orderProps.vendor_cost = masterVendor;
-          orderProps.client_cost = Number.isFinite(markupPct) ? Math.round(masterVendor * (1 + markupPct / 100) * 100) / 100 : masterVendor;
-        }
-      }
-      if (!isCommunityCut) {
+      if (isCommunityCut) {
+        const perRate = Number.isFinite(vendorCost) ? vendorCost : 0;   // rule cost = per-property rate
+        const masterVendor = Math.round(eligibleIds.length * perRate * 100) / 100;
+        orderProps.covered_property_ids = JSON.stringify(eligibleIds);
+        orderProps.covered_property_count = eligibleIds.length;
+        orderProps.per_property_rate = perRate;
+        orderProps.for_billing = 'true';
+        orderProps.vendor_cost = masterVendor;
+        orderProps.client_cost = Number.isFinite(markupPct) ? Math.round(masterVendor * (1 + markupPct / 100) * 100) / 100 : masterVendor;
+      } else {
         if (Number.isFinite(vendorCost)) orderProps.vendor_cost = vendorCost;
         if (clientCost !== null) orderProps.client_cost = clientCost;
       }

@@ -267,6 +267,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
   // not the coverage catalog (which can be incomplete for some portfolios). null =
   // loading. Bumping wcReload re-runs it (after a generate).
   const [wouldCreate, setWouldCreate] = useState<number | null>(null);   // NEW services the rule would create (dry-run)
+  const [masterCoverage, setMasterCoverage] = useState<number | null>(null); // community grass-cut: properties the master covers
   const [coveredLive, setCoveredLive] = useState<number | null>(null);   // accurate applicable-property count (live query)
   const [wcReload, setWcReload] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);   // null = list view; else editing that rule
@@ -576,8 +577,8 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
     setWouldCreate(null);
     fetch(`/api/services/admin/generate?ruleId=${encodeURIComponent(rule.recordId)}`)
       .then((r) => r.json())
-      .then((d) => { if (alive) setWouldCreate(typeof d.wouldCreate === 'number' ? d.wouldCreate : 0); })
-      .catch(() => { if (alive) setWouldCreate(null); });
+      .then((d) => { if (alive) { setWouldCreate(typeof d.wouldCreate === 'number' ? d.wouldCreate : 0); setMasterCoverage(typeof d.masterCoverage === 'number' ? d.masterCoverage : null); } })
+      .catch(() => { if (alive) { setWouldCreate(null); setMasterCoverage(null); } });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rule?.recordId, canGenerate, wcReload]);
@@ -765,7 +766,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                 </div>
               </div>
             </div>
-            {rule.scope === 'community' && (
+            {rule.scope === 'community' && !(rule.worktype === 'landscaping' && rule.subtype === 'cut') && (
               <div className="mb-4">
                 <label className={lbl}>Include Pet Stations?</label>
                 <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
@@ -1045,7 +1046,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                 <div className="mt-2 flex items-center justify-between gap-3">
                   <div className="text-[13px] text-ink">
                     {rule.recordId
-                      ? <>Would create <span className="font-heading font-extrabold">{wouldCreate == null ? '…' : wouldCreate.toLocaleString()}</span> work order{wouldCreate === 1 ? '' : 's'}</>
+                      ? (rule.scope === 'community' && rule.worktype === 'landscaping' && rule.subtype === 'cut')
+                        ? <>Would create <span className="font-heading font-extrabold">1</span> Master Service{masterCoverage != null ? <> (for <span className="font-heading font-extrabold">{masterCoverage.toLocaleString()}</span> propert{masterCoverage === 1 ? 'y' : 'ies'})</> : ''}</>
+                        : <>Would create <span className="font-heading font-extrabold">{wouldCreate == null ? '…' : wouldCreate.toLocaleString()}</span> work order{wouldCreate === 1 ? '' : 's'}</>
                       : <span className="text-gray-500">Save the rule to see how many it would create.</span>}
                     {genMsg && <span className="block text-[12px] font-heading font-semibold text-gray-600">{genMsg}</span>}
                   </div>
