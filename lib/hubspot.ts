@@ -1351,6 +1351,7 @@ export async function searchServiceWorkOrders(limit = 500): Promise<SampleServic
   if (!typeId) return null;
   try {
     const items: SampleService[] = [];
+    const refById = new Map<string, string>();   // service id → property_id_ref
     let after: string | undefined;
     do {
       const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
@@ -1361,7 +1362,12 @@ export async function searchServiceWorkOrders(limit = 500): Promise<SampleServic
           sorts: [{ propertyName: 'due_date', direction: 'ASCENDING' }],
         }),
       });
-      for (const r of resp.results || []) items.push(mapServiceRow(r));
+      for (const r of resp.results || []) {
+        const row = mapServiceRow(r);
+        const ref = String(r.properties?.property_id_ref || '').trim();
+        if (ref) refById.set(row.id, ref);
+        items.push(row);
+      }
       after = resp.paging?.next?.after;
     } while (after && items.length < limit);
     // Community services carry only the community name; fill in City/ST/ZIP from
@@ -1374,6 +1380,14 @@ export async function searchServiceWorkOrders(limit = 500): Promise<SampleServic
           if (loc) s.locality = loc;
         }
       }
+    }
+    // SFR property status: LIVE until the service is submitted, then the value
+    // stamped at submit (property_status_snapshot) stays locked. So only the
+    // pre-submit property rows get their status refreshed from the property NOW.
+    const preSubmit = items.filter((s) => s.scope === 'property' && (s.status === 'estimated' || s.status === 'assigned') && refById.get(s.id));
+    if (preSubmit.length) {
+      const liveById = await batchReadPropertyStatuses(preSubmit.map((s) => refById.get(s.id)!)).catch(() => new Map<string, string>());
+      for (const s of preSubmit) { const live = liveById.get(refById.get(s.id)!); if (live) s.propertyStatus = live; }
     }
     return items;
   } catch (e) {

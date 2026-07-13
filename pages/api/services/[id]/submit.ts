@@ -10,7 +10,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder, readServiceForms } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder, readServiceForms, fetchPropertyStatus } from '@/lib/hubspot';
 import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
@@ -133,6 +133,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     props.client_cost = clientOf(finalV);
   }
   if (routeToReview) props.status = 'review';
+
+  // Property status: LIVE until now, then STAMPED and locked at submit. Freeze
+  // the property's current status onto the work order (property scope only) so
+  // the card/record shows the status as it was when the crew submitted.
+  if (isProperty && p0.property_id_ref && !props.property_status_snapshot) {
+    const liveStatus = await fetchPropertyStatus(String(p0.property_id_ref)).catch(() => null);
+    if (liveStatus) props.property_status_snapshot = liveStatus;
+  }
 
   try {
     const okp = await patchServiceWorkOrder(id, props);
