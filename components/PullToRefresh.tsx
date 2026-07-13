@@ -16,12 +16,29 @@ export function PullToRefresh({ onRefresh, threshold = 70 }: { onRefresh: () => 
   const armed = useRef(false);
   const pullRef = useRef(0);
   const refreshingRef = useRef(false);
+  // The scroll container the current gesture lives in (the Home list scrolls
+  // inside `.frozen-scroll`, NOT the document — so we must read ITS scrollTop,
+  // else a downward drag inside a scrolled list wrongly arms the refresh).
+  const scroller = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    const scrollTop = () => (document.scrollingElement || document.documentElement).scrollTop || 0;
+    // Nearest scrollable ancestor of a node (overflow-y auto/scroll with real
+    // overflow). Null → the page scrolls the document.
+    const findScrollable = (node: EventTarget | null): HTMLElement | null => {
+      let el: HTMLElement | null = node instanceof Element ? (node as HTMLElement) : null;
+      while (el && el !== document.body && el !== document.documentElement) {
+        const oy = getComputedStyle(el).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) return el;
+        el = el.parentElement;
+      }
+      return null;
+    };
+    const docTop = () => (document.scrollingElement || document.documentElement).scrollTop || 0;
+    const scrollTop = () => (scroller.current ? scroller.current.scrollTop : docTop());
 
     const onStart = (e: TouchEvent) => {
       if (refreshingRef.current || e.touches.length !== 1) { armed.current = false; return; }
+      scroller.current = findScrollable(e.target);
       if (scrollTop() <= 0) { startY.current = e.touches[0].clientY; armed.current = true; }
       else { armed.current = false; startY.current = null; }
     };
