@@ -177,14 +177,21 @@ export async function runServiceAiReview(apply: boolean, todayISO: string, onlyI
     try {
       const v = await reviewOne(order, allChecks);
       result.reviewed++;
-      const clean = v.verdict === 'clean';
+      // A community grass-cut MASTER must ALWAYS go to a human: the reviewer
+      // curates the covered-home list (add/drop) and the close-out is what splits
+      // the master into per-property billing lines. So it never auto-completes,
+      // even on a clean verdict — otherwise it would complete without splitting.
+      const isMasterCut = order.props.scope === 'community' && order.props.worktype === 'landscaping'
+        && order.props.subtype === 'cut' && !String(order.props.master_service_id || '').trim()
+        && !!String(order.props.covered_property_ids || '').trim();
+      const clean = v.verdict === 'clean' && !isMasterCut;
       if (clean) result.completed++; else result.routedToReview++;
 
       if (apply) {
         const notes = [v.notes, ...(v.issues.length ? ['Issues:', ...v.issues.map((i) => `• ${i}`)] : [])].join('\n');
         const props: Record<string, any> = {
-          ai_verdict: clean ? 'clean' : 'needs_review',
-          ai_notes: notes.slice(0, 2000),
+          ai_verdict: v.verdict === 'clean' ? 'clean' : 'needs_review',
+          ai_notes: (isMasterCut && v.verdict === 'clean' ? 'Community grass-cut master — routed to review to confirm covered homes and split into per-property billing.\n\n' : '').concat(notes).slice(0, 2000),
           status: clean ? 'completed' : 'review',
         };
         if (clean) {

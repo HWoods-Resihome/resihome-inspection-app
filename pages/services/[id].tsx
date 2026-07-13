@@ -872,6 +872,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             ? `The service closed out, but the re-issue couldn’t be created: ${d.reissueError}`
             : 'A new service was created with the original requirements and assignment.');
       }
+      // Community grass-cut master → confirm the per-property billing split.
+      if (typeof d.split === 'number' && d.split > 0) {
+        setReissueMsg(`Split into ${d.split} per-property billing line${d.split === 1 ? '' : 's'}.`);
+      }
       setDoneStatus('completed');
     } catch { setError('Couldn’t reach the server. Try again.'); }
     finally { setDeciding(false); }
