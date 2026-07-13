@@ -357,7 +357,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
 
       {needsDays && (
         <div className="flex items-center gap-2">
-          <span className="text-[13px] text-gray-500">Days until due <span className="text-brand">*</span></span>
+          <span className="text-[13px] text-gray-500">Days to Complete <span className="text-brand">*</span></span>
           <input type="number" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)}
             className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" />
         </div>
@@ -378,7 +378,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
           {reissue ? (
             <div className="mt-3 space-y-3">
               <div className="flex items-center gap-2">
-                <span className="text-[13px] text-gray-500">Days until new service is due <span className="text-brand">*</span></span>
+                <span className="text-[13px] text-gray-500">Days to Complete <span className="text-brand">*</span></span>
                 <input type="number" inputMode="numeric" value={reissueDays} onChange={(e) => setReissueDays(e.target.value)}
                   className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" />
               </div>
@@ -410,8 +410,8 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
         {busy ? '…' : submitLabel}
       </button>
       {decision && !notes.trim() && <div className="text-[12px] text-gray-400 text-center -mt-1">A decision note is required to finalize.</div>}
-      {needsDays && !(Number(days) > 0) && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days until due.</div>}
-      {kind === 'review' && reissue && !reissueOk && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days until the re-issued service is due.</div>}
+      {needsDays && !(Number(days) > 0) && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days to complete.</div>}
+      {kind === 'review' && reissue && !reissueOk && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days to complete the re-issued service.</div>}
       {error && <div className="text-center text-xs text-red-600">{error}</div>}
       </>)}
     </section>
