@@ -90,6 +90,16 @@ export const SERVICE_OBJECT: ObjectSpec = {
     TA('pet_before_photo_urls', 'Pet Station Before Photo URLs'),
     TA('pet_after_photo_urls', 'Pet Station After Photo URLs'),
     TA('answers_json', 'Completion Answers (JSON)'),
+    // Community grass-cut billing split (see RECURRING_SERVICES_PLAN.md). A master
+    // community Grass Cut carries the covered property snapshot + per-property
+    // rate; on close-out it splits into one property SWO each. `for_billing`
+    // flips master→false / children→true so billing never double-counts.
+    BOOL('for_billing', 'For Billing'),
+    T('master_service_id', 'Master Service Id'),
+    TA('covered_property_ids', 'Covered Property Ids (JSON)'),
+    NUM('covered_property_count', 'Covered Property Count'),
+    NUM('per_property_rate', 'Per Property Rate'),
+    DTIME('split_at', 'Split At'),
   ],
 };
 
