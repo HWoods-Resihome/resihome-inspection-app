@@ -1325,6 +1325,17 @@ export async function searchServiceWorkOrders(limit = 500): Promise<SampleServic
       for (const r of resp.results || []) items.push(mapServiceRow(r));
       after = resp.paging?.next?.after;
     } while (after && items.length < limit);
+    // Community services carry only the community name; fill in City/ST/ZIP from
+    // the community's own location (name → locality map, cached).
+    if (items.some((s) => s.scope === 'community' && !s.locality && s.community)) {
+      const byName = await communityLocalityByName().catch(() => new Map<string, string>());
+      for (const s of items) {
+        if (s.scope === 'community' && !s.locality && s.community) {
+          const loc = byName.get(s.community);
+          if (loc) s.locality = loc;
+        }
+      }
+    }
     return items;
   } catch (e) {
     console.warn('[services] searchServiceWorkOrders failed:', e);
@@ -1358,6 +1369,19 @@ async function fetchFirstCommunityProperty(communityId: string): Promise<{ city:
     console.warn('[community] first-property fallback failed:', e);
     return null;
   }
+}
+
+// Community NAME → "City, State ZIP", built from the existing id-keyed location
+// map + the id/name list (both cached). Lets us backfill locality on community
+// services that stored only the name.
+export async function communityLocalityByName(): Promise<Map<string, string>> {
+  const [comms, locById] = await Promise.all([
+    listServiceCommunities().catch(() => null),
+    communityLocationMap().catch(() => new Map<string, string>()),
+  ]);
+  const byName = new Map<string, string>();
+  for (const c of comms || []) { const loc = locById.get(c.id); if (loc) byName.set(c.name, loc); }
+  return byName;
 }
 
 /** The Community object's OWN region. The field name isn't universally known, so
@@ -1576,7 +1600,7 @@ const SERVICE_DETAIL_PROPS = [
   'submitted_at', 'completed_at', 'ai_verdict', 'ai_notes',
   'review_decision', 'review_notes', 'reviewed_by', 'reviewed_at',
   'before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls',
-  'pet_after_photo_urls', 'answers_json', 'property_id_ref', 'enrollment_key',
+  'pet_after_photo_urls', 'answers_json', 'property_id_ref', 'community_id_ref', 'enrollment_key',
   'hs_createdate',
 ];
 
@@ -1586,7 +1610,20 @@ export async function fetchServiceWorkOrder(id: string): Promise<{ id: string; p
   if (!typeId || !id) return null;
   try {
     const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/${id}?properties=${SERVICE_DETAIL_PROPS.join(',')}`);
-    return resp?.id ? { id: String(resp.id), props: resp.properties || {} } : null;
+    if (resp?.id) {
+      const p = resp.properties || {};
+      // Community services carry only the name — fill City/ST/ZIP from the
+      // community's own location for the record header.
+      if (p.scope === 'community' && !String(p.locality_snapshot || '').trim()) {
+        let loc = '';
+        const idRef = String(p.community_id_ref || '').trim();
+        if (idRef) { const c = await fetchCommunityById(idRef).catch(() => null); if (c) loc = formatCommunityLocation({ city: c.city, state: c.state, zip: c.zip }); }
+        if (!loc && p.community_name) loc = (await communityLocalityByName().catch(() => new Map<string, string>())).get(String(p.community_name)) || '';
+        if (loc) p.locality_snapshot = loc;
+      }
+      return { id: String(resp.id), props: p };
+    }
+    return null;
   } catch (e) { console.warn('[services] work order fetch failed:', e); return null; }
 }
 

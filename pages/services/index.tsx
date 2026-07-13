@@ -101,7 +101,12 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
           {isAdmin && s.status === 'submitted' && <AiSparkle className="w-3 h-3" />}
         </span>
       </div>
-      <div className="text-[12px] text-gray-500 truncate mt-0.5">{s.locality}{s.community ? ` · ${s.community}` : ''}</div>
+      {/* Second line: the locality (City, ST ZIP). For a community the title is
+          already the community name, so show just the locality (never repeat the
+          name); for a property, append a community tag only if distinct. */}
+      <div className="text-[12px] text-gray-500 truncate mt-0.5">
+        {s.scope === 'community' ? (s.locality || ' ') : `${s.locality}${s.community && s.community !== s.address ? ` · ${s.community}` : ''}`}
+      </div>
       <div className="mt-1 flex items-center justify-between gap-2">
         <div className="text-[12px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 min-w-0">
           <span className="font-semibold text-ink">{worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)}</span>
