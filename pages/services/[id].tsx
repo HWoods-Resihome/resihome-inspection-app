@@ -425,6 +425,23 @@ const isHigherGrassTier = (v: unknown) => {
   const h = String(v || '').toLowerCase();
   return h.includes('overgrown') || h.includes('heavy') || h.includes('6-12') || h.includes('6–12') || h.includes('over 12') || h.includes('12"+') || h.includes('12+');
 };
+// Grass-height tier → hint color (green Standard, yellow Overgrown, red Heavy).
+const grassTier = (label: string): 'emerald' | 'amber' | 'rose' => {
+  const h = label.toLowerCase();
+  if (h.includes('heavy') || h.includes('over 12') || h.includes('12"+') || h.includes('12+')) return 'rose';
+  if (h.includes('overgrown') || h.includes('6-12') || h.includes('6–12') || h.includes('6 - 12')) return 'amber';
+  return 'emerald';
+};
+// Split "Standard (<6 in)" → { main: 'Standard', sub: '(<6 in)' } for the 2-line label.
+const splitGrassLabel = (label: string): { main: string; sub: string } => {
+  const m = label.match(/^(.*?)\s*(\(.*\))\s*$/);
+  return m ? { main: m[1].trim(), sub: m[2].trim() } : { main: label, sub: '' };
+};
+const GRASS_TIER_BORDER: Record<'emerald' | 'amber' | 'rose', string> = {
+  emerald: 'bg-white border-emerald-400 text-emerald-700',
+  amber: 'bg-white border-amber-400 text-amber-700',
+  rose: 'bg-white border-rose-400 text-rose-700',
+};
 
 // One-line, work-type-specific reminder for the Photos section (shown as its
 // subtitle, like the Bid Item section).
@@ -977,12 +994,34 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                       )}
                       {q.type === 'single' && (
                         <>
-                          <div className={`gap-2 ${(q.options || []).length === 3 ? 'grid grid-cols-3' : 'flex flex-wrap'}`}>
-                            {(q.options || []).map((o) => (
-                              <button key={o.id} type="button" onClick={() => setAns(q.id, o.label)}
-                                className={`px-3 py-1.5 rounded-xl border text-[13px] font-heading font-semibold text-center leading-tight ${answers[q.id] === o.label ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
-                            ))}
-                          </div>
+                          {isGrassHeightQuestion(q) ? (
+                            <div className="grid grid-cols-3 gap-2">
+                              {(q.options || []).map((o) => {
+                                const selected = answers[q.id] === o.label;
+                                const anySelected = !!answers[q.id];
+                                const { main, sub } = splitGrassLabel(o.label);
+                                // Tier color hints show until a choice is made; after
+                                // that the un-picked ones fall back to the default gray.
+                                const cls = selected ? 'bg-brand text-white border-brand'
+                                  : anySelected ? 'bg-white text-gray-700 border-gray-300'
+                                    : GRASS_TIER_BORDER[grassTier(o.label)];
+                                return (
+                                  <button key={o.id} type="button" onClick={() => setAns(q.id, o.label)}
+                                    className={`px-2 py-2 rounded-xl border-2 text-[13px] font-heading font-bold text-center leading-tight ${cls}`}>
+                                    <div>{main}</div>
+                                    {sub && <div className="text-[11px] font-semibold opacity-80 mt-0.5">{sub}</div>}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className={`gap-2 ${(q.options || []).length === 3 ? 'grid grid-cols-3' : 'flex flex-wrap'}`}>
+                              {(q.options || []).map((o) => (
+                                <button key={o.id} type="button" onClick={() => setAns(q.id, o.label)}
+                                  className={`px-3 py-1.5 rounded-xl border text-[13px] font-heading font-semibold text-center leading-tight ${answers[q.id] === o.label ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
+                              ))}
+                            </div>
+                          )}
                           {isGrassHeightQuestion(q) && isHigherGrassTier(answers[q.id]) && (
                             <div className="mt-2 text-[12px] font-heading font-semibold rounded-lg px-3 py-2 border bg-amber-50 border-amber-200 text-amber-800">
                               * Higher grass tier — the increased payout is pending review of the photos.
