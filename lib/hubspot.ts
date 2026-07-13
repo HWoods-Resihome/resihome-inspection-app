@@ -1586,17 +1586,25 @@ export async function searchServiceRuleRecords(): Promise<{ id: string; props: R
 
 /** Create (id null) or update a Service Rule record. Returns the record id, or
  *  null when the object type id env var isn't set. */
-// Extract property names HubSpot reports as non-existent from an error's raw
-// detail (e.g. `Property "enroll_criteria_json" does not exist`). Lets a write
-// self-heal by dropping not-yet-provisioned props and retrying — so shipping a
-// schema-dependent field before the provision run never breaks the save.
-function missingPropNames(e: any): string[] {
+// Property names HubSpot rejects in a write — either the property doesn't exist
+// yet (`Property "enroll_criteria_json" does not exist`) or a value isn't a valid
+// enum option (`... was not one of the allowed options ... "name":"enroll_op"`).
+// Both happen when a schema-dependent field/option ships before its provision
+// run; stripping the named props and retrying lets the write self-heal so it
+// never bricks the save (the field simply persists once provisioned).
+function rejectedPropNames(e: any): string[] {
   const blob = `${String(e?.detail || '')} ${String(e?.message || '')}`;
-  if (!/PROPERTY_DOESNT_EXIST|does not exist/i.test(blob)) return [];
   const out = new Set<string>();
-  const re = /"([a-z0-9_]+)"\s*does not exist|Property\s+"?([a-z0-9_]+)"?\s+does not exist/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(blob))) { const n = m[1] || m[2]; if (n) out.add(n); }
+  if (/PROPERTY_DOESNT_EXIST|does not exist/i.test(blob)) {
+    const re = /"([a-z0-9_]+)"\s*does not exist|Property\s+"?([a-z0-9_]+)"?\s+does not exist/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(blob))) { const n = m[1] || m[2]; if (n) out.add(n); }
+  }
+  if (/were not valid|INVALID_OPTION|not one of the allowed/i.test(blob)) {
+    const re = /"name"\s*:\s*"([a-z0-9_]+)"/gi;   // the {"name":"enroll_op",...} entries
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(blob))) if (m[1]) out.add(m[1]);
+  }
   return [...out];
 }
 
@@ -1604,21 +1612,21 @@ export async function upsertServiceRuleRecord(id: string | null, props: Record<s
   const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
   if (!typeId) return null;
   let body = { ...props };
-  // Retry a few times, each pass stripping any property HubSpot rejects as
-  // unknown (new fields not yet provisioned). Non-property errors rethrow.
-  for (let attempt = 0; attempt < 4; attempt++) {
+  // Retry a few times, each pass stripping any property HubSpot rejects (unknown
+  // field OR invalid enum value not yet provisioned). Other errors rethrow.
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       if (id) { await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: body }) }); return id; }
       const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: body }) });
       return resp?.id ? String(resp.id) : null;
     } catch (e: any) {
-      const missing = missingPropNames(e).filter((n) => n in body);
-      if (!missing.length) throw e;
-      for (const n of missing) delete body[n];
-      console.warn(`[services] rule save: dropping unprovisioned props and retrying: ${missing.join(', ')}`);
+      const rejected = rejectedPropNames(e).filter((n) => n in body);
+      if (!rejected.length) throw e;
+      for (const n of rejected) delete body[n];
+      console.warn(`[services] rule save: dropping rejected props and retrying: ${rejected.join(', ')}`);
     }
   }
-  throw new Error('rule save failed after stripping unknown properties');
+  throw new Error('rule save failed after stripping rejected properties');
 }
 
 export async function deleteServiceRuleRecord(id: string): Promise<boolean> {

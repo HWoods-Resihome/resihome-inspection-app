@@ -163,7 +163,7 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
     rulesActive: 0, rulesSkipped: 0, wouldCreate: 0, created: 0, skippedExisting: 0, errors: 0,
     items: [], notes: [
       'Property targets: live Property records in the rule’s portfolios/regions, filtered by the enrollment condition (best-effort status match). Community targets: one per selected community.',
-      'v1: stop conditions not yet evaluated; no cadence date math (due = today + First Order Due days, else +5).',
+      'v1: stop conditions not yet evaluated. Due = created date + the active cadence’s “Due within” days (else the rule’s First Order Due, else +5).',
       'v1: first assigned vendor used for every order (no rotation).',
       'One open order per (rule, target) at a time — the next generates after the current completes/cancels.',
     ],
@@ -177,8 +177,16 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
     const subtype = p.subtype || '';
     const vendors = parseArr(p.vendors_json);
     const vendor: string | null = vendors.length ? String(vendors[0]) : null;
-    const dueDays = Number(p.initial_due_days);
-    const dueDate = addDays(todayISO, Number.isFinite(dueDays) && dueDays > 0 ? dueDays : 5);
+    // Due window: the cadence covering the current month sets its own "Due within
+    // N days"; fall back to the rule's First Order Due, then 5. Each cadence can
+    // define a different completion window (e.g. cut every 10 days, due 4 later).
+    const curMonth = new Date(`${todayISO}T00:00:00Z`).getUTCMonth();
+    const activeCad = parseArr(p.cadences_json).find((c: any) => Array.isArray(c.months) && c.months.includes(curMonth));
+    const cadDue = activeCad && String(activeCad.dueDays ?? '').trim() !== '' ? Number(activeCad.dueDays) : NaN;
+    const ruleDue = Number(p.initial_due_days);
+    const dueWindow = Number.isFinite(cadDue) && cadDue > 0 ? cadDue
+      : (Number.isFinite(ruleDue) && ruleDue > 0 ? ruleDue : 5);
+    const dueDate = addDays(todayISO, dueWindow);
     const vendorCost = Number(p.vendor_cost);
     const markupPct = Number(p.markup_pct);
     const clientCost = Number.isFinite(vendorCost) ? Math.round(vendorCost * (1 + (Number.isFinite(markupPct) ? markupPct : 0) / 100) * 100) / 100 : null;

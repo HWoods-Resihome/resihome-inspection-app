@@ -88,7 +88,9 @@ const RULE_SORT: { value: RuleSortField; label: string }[] = [
 
 type Unit = 'days' | 'weeks' | 'months';
 // interval is a STRING so it can be cleared/retyped; dow -1 and dom 0 mean "Any day".
-interface Cadence { id: number; unit: Unit; interval: string; dow: number; dom: number; months: number[]; }
+// dueDays = the completion window: an order created by this cadence is due N days
+// after it generates (blank → falls back to the rule's First Order Due, else 5).
+interface Cadence { id: number; unit: Unit; interval: string; dow: number; dom: number; months: number[]; dueDays: string; }
 interface Rule {
   id: number; recordId?: string;            // HubSpot Service Rule record id (undefined = not saved yet)
   name: string; active: boolean; worktype: Worktype; subtype: string;
@@ -114,7 +116,7 @@ interface Rule {
 }
 
 let _cid = 100;
-const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: '', dow: -1, dom: 0, months });
+const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: '', dow: -1, dom: 0, months, dueDays: '' });
 
 // Searchable, multi-select, scrollable dropdown for portfolio/community/region
 // coverage, with Select all / Deselect all over the current search results.
@@ -174,8 +176,8 @@ const SEED: Rule[] = [
     portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [
-      { id: 11, unit: 'weeks', interval: '2', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
-      { id: 12, unit: 'months', interval: '1', dow: 0, dom: 15, months: [10, 11] },
+      { id: 11, unit: 'weeks', interval: '2', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9], dueDays: '4' },
+      { id: 12, unit: 'months', interval: '1', dow: 0, dom: 15, months: [10, 11], dueDays: '7' },
     ],
     initialDueDays: '5', skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
@@ -186,7 +188,7 @@ const SEED: Rule[] = [
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
     portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
-    cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
+    cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dueDays: '4' }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
     enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }],
@@ -228,7 +230,7 @@ function parseCriteria(p: Record<string, any>): EnrollCriterion[] {
 let _rid = 900;
 function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule {
   const p = rec.props;
-  const cadences: Cadence[] = parseArr(p.cadences_json).map((c: any) => ({ id: ++_cid, unit: (c.unit || 'weeks') as Unit, interval: String(c.interval ?? ''), dow: Number(c.dow ?? -1), dom: Number(c.dom ?? 0), months: Array.isArray(c.months) ? c.months : [] }));
+  const cadences: Cadence[] = parseArr(p.cadences_json).map((c: any) => ({ id: ++_cid, unit: (c.unit || 'weeks') as Unit, interval: String(c.interval ?? ''), dow: Number(c.dow ?? -1), dom: Number(c.dom ?? 0), months: Array.isArray(c.months) ? c.months : [], dueDays: c.dueDays != null ? String(c.dueDays) : '' }));
   return {
     id: ++_rid, recordId: rec.id,
     name: p.rule_name || 'Rule', active: p.active === 'true',
@@ -919,7 +921,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                     className={`${ctl} w-12 text-center tabular-nums ${!rule.recurring && !rule.initialDueDays.trim() ? 'border-red-300' : ''}`} />
                   <span className="text-gray-600">days after enrollment</span>
                 </div>
-                <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Optional · blank = due on the enrollment date.' : 'Required — a one-time service has no cadence to schedule from.'}</div>
+                <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Fallback due window · a cadence’s own “Due within” overrides this.' : 'Required — a one-time service has no cadence to schedule from.'}</div>
               </div>
             </div>
 
@@ -957,6 +959,13 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                           <><span className="text-[13px] text-gray-600 shrink-0 whitespace-nowrap">on day</span>
                           <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={0}>Any day</option>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
                         )}
+                      </div>
+                      {/* Completion window: how many days after it generates the order is due. */}
+                      <div className="flex flex-nowrap items-center gap-1.5 mb-2.5">
+                        <span className="text-[13px] text-gray-600 shrink-0">Due within</span>
+                        <input value={c.dueDays} inputMode="numeric" onChange={(e) => patchCadence(c.id, { dueDays: e.target.value.replace(/\D/g, '') })}
+                          placeholder="—" className={`${ctl} w-11 shrink-0 text-center tabular-nums`} />
+                        <span className="text-[13px] text-gray-600 shrink-0">days of creation</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {MONTHS.map((m, mi) => {
