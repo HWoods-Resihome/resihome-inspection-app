@@ -14,11 +14,11 @@ const pdfName = (kind: string, id: string) => `${kind}-${id}.pdf`;
 /** Inspection completed → the inspector, with the report PDF attached + a link. */
 export async function notifyInspectionCompleted(o: {
   inspectionId: string; inspectorEmail?: string | null; templateLabel: string; address: string;
-  pdfUrl?: string | null; baseUrl: string;
+  pdfUrl?: string | null; baseUrl: string; force?: boolean;
 }): Promise<void> {
   try {
     const to = String(o.inspectorEmail || '').trim();
-    if (!validEmail(to) || !(await isNotificationEnabled(to, 'inspection_completed'))) return;
+    if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'inspection_completed')))) return;
     let attachment: { filename: string; content: Buffer; mimeType: string } | null = null;
     if (o.pdfUrl) { const buf = await fetchToBuffer(o.pdfUrl); if (buf) attachment = { filename: pdfName('inspection', o.inspectionId), content: buf, mimeType: 'application/pdf' }; }
     await sendNotificationEmail({
@@ -35,11 +35,11 @@ export async function notifyInspectionCompleted(o: {
 /** New service assigned → the vendor, with a link. */
 export async function notifyServiceAssigned(o: {
   serviceId: string; vendorEmail?: string | null; vendorName?: string | null;
-  address: string; worktypeLabel: string; subtypeLabel: string; dueDate?: string; baseUrl: string;
+  address: string; worktypeLabel: string; subtypeLabel: string; dueDate?: string; baseUrl: string; force?: boolean;
 }): Promise<void> {
   try {
     const to = String(o.vendorEmail || '').trim();
-    if (!validEmail(to) || !(await isNotificationEnabled(to, 'service_assigned'))) return;
+    if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'service_assigned')))) return;
     await sendNotificationEmail({
       to, subject: `New service assigned — ${o.address}`,
       heading: 'New Service Assigned',
@@ -53,11 +53,11 @@ export async function notifyServiceAssigned(o: {
 /** Service completed → the vendor, with the completion PDF attached + a link. */
 export async function notifyServiceCompleted(o: {
   serviceId: string; vendorEmail?: string | null; vendorName?: string | null;
-  address: string; worktypeLabel: string; subtypeLabel: string; baseUrl: string;
+  address: string; worktypeLabel: string; subtypeLabel: string; baseUrl: string; force?: boolean;
 }): Promise<void> {
   try {
     const to = String(o.vendorEmail || '').trim();
-    if (!validEmail(to) || !(await isNotificationEnabled(to, 'service_completed'))) return;
+    if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'service_completed')))) return;
     let attachment: { filename: string; content: Buffer; mimeType: string } | null = null;
     try {
       const buf = await renderServicePdfBuffer(o.serviceId, { variant: 'vendor', baseUrl: o.baseUrl, internal: false });
@@ -77,11 +77,11 @@ export async function notifyServiceCompleted(o: {
 /** Service past due → the vendor, nudging completion, with a link. */
 export async function notifyServicePastDue(o: {
   serviceId: string; vendorEmail?: string | null; vendorName?: string | null;
-  address: string; worktypeLabel: string; subtypeLabel: string; dueDate?: string; baseUrl: string;
+  address: string; worktypeLabel: string; subtypeLabel: string; dueDate?: string; baseUrl: string; force?: boolean;
 }): Promise<void> {
   try {
     const to = String(o.vendorEmail || '').trim();
-    if (!validEmail(to) || !(await isNotificationEnabled(to, 'service_past_due'))) return;
+    if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'service_past_due')))) return;
     await sendNotificationEmail({
       to, subject: `Past due — please complete: ${o.address}`,
       heading: 'Service Past Due',
