@@ -1643,6 +1643,30 @@ function rejectedPropNames(e: any): string[] {
   return [...out];
 }
 
+/**
+ * Create (id=null) or PATCH a CRM object, self-healing against properties HubSpot
+ * rejects as unknown OR as an invalid enum value — it drops the named props and
+ * retries. This keeps writes working when a field/option ships ahead of its
+ * provision run, and (the point of this) never lets a NEW enum value (e.g. a new
+ * review decision or answer choice) 400 an OLDER record's close-out. Returns the
+ * response body. Other errors rethrow.
+ */
+async function writeObjectResilient(typeId: string, id: string | null, props: Record<string, any>): Promise<any> {
+  let body = { ...props };
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      if (id) return await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: body }) });
+      return await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: body }) });
+    } catch (e: any) {
+      const rejected = rejectedPropNames(e).filter((n) => n in body);
+      if (!rejected.length) throw e;
+      for (const n of rejected) delete body[n];
+      console.warn(`[services] work order write: dropping rejected props and retrying: ${rejected.join(', ')}`);
+    }
+  }
+  throw new Error('work order write failed after stripping rejected properties');
+}
+
 export async function upsertServiceRuleRecord(id: string | null, props: Record<string, any>): Promise<string | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
   if (!typeId) return null;
@@ -1695,7 +1719,7 @@ export async function readServiceWorkOrderKeys(): Promise<{ key: string; status:
 export async function createServiceWorkOrder(props: Record<string, any>): Promise<string | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
-  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: props }) });
+  const resp = await writeObjectResilient(typeId, null, props);
   bustServiceListCache();   // a new work order → the list changed
   return resp?.id ? String(resp.id) : null;
 }
@@ -1774,7 +1798,7 @@ export async function fetchPropertyLockInfo(recordId: string): Promise<{ status:
 export async function patchServiceWorkOrder(id: string, props: Record<string, any>): Promise<boolean> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId || !id) return false;
-  await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) });
+  await writeObjectResilient(typeId, id, props);
   bustServiceListCache();   // status/vendor/etc changed → invalidate the list
   return true;
 }

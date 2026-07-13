@@ -79,7 +79,7 @@ export const SERVICE_OBJECT: ObjectSpec = {
     DTIME('submitted_at', 'Submitted At'),
     SEL('ai_verdict', 'AI Verdict', opt([['Clean', 'clean'], ['Needs Review', 'needs_review']])),
     TA('ai_notes', 'AI Notes'),
-    SEL('review_decision', 'Review Decision', opt([['Approved', 'approve'], ['Rejected', 'reject']])),
+    SEL('review_decision', 'Review Decision', opt([['Approved', 'approve'], ['Modified', 'modify'], ['Rejected', 'reject']])),
     TA('review_notes', 'Review Notes'),
     T('reviewed_by', 'Reviewed By'),
     DTIME('reviewed_at', 'Reviewed At'),
