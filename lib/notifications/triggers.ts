@@ -56,8 +56,8 @@ export async function notifyServiceAssigned(o: {
     await sendNotificationEmail({
       to, subject: `New Service Assigned — ${addr}`,
       heading: 'New Service Assigned',
-      intro: `A new ${o.worktypeLabel} · ${o.subtypeLabel} service has been assigned to you.`,
-      rows: [['Property', addr], ['Service', `${o.worktypeLabel} · ${o.subtypeLabel}`], ['Due', fmtMDY(o.dueDate)], ['Vendor', o.vendorName || '']],
+      intro: `A new ${o.worktypeLabel} (${o.subtypeLabel}) service has been assigned to you.`,
+      rows: [['Property', addr], ['Service', `${o.worktypeLabel} (${o.subtypeLabel})`], ['Due', fmtMDY(o.dueDate)], ['Vendor', o.vendorName || '']],
       linkUrl: `${o.baseUrl}/services/${encodeURIComponent(o.serviceId)}`, linkLabel: 'Open Service',
     });
   } catch (e: any) { console.warn('[notify] service_assigned failed:', String(e?.message || e).slice(0, 160)); }
@@ -80,8 +80,8 @@ export async function notifyServiceCompleted(o: {
     await sendNotificationEmail({
       to, subject: `Service Completed — ${addr}`,
       heading: 'Service Completed',
-      intro: `Your ${o.worktypeLabel} · ${o.subtypeLabel} at ${addr} has been completed.${attachment ? ' The completion report is attached.' : ''}`,
-      rows: [['Property', addr], ['Service', `${o.worktypeLabel} · ${o.subtypeLabel}`]],
+      intro: `Your ${o.worktypeLabel} (${o.subtypeLabel}) at ${addr} has been completed.${attachment ? ' The completion report is attached.' : ''}`,
+      rows: [['Property', addr], ['Service', `${o.worktypeLabel} (${o.subtypeLabel})`]],
       linkUrl: `${o.baseUrl}/services/${encodeURIComponent(o.serviceId)}`, linkLabel: 'Open Service',
       attachment,
     });
@@ -100,8 +100,8 @@ export async function notifyServicePastDue(o: {
     await sendNotificationEmail({
       to, subject: `Past Due — Please Complete: ${addr}`,
       heading: 'Service Past Due',
-      intro: `Your ${o.worktypeLabel} · ${o.subtypeLabel} at ${addr} is past due. Please submit the completion as soon as possible.`,
-      rows: [['Property', addr], ['Service', `${o.worktypeLabel} · ${o.subtypeLabel}`], ['Was due', fmtMDY(o.dueDate)]],
+      intro: `Your ${o.worktypeLabel} (${o.subtypeLabel}) at ${addr} is past due. Please submit the completion as soon as possible.`,
+      rows: [['Property', addr], ['Service', `${o.worktypeLabel} (${o.subtypeLabel})`], ['Was due', fmtMDY(o.dueDate)]],
       linkUrl: `${o.baseUrl}/services/${encodeURIComponent(o.serviceId)}`, linkLabel: 'Complete Service',
     });
   } catch (e: any) { console.warn('[notify] service_past_due failed:', String(e?.message || e).slice(0, 160)); }
