@@ -7,7 +7,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
-import { SAMPLE_FORMS, formKey, GRASSCUT_AREAS_QID, type ServiceQuestion } from '@/lib/services/serviceForms';
+import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, easternTodayISO, type ServiceStatus } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
@@ -802,8 +802,6 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
         const h = String(heightAns || '').toLowerCase();
         vendor = (h.includes('heavy') || h.includes('over 12') || h.includes('12"+') || h.includes('12+')) ? 90
           : (h.includes('overgrown') || h.includes('6-12') || h.includes('6–12') || h.includes('6 - 12')) ? 60 : 45;
-        const areas = Array.isArray(answers[GRASSCUT_AREAS_QID]) ? answers[GRASSCUT_AREAS_QID].map(String) : [];
-        if (areas.length > 0 && !areas.includes('Back Yard')) { vendor = Math.round(vendor * 0.75 * 100) / 100; reason = 'Back yard not serviced — 25% off'; }
       }
     }
     const client = Number.isFinite(markup) ? Math.round(vendor * (1 + markup / 100) * 100) / 100 : vendor;

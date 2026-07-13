@@ -14,7 +14,7 @@ import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder, r
 import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
-import { GRASSCUT_AREAS_QID, SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
+import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
 // the review runs inline the moment the work order is submitted.
@@ -73,8 +73,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // ── Completion-answer pricing + routing ──────────────────────────────────
   // Universal gate: "Service Completed? = No" → skip AI, route straight to human
   // Review, and set the payout (trip-fee rate if billing a trip fee, else $0).
-  // Landscaping grass-cut: price by grass height ($45/$60/$90), then reduce the
-  // payout 25% if the Back Yard wasn't among the areas serviced.
+  // Landscaping grass-cut: price by grass height ($45/$60/$90). Whether the back
+  // yard was serviced is a QC check in the AI review, not a price adjustment.
   const p0 = existing?.props || {};
   const worktype = String(p0.worktype || '');
   const subtype = String(p0.subtype || '');
@@ -126,17 +126,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       props.ai_notes = 'Vendor marked NOT completed. Routed to review (AI skipped) — community cost handled at review.';
     }
   } else if (isProperty && worktype === 'landscaping' && subtype === 'cut') {
-    // Height-based hard rate, then a 25% cut if the back yard wasn't serviced.
-    let finalV = grassCutRate(String(heightAns || ''));
-    const areas = Array.isArray(answers[GRASSCUT_AREAS_QID]) ? answers[GRASSCUT_AREAS_QID].map(String) : [];
-    const backYardSkipped = areas.length > 0 && !areas.includes('Back Yard');
-    if (backYardSkipped) finalV = Math.round(finalV * 0.75 * 100) / 100;
+    // Height-based hard rate. Whether the back yard was serviced is verified by
+    // the AI review (a knowledge-base check), not priced here.
+    const finalV = grassCutRate(String(heightAns || ''));
     props.vendor_cost = finalV;
     props.client_cost = clientOf(finalV);
-    if (backYardSkipped && Number.isFinite(origVendor)) {
-      props.vendor_cost_adjustment = Math.round((origVendor - finalV) * 100) / 100;
-      props.vendor_cost_adjustment_reason = 'Back yard not serviced — 25% reduction';
-    }
   }
   if (routeToReview) props.status = 'review';
 
