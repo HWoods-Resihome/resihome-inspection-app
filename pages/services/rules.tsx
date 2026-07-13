@@ -71,11 +71,12 @@ const PROPERTY_FIELDS: { field: string; options: string[] }[] = [
 const FIELD_NAMES = PROPERTY_FIELDS.map((f) => f.field);
 const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field)?.options ?? [];
 const OPS = ['is', 'is any of', 'is not', 'changes to', 'is known'];
+interface EnrollCriterion { field: string; op: string; vals: string[] }
 // Community + Landscaping + Grass Cut defaults its enrollment to "RRQC Pass Date
-// is known" (the per-house eligibility gate). Admin can change it after.
-const cutEnroll = (scope: string, worktype: string, subtype: string): Partial<{ enrollField: string; enrollOp: string; enrollVals: string[] }> =>
+// is known" (the per-house eligibility gate). Admin can add/change criteria after.
+const cutEnroll = (scope: string, worktype: string, subtype: string): Partial<{ enrollField: string; enrollOp: string; enrollVals: string[]; enrollCriteria: EnrollCriterion[] }> =>
   (scope === 'community' && worktype === 'landscaping' && subtype === 'cut')
-    ? { enrollField: 'RRQC Pass Date', enrollOp: 'is known', enrollVals: [] }
+    ? { enrollField: 'RRQC Pass Date', enrollOp: 'is known', enrollVals: [], enrollCriteria: [{ field: 'RRQC Pass Date', op: 'is known', vals: [] }] }
     : {};
 
 // Rules-list sort (mirrors the Services home sort: tap a field, re-tap to flip).
@@ -103,7 +104,8 @@ interface Rule {
   cadences: Cadence[];
   initialDueDays: string;                   // optional: first order due N days after enrollment (blank = standard cadence)
   skipMonths: number[];                     // months explicitly set to NO service
-  enrollField: string; enrollOp: string; enrollVals: string[];   // one value, or many when op is "is any of"
+  enrollField: string; enrollOp: string; enrollVals: string[];   // legacy single (= first criterion, kept in sync)
+  enrollCriteria: EnrollCriterion[];         // AND-combined enrollment criteria (source of truth)
   stopEnabled: boolean;
   stopMode: 'condition' | 'date' | 'count';  // how enrollment stops
   stopField: string; stopOp: string; stopVal: string;   // stopMode 'condition'
@@ -177,6 +179,7 @@ const SEED: Rule[] = [
     ],
     initialDueDays: '5', skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
+    enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }],
     stopEnabled: true, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
   {
@@ -186,6 +189,7 @@ const SEED: Rule[] = [
     cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
+    enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }],
     stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
   {
@@ -197,6 +201,7 @@ const SEED: Rule[] = [
     cadences: [],
     initialDueDays: '2', skipMonths: [],
     enrollField: 'Deal Stage', enrollOp: 'changes to', enrollVals: ['Move-In Scheduled'],
+    enrollCriteria: [{ field: 'Deal Stage', op: 'changes to', vals: ['Move-In Scheduled'] }],
     stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
 ];
@@ -211,6 +216,15 @@ const parseVals = (s: any): string[] => {
   return [raw];
 };
 const serializeVals = (a: string[]): string => (a.length <= 1 ? (a[0] || '') : JSON.stringify(a));
+// Enrollment criteria: prefer the JSON array; fall back to the legacy single
+// enroll_field/op/value triple so rules saved before multi-criteria still load.
+function parseCriteria(p: Record<string, any>): EnrollCriterion[] {
+  const arr = parseArr(p.enroll_criteria_json)
+    .map((c: any) => ({ field: String(c?.field || ''), op: String(c?.op || 'is'), vals: Array.isArray(c?.vals) ? c.vals.map(String) : [] }))
+    .filter((c: EnrollCriterion) => c.field);
+  if (arr.length) return arr;
+  return [{ field: p.enroll_field || 'Property Status', op: p.enroll_op || 'is', vals: parseVals(p.enroll_value) }];
+}
 let _rid = 900;
 function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule {
   const p = rec.props;
@@ -227,6 +241,7 @@ function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule 
     recurring: p.recurring !== 'false', cadences,
     initialDueDays: p.initial_due_days != null ? String(p.initial_due_days) : '', skipMonths: parseArr(p.skip_months_json),
     enrollField: p.enroll_field || 'Property Status', enrollOp: p.enroll_op || 'is', enrollVals: parseVals(p.enroll_value),
+    enrollCriteria: parseCriteria(p),
     stopEnabled: p.stop_enabled === 'true', stopMode: (p.stop_mode || 'condition') as Rule['stopMode'],
     stopField: p.stop_field || 'Property Status', stopOp: p.stop_op || 'changes to', stopVal: p.stop_value || '',
     stopDate: p.stop_date ? String(p.stop_date).slice(0, 10) : '', stopCount: p.stop_count != null ? String(p.stop_count) : '',
@@ -240,7 +255,12 @@ function ruleToProps(r: Rule): Record<string, any> {
     recurring: r.recurring ? 'true' : 'false', cadences_json: JSON.stringify(r.cadences),
     skip_months_json: JSON.stringify(r.skipMonths), included_props_json: JSON.stringify(r.includedProps),
     portfolios_json: JSON.stringify(r.portfolios), communities_json: JSON.stringify(r.communities), regions_json: JSON.stringify(r.regions),
-    enroll_field: r.enrollField, enroll_op: r.enrollOp, enroll_value: serializeVals(r.enrollVals),
+    // enrollCriteria is the source of truth; keep the legacy single triple in
+    // sync with the first criterion for back-compat with older readers.
+    enroll_criteria_json: JSON.stringify(r.enrollCriteria),
+    enroll_field: r.enrollCriteria[0]?.field || r.enrollField,
+    enroll_op: r.enrollCriteria[0]?.op || r.enrollOp,
+    enroll_value: serializeVals(r.enrollCriteria[0]?.vals || r.enrollVals),
     stop_enabled: r.stopEnabled ? 'true' : 'false', stop_mode: r.stopMode,
     stop_field: r.stopField, stop_op: r.stopOp, stop_value: r.stopVal,
   };
@@ -360,6 +380,13 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
   const closeRule = () => setOpenId(null);
 
   const patch = (p: Partial<Rule>) => setRules((rs) => rs.map((r) => (r.id === openId ? { ...r, ...p } : r)));
+  // ── Enrollment criteria (AND-combined) mutators ──
+  const patchCrit = (i: number, c: Partial<EnrollCriterion>) =>
+    patch({ enrollCriteria: (rule?.enrollCriteria || []).map((x, j) => (j === i ? { ...x, ...c } : x)) });
+  const addCrit = () =>
+    patch({ enrollCriteria: [...(rule?.enrollCriteria || []), { field: 'Property Status', op: 'is', vals: [] }] });
+  const removeCrit = (i: number) =>
+    patch({ enrollCriteria: (rule?.enrollCriteria || []).filter((_, j) => j !== i) });
   const patchCadence = (cid: number, p: Partial<Cadence>) =>
     patch({ cadences: rule.cadences.map((c) => (c.id === cid ? { ...c, ...p } : c)) });
   const toggleMonth = (cid: number, m: number) =>
@@ -433,7 +460,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [] }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [{ field: 'Property Status', op: 'is', vals: [] }] }]);
     openRule(id);
   };
   const duplicateRule = () => {
@@ -526,7 +553,8 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
     if (rule.recurring && missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
     if (!rule.recurring && !rule.initialDueDays.trim()) saveErrors.push('Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
     if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
-    if (rule.enrollOp !== 'is known' && !rule.enrollVals.length) saveErrors.push('Set an enrollment trigger.');
+    if (!rule.enrollCriteria.length) saveErrors.push('Add at least one enrollment criterion.');
+    if (rule.enrollCriteria.some((c) => c.op !== 'is known' && !c.vals.length)) saveErrors.push('Every enrollment criterion needs a value.');
     if (rule.stopEnabled && rule.stopMode === 'date' && !rule.stopDate) saveErrors.push('Set a stop date.');
     if (rule.stopEnabled && rule.stopMode === 'count' && (!rule.stopCount || Number(rule.stopCount) < 1)) saveErrors.push('Set the number of services before stopping.');
   }
@@ -970,22 +998,36 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
             <SecHead n={3} title="Enrollment & Stop" />
             {openSec[3] && (<div className="mt-3">
             <label className={lbl}>Enroll (Create Services) When</label>
-            <div className="flex flex-wrap items-center gap-2 mb-4">
-              <ListPicker value={rule.enrollField} ariaLabel="Enrollment field" className={pick}
-                options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
-                onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patch({ enrollField: v, enrollVals: first ? [first] : [] }); }} />
-              <ListPicker value={rule.enrollOp} ariaLabel="Operator" className={pick}
-                options={OPS.map((o) => ({ value: o, label: o }))}
-                onChange={(v) => patch({ enrollOp: v, ...(v !== 'is any of' && rule.enrollVals.length > 1 ? { enrollVals: rule.enrollVals.slice(0, 1) } : {}) })} />
-              {rule.enrollOp === 'is known' ? (
-                <span className="text-[12px] text-gray-500 self-center">has any date on the property</span>
-              ) : rule.enrollOp === 'is any of' ? (
-                <MultiFilter label="Values" options={valueOptsFor(rule.enrollField)} selected={rule.enrollVals}
-                  onChange={(next) => patch({ enrollVals: next })} className={`${pick} flex-1 min-w-[140px]`} />
-              ) : (
-                <ListPicker value={rule.enrollVals[0] || ''} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
-                  options={valueOptsFor(rule.enrollField)} onChange={(v) => patch({ enrollVals: [v] })} />
-              )}
+            <p className="text-[12px] text-gray-500 mb-2 -mt-1">All criteria must be met (AND).</p>
+            <div className="space-y-2 mb-4">
+              {rule.enrollCriteria.map((c, i) => (
+                <div key={i}>
+                  {i > 0 && <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1">and</div>}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ListPicker value={c.field} ariaLabel="Enrollment field" className={pick}
+                      options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
+                      onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patchCrit(i, { field: v, vals: first ? [first] : [] }); }} />
+                    <ListPicker value={c.op} ariaLabel="Operator" className={pick}
+                      options={OPS.map((o) => ({ value: o, label: o }))}
+                      onChange={(v) => patchCrit(i, { op: v, ...(v !== 'is any of' && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
+                    {c.op === 'is known' ? (
+                      <span className="text-[12px] text-gray-500 self-center">has any date on the property</span>
+                    ) : c.op === 'is any of' ? (
+                      <MultiFilter label="Values" options={valueOptsFor(c.field)} selected={c.vals}
+                        onChange={(next) => patchCrit(i, { vals: next })} className={`${pick} flex-1 min-w-[140px]`} />
+                    ) : (
+                      <ListPicker value={c.vals[0] || ''} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
+                        options={valueOptsFor(c.field)} onChange={(v) => patchCrit(i, { vals: [v] })} />
+                    )}
+                    {rule.enrollCriteria.length > 1 && (
+                      <button type="button" onClick={() => removeCrit(i)} aria-label="Remove criterion"
+                        className="text-gray-400 hover:text-red-500 text-[16px] leading-none px-1.5 self-center">×</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <button type="button" onClick={addCrit}
+                className="text-[12px] font-semibold text-brand border border-brand/40 rounded-lg px-2.5 py-1 bg-white hover:bg-brand/5">+ Add criterion</button>
             </div>
             <label className="flex items-center gap-2 mb-2 cursor-pointer">
               <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: valueOptsFor(rule.stopField)[0]?.value || '' } : {}) })} />

@@ -40,6 +40,30 @@ const subLabel = (wt: string, id: string) =>
   WORKTYPES.find((w) => w.id === wt)?.subtypes.find((s) => s.id === id)?.label || id;
 
 /** Add N days to a YYYY-MM-DD date (UTC), returning YYYY-MM-DD. */
+// Enrollment criteria (AND-combined). Parsed from the rule's enroll_criteria_json,
+// falling back to the legacy single enroll_field/op/value.
+interface Criterion { field: string; op: string; vals: string[] }
+function parseCriteria(p: Record<string, any>): Criterion[] {
+  try {
+    const arr = JSON.parse(p.enroll_criteria_json || '[]');
+    if (Array.isArray(arr) && arr.length) return arr.map((c: any) => ({ field: String(c.field || ''), op: String(c.op || 'is'), vals: Array.isArray(c.vals) ? c.vals.map(String) : [] }));
+  } catch { /* fall through to legacy */ }
+  const f = String(p.enroll_field || '');
+  return f ? [{ field: f, op: String(p.enroll_op || 'is'), vals: parseVals(p.enroll_value) }] : [];
+}
+function matchCriterion(prop: { rrqcPassDate: string; status: string }, c: Criterion): boolean {
+  const field = c.field.toLowerCase();
+  if (/rrqc/.test(field)) return c.op === 'is known' ? !!prop.rrqcPassDate : true;
+  if (/status/.test(field)) {
+    const s = (prop.status || '').toLowerCase();
+    const vals = c.vals.map((v) => v.trim().toLowerCase()).filter(Boolean);
+    if (!vals.length) return true;
+    const hit = vals.some((v) => s === v || s.startsWith(v) || s.includes(v));
+    return c.op === 'is not' ? !hit : hit;
+  }
+  return true; // fields we can't evaluate here → best-effort include
+}
+
 function addDays(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -181,9 +205,11 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
       let eligibleIds: string[] = [];
       if (t.scope === 'community') commId = await communityIdByName(t.community || t.address);
       if (isCommunityCut) {
-        const rrqcGate = /rrqc/i.test(String(p.enroll_field || ''));
+        // Eligibility = community properties matching ALL enrollment criteria
+        // (e.g. "RRQC Pass Date is known" AND "Property Status is Vacant").
+        const criteria = parseCriteria(p);
         const all = commId ? await fetchCommunityProperties(commId) : [];
-        eligibleIds = (rrqcGate ? all.filter((x) => x.rrqcPassDate) : all).map((x) => x.id);
+        eligibleIds = all.filter((x) => criteria.every((c) => matchCriterion(x, c))).map((x) => x.id);
         if (!eligibleIds.length) { result.items.push({ ...base, action: 'skip-open' }); result.skippedExisting++; continue; }
         result.masterCoverage = eligibleIds.length;   // for the single-rule "would create" preview
       }

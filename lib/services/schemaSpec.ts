@@ -33,7 +33,7 @@ const SUB_OPTS = [
 ];
 const STATUS_OPTS = opt([['Estimated', 'estimated'], ['Assigned', 'assigned'], ['Submitted', 'submitted'], ['Review', 'review'], ['Completed', 'completed'], ['Canceled', 'canceled']]);
 const SCOPE_OPTS = opt([['Property', 'property'], ['Community', 'community']]);
-const OPERATOR_OPTS = opt([['is', 'is'], ['is any of', 'is any of'], ['is not', 'is not'], ['changes to', 'changes to']]);
+const OPERATOR_OPTS = opt([['is', 'is'], ['is any of', 'is any of'], ['is not', 'is not'], ['changes to', 'changes to'], ['is known', 'is known']]);
 
 export interface ObjectSpec {
   name: string;                  // unique object name
@@ -131,6 +131,8 @@ export const SERVICE_RULE_OBJECT: ObjectSpec = {
     T('enroll_field', 'Enroll Field'),
     SEL('enroll_op', 'Enroll Operator', OPERATOR_OPTS),
     T('enroll_value', 'Enroll Value'),
+    TA('enroll_criteria_json', 'Enrollment Criteria (JSON)'),   // multiple AND-combined criteria
+
     BOOL('stop_enabled', 'Stop Enabled'),
     SEL('stop_mode', 'Stop Mode', opt([['Condition', 'condition'], ['Date', 'date'], ['Count', 'count']])),
     T('stop_field', 'Stop Field'),

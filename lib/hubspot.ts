@@ -1154,7 +1154,7 @@ export async function listServiceCommunities(): Promise<{ id: string; name: stri
   } catch (e) { console.warn('[community] list failed:', e); return null; }
 }
 
-export interface CommunityProperty { id: string; address: string; locality: string; region: string; rrqcPassDate: string }
+export interface CommunityProperty { id: string; address: string; locality: string; region: string; rrqcPassDate: string; status: string }
 
 /** All properties associated to a Community, with address + `rrqc_pass_date`.
  *  Powers the community grass-cut eligible snapshot (rrqcPassDate set) and the
@@ -1163,7 +1163,7 @@ export async function fetchCommunityProperties(communityId: string): Promise<Com
   const ids = await fetchCommunityPropertyIds(communityId);
   if (!ids.length) return [];
   const { property } = typeIds();
-  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'rrqc_pass_date'];
+  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'rrqc_pass_date', PROPERTY_STATUS_PROPERTY];
   const out: CommunityProperty[] = [];
   for (let i = 0; i < ids.length; i += 100) {
     try {
@@ -1182,6 +1182,7 @@ export async function fetchCommunityProperties(communityId: string): Promise<Com
           locality: [city, st, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
           region: String(p.region || '').trim(),
           rrqcPassDate: String(p.rrqc_pass_date || '').trim(),
+          status: String(p[PROPERTY_STATUS_PROPERTY] || '').trim(),
         });
       }
     } catch (e) { console.warn('[community] batch read failed:', e); }
