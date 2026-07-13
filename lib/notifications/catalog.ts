@@ -18,13 +18,13 @@ export interface NotificationDef {
 }
 
 export const NOTIFICATIONS: NotificationDef[] = [
-  { key: 'inspection_completed', object: 'inspections', label: 'Inspection completed',
+  { key: 'inspection_completed', object: 'inspections', label: 'Inspection Completed',
     description: 'Email me a copy of the report (PDF attached) when an inspection I ran is completed.' },
-  { key: 'service_assigned', object: 'services', label: 'New service assigned',
+  { key: 'service_assigned', object: 'services', label: 'New Service Assigned',
     description: 'Email me when a service is assigned to me, with a link to open it.' },
-  { key: 'service_completed', object: 'services', label: 'Service completed',
+  { key: 'service_completed', object: 'services', label: 'Service Completed',
     description: 'Email me the completion report (PDF attached) when one of my services is completed.' },
-  { key: 'service_past_due', object: 'services', label: 'Service past due',
+  { key: 'service_past_due', object: 'services', label: 'Service Past Due',
     description: 'Email me when one of my assigned services is past due and still needs completion.' },
 ];
 

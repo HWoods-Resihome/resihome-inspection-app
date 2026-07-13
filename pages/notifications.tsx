@@ -133,7 +133,7 @@ function TestSend({ email, access }: { email: string; access: Access }) {
   return (
     <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
       <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
-        <div className="font-heading font-bold text-[15px] text-ink">Test send <span className="text-[11px] font-normal text-gray-400 uppercase tracking-wide">Admin</span></div>
+        <div className="font-heading font-bold text-[15px] text-ink">Test Send <span className="text-[11px] font-normal text-gray-400 uppercase tracking-wide">Admin</span></div>
         <p className="text-[12px] text-gray-500 mt-0.5">Send any notification to yourself ({email}) using a real record.</p>
       </div>
       <div className="p-4 space-y-3">
