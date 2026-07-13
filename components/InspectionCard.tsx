@@ -72,6 +72,11 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
 
   const { street, locality } = splitAddress(i.propertyAddressSnapshot || i.inspectionName);
   const isReinspect = i.templateType === 'pm_turn_reinspect_qc';
+  // Overall pass/fail glyph: the Turn Re-Inspect QC carries it as qc_verdict; the
+  // Leasing Agent (1099) inspection carries it as inspection_result. Both render
+  // as the same colored ✓ Pass / ✕ Fail on the card.
+  const isLeasingAgent = i.templateType === 'leasing_agent_1099_property_inspection';
+  const cardVerdict: 'pass' | 'fail' | null = isReinspect ? i.qcVerdict : (isLeasingAgent ? (i.inspectionResult ?? null) : null);
   // Date on the left: the scheduled date ONLY while the inspection is still
   // Scheduled (the planned visit is the meaningful date then); once work starts
   // it switches to the last-updated date.
@@ -116,14 +121,14 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
           ) : (
             <StatusBadge status={i.status} />
           )}
-          {/* Overall QC outcome for a Turn Re-Inspect — plain colored text with a
-              glyph (not a filled pill) so a Pass doesn't read as green-on-green
-              next to the green Completed badge. */}
-          {isReinspect && i.qcVerdict && (
+          {/* Overall pass/fail outcome (Turn Re-Inspect QC + Leasing Agent) — plain
+              colored text with a glyph (not a filled pill) so a Pass doesn't read
+              as green-on-green next to the green Completed badge. */}
+          {cardVerdict && (
             <span className={`inline-flex items-center gap-0.5 text-[11px] font-heading font-bold ${
-              i.qcVerdict === 'pass' ? 'text-emerald-600' : 'text-red-600'
+              cardVerdict === 'pass' ? 'text-emerald-600' : 'text-red-600'
             }`}>
-              {i.qcVerdict === 'pass' ? '✓ Pass' : '✕ Fail'}
+              {cardVerdict === 'pass' ? '✓ Pass' : '✕ Fail'}
             </span>
           )}
         </div>
