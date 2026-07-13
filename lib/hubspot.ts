@@ -10,6 +10,7 @@ import { extractLeasingAgent1099Fields } from './leasingAgent1099';
 import { calculateLine, roundMoney } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
 import { normalizeApprovalRouting, type ApprovalRoutingConfig } from './approvalRouting';
+import { rejectedPropNames } from './hubspotErrors';
 import { reportServerError } from './serverErrorReporter';
 import { SERVICE_OBJECTS, QUESTION_ADDITIONS, SERVICE_ASSOCIATIONS, type PropSpec, type ObjectSpec } from './services/schemaSpec';
 
@@ -263,7 +264,7 @@ async function hubspotFetchInner(url: string, method: string, path: string, init
       // validation specifics).
       lastError = new Error(`Upstream request failed (${res.status})`);
       (lastError as any).status = res.status;
-      (lastError as any).detail = text.slice(0, 500);
+      (lastError as any).detail = text.slice(0, 1200);
       // Circuit breaker counts ONLY true upstream failures (5xx). A 4xx is
       // request-specific (bad/duplicate/validation) and PROVES HubSpot is up and
       // answering — so it must NOT trip the breaker (that would fail-fast every
@@ -1627,21 +1628,6 @@ export async function searchServiceRuleRecords(): Promise<{ id: string; props: R
 // Both happen when a schema-dependent field/option ships before its provision
 // run; stripping the named props and retrying lets the write self-heal so it
 // never bricks the save (the field simply persists once provisioned).
-function rejectedPropNames(e: any): string[] {
-  const blob = `${String(e?.detail || '')} ${String(e?.message || '')}`;
-  const out = new Set<string>();
-  if (/PROPERTY_DOESNT_EXIST|does not exist/i.test(blob)) {
-    const re = /"([a-z0-9_]+)"\s*does not exist|Property\s+"?([a-z0-9_]+)"?\s+does not exist/gi;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(blob))) { const n = m[1] || m[2]; if (n) out.add(n); }
-  }
-  if (/were not valid|INVALID_OPTION|not one of the allowed/i.test(blob)) {
-    const re = /"name"\s*:\s*"([a-z0-9_]+)"/gi;   // the {"name":"enroll_op",...} entries
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(blob))) if (m[1]) out.add(m[1]);
-  }
-  return [...out];
-}
 
 /**
  * Create (id=null) or PATCH a CRM object, self-healing against properties HubSpot
