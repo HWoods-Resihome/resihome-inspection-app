@@ -249,6 +249,10 @@ function CollapsibleSection({ title, subtitle, right, defaultOpen = true, bodyCl
 // add ANY community property or drop covered ones — the price recomputes down
 // (count × per-property rate). Photos stay on the master; children reference it.
 interface CoveredProp { id: string; address: string; locality: string; rrqc: boolean; status: string }
+// Sort by leading house number (smallest → largest), then street text — so the
+// list reads like a route, not an ASCII sort ("2" before "10").
+const houseNum = (a: string): number => { const m = /^\s*(\d+)/.exec(a || ''); return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER; };
+const byAddr = (x: CoveredProp, y: CoveredProp): number => (houseNum(x.address) - houseNum(y.address)) || x.address.localeCompare(y.address);
 function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boolean }) {
   const router = useRouter();
   const split = svc.forBilling === 'false' || !!svc.splitAt;
@@ -269,7 +273,7 @@ function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boo
     setLoading(true);
     fetch(`/api/services/${encodeURIComponent(svc.id)}/covered`)
       .then((r) => r.json())
-      .then((d) => { if (!alive) return; if (d.error) { setErr(d.error); return; } setCovered(d.covered || []); setAvailable(d.available || []); })
+      .then((d) => { if (!alive) return; if (d.error) { setErr(d.error); return; } setCovered([...(d.covered || [])].sort(byAddr)); setAvailable([...(d.available || [])].sort(byAddr)); })
       .catch(() => { if (alive) setErr('Could not load covered properties.'); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -279,13 +283,13 @@ function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boo
     if (covered.length <= 1) return;   // at least one must remain
     const p = covered.find((x) => x.id === id); if (!p) return;
     setCovered((c) => c.filter((x) => x.id !== id));
-    setAvailable((a) => [p, ...a].sort((x, y) => x.address.localeCompare(y.address)));
+    setAvailable((a) => [p, ...a].sort(byAddr));
     setDirty(true);
   };
   const add = (id: string) => {
     const p = available.find((x) => x.id === id); if (!p) return;
     setAvailable((a) => a.filter((x) => x.id !== id));
-    setCovered((c) => [...c, p].sort((x, y) => x.address.localeCompare(y.address)));
+    setCovered((c) => [...c, p].sort(byAddr));
     setDirty(true);
   };
   const save = async () => {
@@ -310,6 +314,7 @@ function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boo
   return (
     <CollapsibleSection
       title="Covered Homes"
+      defaultOpen={false}
       subtitle={split ? 'Split into per-property billing lines — final.' : `One visit, billed as ${count} individual cut${count === 1 ? '' : 's'}.`}
       right={<span className="text-[12px] font-heading font-bold text-brand tabular-nums">{count} home{count === 1 ? '' : 's'}</span>}
     >
@@ -594,7 +599,7 @@ const GRASS_TIER_BORDER: Record<'emerald' | 'amber' | 'rose', string> = {
 // One-line, work-type-specific reminder for the Photos section (shown as its
 // subtitle, like the Bid Item section).
 const photoGuidance = (worktype: string, subtype: string): string => {
-  if (worktype === 'landscaping' && subtype === 'cut') return 'Capture all four sides of the house and clearly show the back yard was cut.';
+  if (worktype === 'landscaping' && subtype === 'cut') return 'Capture all 4 sides and the cut back yard.';
   if (worktype === 'landscaping') return 'Show the completed work and that all clippings and debris were hauled off.';
   if (worktype === 'cleaning') return 'Show your cleaning supplies on site, plus a clear before and after of each area.';
   if (worktype === 'pools') return 'Show clear water, the equipment/skimmer baskets, and chemical test evidence.';
@@ -1117,8 +1122,19 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
               </div>
             )}
 
-            {/* Community grass-cut master: the covered-home list (crew sees it,
-                reviewer curates it before split). Shown in every status. */}
+            {/* Office instructions / service brief — always at the TOP for every
+                status (re-issued services carry the reviewer's note here). Bid
+                items render their own "Bid request" block instead. */}
+            {svc.description.trim() && !svc.isBidItem && (
+              <section className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1">Service Order Description</div>
+                <p className="text-[13px] text-ink whitespace-pre-line">{svc.description}</p>
+              </section>
+            )}
+
+            {/* Community grass-cut master: the covered-home list, SECOND (below the
+                description). Crew sees it; reviewer curates it before split.
+                Collapsed by default. Shown in every status. */}
             {svc.isMaster && <MasterCoverage svc={svc} isInternal={isInternal} />}
 
             {/* A per-property billing line split off a community master. */}
@@ -1132,14 +1148,6 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             {editable ? (
               /* ── Editable completion form (assigned crew) ── */
               <>
-                {/* Office instructions / service brief — shown at the top for the
-                    vendor. Re-issued services carry the reviewer's note here. */}
-                {svc.description.trim() && (
-                  <section className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1">Service Order Description</div>
-                    <p className="text-[13px] text-ink whitespace-pre-line">{svc.description}</p>
-                  </section>
-                )}
                 <CollapsibleSection title="Completion Checklist">
                   {form.length === 0 && <div className="text-[13px] text-gray-400">No completion form is configured for this service type yet.</div>}
                   {form.filter(isVisible).map((q) => (
@@ -1254,7 +1262,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 </CollapsibleSection>
 
                 {/* Additional-work bid — spawns an Estimated "Bid Item" for review. */}
-                <CollapsibleSection title="Submit Bid Item?" subtitle="Have additional items that need a separate bid? Flag here — the office will review the bid separately." bodyClass="space-y-3">
+                <CollapsibleSection title="Submit Bid Item?" subtitle="Flag extra work that needs its own bid." defaultOpen={false} bodyClass="space-y-3">
                   <div className="flex gap-2">
                     {([['no', 'No'], ['yes', 'Yes — submit a bid']] as const).map(([v, label]) => (
                       <button key={v} type="button" onClick={() => setBidWanted(v === 'yes')}
