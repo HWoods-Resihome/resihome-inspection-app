@@ -37,6 +37,10 @@ interface ServiceView {
   reviewDecision: string; reviewNotes: string; reviewedBy: string;
   answers: Record<string, any>;
   before: string[]; after: string[]; petBefore: string[]; petAfter: string[];
+  // Community grass-cut billing split: a master carries a covered-property snapshot
+  // + per-property rate; a child points back to its master via masterServiceId.
+  isMaster: boolean; coveredCount: number | null; perRate: number | null;
+  forBilling: string; masterServiceId: string; splitAt: string;
 }
 
 const EDITABLE = new Set(['', 'estimated', 'assigned']);
@@ -91,6 +95,9 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         answers: (() => { try { return JSON.parse(p.answers_json || '{}'); } catch { return {}; } })(),
         before: splitUrls(p.before_photo_urls), after: splitUrls(p.after_photo_urls),
         petBefore: splitUrls(p.pet_before_photo_urls), petAfter: splitUrls(p.pet_after_photo_urls),
+        isMaster: p.scope === 'community' && p.worktype === 'landscaping' && p.subtype === 'cut' && !String(p.master_service_id || '').trim() && !!String(p.covered_property_ids || '').trim(),
+        coveredCount: num(p.covered_property_count), perRate: num(p.per_property_rate),
+        forBilling: p.for_billing || '', masterServiceId: String(p.master_service_id || '').trim(), splitAt: normDate(p.split_at),
       };
     }
   } else {
@@ -104,6 +111,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       vendorCost: null, markupPct: null, clientCost: null, vendorCostAdjustment: null, adjustmentReason: '',
       aiVerdict: '', aiNotes: '', reviewDecision: '', reviewNotes: '', reviewedBy: '',
       answers: {}, before: [], after: [], petBefore: [], petAfter: [],
+      isMaster: false, coveredCount: null, perRate: null, forBilling: '', masterServiceId: '', splitAt: '',
     };
   }
   if (!svc) return { redirect: { destination: '/services', permanent: false } };
@@ -232,6 +240,144 @@ function CollapsibleSection({ title, subtitle, right, defaultOpen = true, bodyCl
       </button>
       {open && <div className={`p-4 ${bodyClass}`}>{children}</div>}
     </section>
+  );
+}
+
+// ── Community grass-cut MASTER: covered-property list ──
+// The crew/vendor sees the street-address list of every home this one visit
+// bills for (read-only). An internal reviewer, before the master splits, can
+// add ANY community property or drop covered ones — the price recomputes down
+// (count × per-property rate). Photos stay on the master; children reference it.
+interface CoveredProp { id: string; address: string; locality: string; rrqc: boolean; status: string }
+function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boolean }) {
+  const router = useRouter();
+  const split = svc.forBilling === 'false' || !!svc.splitAt;
+  const canEdit = isInternal && svc.live && !split && ['assigned', 'submitted', 'review'].includes(svc.status);
+  const [covered, setCovered] = useState<CoveredProp[]>([]);
+  const [available, setAvailable] = useState<CoveredProp[]>([]);
+  const [loading, setLoading] = useState(svc.live);
+  const [err, setErr] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [q, setQ] = useState('');
+  const perRate = svc.perRate ?? 0;
+
+  useEffect(() => {
+    if (!svc.live) { setLoading(false); return; }
+    let alive = true;
+    setLoading(true);
+    fetch(`/api/services/${encodeURIComponent(svc.id)}/covered`)
+      .then((r) => r.json())
+      .then((d) => { if (!alive) return; if (d.error) { setErr(d.error); return; } setCovered(d.covered || []); setAvailable(d.available || []); })
+      .catch(() => { if (alive) setErr('Could not load covered properties.'); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [svc.id, svc.live]);
+
+  const drop = (id: string) => {
+    if (covered.length <= 1) return;   // at least one must remain
+    const p = covered.find((x) => x.id === id); if (!p) return;
+    setCovered((c) => c.filter((x) => x.id !== id));
+    setAvailable((a) => [p, ...a].sort((x, y) => x.address.localeCompare(y.address)));
+    setDirty(true);
+  };
+  const add = (id: string) => {
+    const p = available.find((x) => x.id === id); if (!p) return;
+    setAvailable((a) => a.filter((x) => x.id !== id));
+    setCovered((c) => [...c, p].sort((x, y) => x.address.localeCompare(y.address)));
+    setDirty(true);
+  };
+  const save = async () => {
+    setSaving(true); setErr('');
+    try {
+      const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/covered`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ propertyIds: covered.map((c) => c.id) }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'Save failed.'); return; }
+      setDirty(false);
+      router.replace(router.asPath);   // reflect the new count + pricing
+    } catch { setErr('Save failed.'); }
+    finally { setSaving(false); }
+  };
+
+  const count = svc.live ? covered.length : (svc.coveredCount ?? 0);
+  const liveTotal = Math.round(count * perRate * 100) / 100;
+  const filtered = available.filter((a) => !q.trim() || `${a.address} ${a.locality}`.toLowerCase().includes(q.trim().toLowerCase()));
+
+  return (
+    <CollapsibleSection
+      title="Covered Homes"
+      subtitle={split ? 'Split into per-property billing lines — final.' : `One visit, billed as ${count} individual cut${count === 1 ? '' : 's'}.`}
+      right={<span className="text-[12px] font-heading font-bold text-brand tabular-nums">{count} home{count === 1 ? '' : 's'}</span>}
+    >
+      {loading ? (
+        <div className="text-[13px] text-gray-400">Loading covered homes…</div>
+      ) : (
+        <>
+          {isInternal && (
+            <div className="flex items-center justify-between text-[12px] text-gray-500 -mt-1 mb-1">
+              <span>Per-property rate <span className="font-semibold text-ink tabular-nums">{money(perRate)}</span></span>
+              <span>Master total <span className="font-semibold text-ink tabular-nums">{money(svc.live ? liveTotal : (svc.vendorCost ?? liveTotal))}</span></span>
+            </div>
+          )}
+          <ul className="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
+            {(svc.live ? covered : []).map((c) => (
+              <li key={c.id} className="flex items-center gap-2 px-3 py-2 text-[13px]">
+                <span className="flex-1 min-w-0">
+                  <span className="text-ink truncate">{c.address}</span>
+                  {c.locality && <span className="block text-[11px] text-gray-400 truncate">{c.locality}</span>}
+                </span>
+                {!c.rrqc && <span className="text-[10px] font-bold uppercase tracking-wide text-amber-600 shrink-0" title="No RRQC pass date">added</span>}
+                {canEdit && (
+                  <button type="button" onClick={() => drop(c.id)} disabled={covered.length <= 1}
+                    aria-label={`Drop ${c.address}`} className="text-gray-400 hover:text-red-500 disabled:opacity-30 text-[16px] leading-none px-1 shrink-0">×</button>
+                )}
+              </li>
+            ))}
+            {svc.live && covered.length === 0 && <li className="px-3 py-2 text-[13px] text-gray-400">No covered homes.</li>}
+            {!svc.live && <li className="px-3 py-2 text-[13px] text-gray-400">{count} home{count === 1 ? '' : 's'} (sample record).</li>}
+          </ul>
+
+          {canEdit && (
+            <div className="mt-3">
+              {!adding ? (
+                <button type="button" onClick={() => setAdding(true)}
+                  className="text-[12px] font-semibold text-brand border border-brand/40 rounded-lg px-2.5 py-1 bg-white hover:bg-brand/5">+ Add property</button>
+              ) : (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="p-2 border-b border-gray-100 flex items-center gap-2">
+                    <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search community properties…"
+                      className="flex-1 text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg text-ink focus:outline-none focus:border-brand" />
+                    <button type="button" onClick={() => { setAdding(false); setQ(''); }} className="text-[12px] font-semibold text-gray-500 px-1">Done</button>
+                  </div>
+                  <div className="max-h-52 overflow-y-auto py-1">
+                    {filtered.map((a) => (
+                      <button key={a.id} type="button" onClick={() => add(a.id)} className="w-full flex items-center gap-2 px-3 py-2 text-[13px] hover:bg-gray-50 text-left">
+                        <span className="text-brand font-bold shrink-0">+</span>
+                        <span className="flex-1 min-w-0"><span className="text-ink truncate">{a.address}</span>{a.locality && <span className="block text-[11px] text-gray-400 truncate">{a.locality}</span>}</span>
+                        {!a.rrqc && <span className="text-[10px] font-bold uppercase tracking-wide text-amber-600 shrink-0" title="No RRQC pass date">no rrqc</span>}
+                      </button>
+                    ))}
+                    {filtered.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-gray-400">No other community properties.</div>}
+                  </div>
+                </div>
+              )}
+              {dirty && (
+                <div className="mt-3 flex items-center gap-3">
+                  <button type="button" onClick={save} disabled={saving}
+                    className="text-[13px] font-heading font-bold text-white bg-brand rounded-lg px-4 py-1.5 disabled:opacity-50">{saving ? 'Saving…' : `Save — ${count} home${count === 1 ? '' : 's'} · ${money(liveTotal)}`}</button>
+                  <span className="text-[12px] text-gray-400">Unsaved changes</span>
+                </div>
+              )}
+            </div>
+          )}
+          {err && <p className="text-[12px] text-red-600 mt-2">{err}</p>}
+        </>
+      )}
+    </CollapsibleSection>
   );
 }
 
@@ -968,6 +1114,18 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             {pendingQueued && editable && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[13px] text-amber-800">
                 A completion for this service is saved offline and will submit automatically when you’re back online. No need to re-enter it.
+              </div>
+            )}
+
+            {/* Community grass-cut master: the covered-home list (crew sees it,
+                reviewer curates it before split). Shown in every status. */}
+            {svc.isMaster && <MasterCoverage svc={svc} isInternal={isInternal} />}
+
+            {/* A per-property billing line split off a community master. */}
+            {svc.masterServiceId && (
+              <div className="bg-gray-50 border border-gray-200 rounded-2xl p-3 text-[13px] text-gray-600 flex items-center justify-between gap-3">
+                <span>Per-property billing line from a community grass cut. Photos are on the master.</span>
+                <Link href={`/services/${encodeURIComponent(svc.masterServiceId)}`} className="font-heading font-bold text-brand shrink-0">View master →</Link>
               </div>
             )}
 

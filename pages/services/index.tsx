@@ -27,6 +27,10 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   const real = await searchServiceWorkOrders().catch(() => null);
+  // Per-property billing lines split from a community grass-cut master roll UP
+  // into the master — hide the children from the operational list (the master
+  // drill-down and the billing view surface them). See RECURRING_SERVICES_PLAN.md.
+  const services = (real ?? SAMPLE_SERVICES).filter((s) => !s.masterServiceId);
   // "View as Vendor" persists via cookie (whole-app), with the legacy ?as=vendor
   // query still honored as an entry point.
   const asVendor = isViewingAsVendor(ctx.req) || ctx.query.as === 'vendor';
@@ -34,7 +38,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     props: {
       userName: session?.name || session?.email || '',
       canCreate: isInternalEmail(session?.email),
-      services: real ?? SAMPLE_SERVICES,
+      services,
       live: !!real,
       asVendor,
     },

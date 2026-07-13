@@ -1294,6 +1294,7 @@ const SERVICE_LIST_PROPS = [
   'region_snapshot', 'address_snapshot', 'locality_snapshot', 'community_name',
   'property_status_snapshot', 'latitude', 'longitude', 'vendor_name', 'pet_stations',
   'property_id_ref', 'community_id_ref', 'submitted_at', 'completed_at', 'ontime',
+  'master_service_id', 'for_billing',
   'hs_createdate',
 ];
 
@@ -1325,6 +1326,8 @@ function mapServiceRow(r: any): SampleService {
     dueDate: normServiceDate(p.due_date),
   };
   if (p.is_bid_item === 'true') rec.isBidItem = true;
+  if (String(p.master_service_id || '').trim()) rec.masterServiceId = String(p.master_service_id).trim();
+  if (p.for_billing === 'true') rec.forBilling = true;
   if (p.community_name) rec.community = p.community_name;
   if (p.property_status_snapshot) rec.propertyStatus = p.property_status_snapshot;
   if (p.ontime === 'true') rec.onTime = true;
@@ -1664,6 +1667,8 @@ const SERVICE_DETAIL_PROPS = [
   'review_decision', 'review_notes', 'reviewed_by', 'reviewed_at',
   'before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls',
   'pet_after_photo_urls', 'answers_json', 'property_id_ref', 'community_id_ref', 'enrollment_key',
+  // Community grass-cut billing split (RECURRING_SERVICES_PLAN.md).
+  'for_billing', 'master_service_id', 'covered_property_ids', 'covered_property_count', 'per_property_rate', 'split_at',
   'hs_createdate',
 ];
 

@@ -23,6 +23,7 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder } from '@/lib/hubspot';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { defaultRateFor } from '@/lib/services/worktypes';
+import { isCommunityCutMaster, splitMasterCommunityCut } from '@/lib/services/split';
 import { easternTodayISO } from '@/lib/services/sampleData';
 
 /** Add whole days to a YYYY-MM-DD date, returned as YYYY-MM-DD (UTC-safe). */
@@ -88,6 +89,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const decisionLabel = decision === 'reject' ? 'Rejected — payment denied' : decision === 'modify' ? 'Modified pricing' : 'Approved';
     void recordServiceAudit({ serviceId: id, action: 'review', actorEmail: email, actorName: session?.name, detail: `${decisionLabel}: ${notes}`.slice(0, 500), meta: { decision } });
 
+    // Community grass-cut MASTER → split into one completed per-property billing
+    // line each (children carry for_billing; master leaves billing). A rejection
+    // pays nothing, so no children — just flag the master out of billing.
+    let split: { childIds: string[]; count: number } | null = null;
+    if (isCommunityCutMaster(p) && p.for_billing !== 'false') {
+      if (decision === 'reject') {
+        await patchServiceWorkOrder(id, { for_billing: 'false', split_at: now }).catch(() => {});
+      } else {
+        try {
+          const finalVendorCost = Number.isFinite(Number(props.vendor_cost)) ? Number(props.vendor_cost) : Number(p.vendor_cost) || 0;
+          const markup = Number.isFinite(Number(props.markup_pct)) ? Number(props.markup_pct) : (Number.isFinite(Number(p.markup_pct)) ? Number(p.markup_pct) : null);
+          split = await splitMasterCommunityCut({
+            masterId: id, masterProps: p, finalVendorCost, markupPct: markup,
+            closedAt: now, reviewedBy: email || '', reviewNotes: notes, decision,
+          });
+          void recordServiceAudit({ serviceId: id, action: 'review', actorEmail: email, actorName: session?.name, detail: `Split into ${split.count} per-property billing line${split.count === 1 ? '' : 's'}`.slice(0, 500), meta: { split: true, count: split.count } });
+        } catch (e: any) {
+          console.warn('[services/review-decision] community-cut split failed:', e?.message || e);
+        }
+      }
+    }
+
     // Re-Issue: the reviewer wants the work redone. Spin up a fresh service with
     // the SAME requirements (worktype/subtype/description), property/community,
     // and vendor — due in N days — with the reviewer's note surfaced at the top
@@ -131,7 +154,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(200).json({ ok: true, id, decision, status: 'completed', vendorCost: props.vendor_cost ?? originalVendorCost, reissued: false, reissueError: String(e?.message || e).slice(0, 200) });
       }
     }
-    return res.status(200).json({ ok: true, id, decision, status: 'completed', vendorCost: props.vendor_cost ?? originalVendorCost, reissued: !!b.reissue, reissuedId });
+    return res.status(200).json({ ok: true, id, decision, status: 'completed', vendorCost: props.vendor_cost ?? originalVendorCost, reissued: !!b.reissue, reissuedId, split: split ? split.count : null });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });
   }
