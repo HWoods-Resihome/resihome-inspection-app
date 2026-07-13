@@ -1486,8 +1486,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       {/* Change Due Date modal (internal) — the calendar opens on the current due
           date; pick a new one and save to push it out. */}
       {dueOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDueOpen(false)}>
-          <div className="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setDueOpen(false)}>
+          <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
             <div className="font-heading font-bold text-[15px] text-ink">Change Due Date</div>
             <p className="text-[13px] text-gray-500 -mt-1">Currently due <b className="text-ink">{svc.dueDate ? fmtMDY(svc.dueDate) : '—'}</b>. Pick a new date to push it out.</p>
             <DatePicker value={newDue} onChange={setNewDue} className={`${inputCls} flex items-center justify-between`} ariaLabel="New due date" />
