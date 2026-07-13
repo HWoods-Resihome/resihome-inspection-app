@@ -419,6 +419,24 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
 // The Bill Trip Fee question — by stable id, or by label if it was renamed in the
 // Form Builder. Matches the submit-side pricing resolver (keep them in lockstep).
 const isTripFeeQuestion = (q: ServiceQuestion) => q.id === 'bill_trip_fee' || /trip\s*fee/i.test(q.label);
+const isGrassHeightQuestion = (q: ServiceQuestion) => q.id === 'grass_height' || /grass\s*height/i.test(q.label);
+// Overgrown / Heavy tiers bill above the base grass-cut rate.
+const isHigherGrassTier = (v: unknown) => {
+  const h = String(v || '').toLowerCase();
+  return h.includes('overgrown') || h.includes('heavy') || h.includes('6-12') || h.includes('6–12') || h.includes('over 12') || h.includes('12"+') || h.includes('12+');
+};
+
+// One-line, work-type-specific reminder for the Photos section (shown as its
+// subtitle, like the Bid Item section).
+const photoGuidance = (worktype: string, subtype: string): string => {
+  if (worktype === 'landscaping' && subtype === 'cut') return 'Capture all four sides of the house and clearly show the back yard was cut.';
+  if (worktype === 'landscaping') return 'Show the completed work and that all clippings and debris were hauled off.';
+  if (worktype === 'cleaning') return 'Show your cleaning supplies on site, plus a clear before and after of each area.';
+  if (worktype === 'pools') return 'Show clear water, the equipment/skimmer baskets, and chemical test evidence.';
+  if (worktype === 'trash_removal') return 'Show the area before and after — everything removed and left clean.';
+  if (worktype === 'trip_fee') return 'Show you were on-site at the property (a timestamped exterior shot).';
+  return 'Take clear before and after photos of the work area.';
+};
 
 export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta, asVendor }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null; asVendor: boolean }) {
   const router = useRouter();
@@ -960,12 +978,19 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                         </>
                       )}
                       {q.type === 'single' && (
-                        <div className={`gap-2 ${(q.options || []).length === 3 ? 'grid grid-cols-3' : 'flex flex-wrap'}`}>
-                          {(q.options || []).map((o) => (
-                            <button key={o.id} type="button" onClick={() => setAns(q.id, o.label)}
-                              className={`px-3 py-1.5 rounded-xl border text-[13px] font-heading font-semibold text-center leading-tight ${answers[q.id] === o.label ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
-                          ))}
-                        </div>
+                        <>
+                          <div className={`gap-2 ${(q.options || []).length === 3 ? 'grid grid-cols-3' : 'flex flex-wrap'}`}>
+                            {(q.options || []).map((o) => (
+                              <button key={o.id} type="button" onClick={() => setAns(q.id, o.label)}
+                                className={`px-3 py-1.5 rounded-xl border text-[13px] font-heading font-semibold text-center leading-tight ${answers[q.id] === o.label ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
+                            ))}
+                          </div>
+                          {isGrassHeightQuestion(q) && isHigherGrassTier(answers[q.id]) && (
+                            <div className="mt-2 text-[12px] font-heading font-semibold rounded-lg px-3 py-2 border bg-amber-50 border-amber-200 text-amber-800">
+                              * Higher grass tier — the increased payout is pending review of the photos.
+                            </div>
+                          )}
+                        </>
                       )}
                       {q.type === 'multi' && (
                         <div className={`gap-2 ${(q.options || []).length === 3 ? 'grid grid-cols-3' : 'flex flex-wrap'}`}>
@@ -1008,7 +1033,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   ))}
                 </CollapsibleSection>
 
-                <CollapsibleSection title="Photos">
+                <CollapsibleSection title="Photos" subtitle={photoGuidance(svc.worktype, svc.subtype)}>
                   <CameraPhotos label="Before photos" required urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   <CameraPhotos label="After photos" required urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   {svc.petStations && (
