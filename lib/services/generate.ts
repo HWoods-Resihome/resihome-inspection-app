@@ -21,7 +21,7 @@
  *  - No cadence date math — due date is today + First Order Due (days), else +5.
  *  - No vendor rotation — the first assigned vendor is used for every order.
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties } from '@/lib/hubspot';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { vendorEmail } from './vendors';
 
@@ -124,6 +124,14 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
   // Enrollment keys with a currently-open (non-terminal) order — dedup set.
   const openKeys = new Set(existing.filter((e) => OPEN_STATUSES.has(e.status)).map((e) => e.key).filter(Boolean));
 
+  // Community NAME → HubSpot id, resolved lazily (community grass-cut masters need
+  // the id to look up their properties). Cached for the run.
+  let _commIdMap: Map<string, string> | null = null;
+  const communityIdByName = async (name: string): Promise<string> => {
+    if (!_commIdMap) _commIdMap = new Map((await listServiceCommunities().catch(() => null) || []).map((c) => [c.name, c.id]));
+    return _commIdMap.get(name) || '';
+  };
+
   const result: GenerateResult = {
     mode: apply ? 'apply' : 'dry-run', today: todayISO, configured: true,
     rulesActive: 0, rulesSkipped: 0, wouldCreate: 0, created: 0, skippedExisting: 0, errors: 0,
@@ -178,11 +186,38 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         generated_by_rule_id: ruleId, enrollment_key: enrollmentKey,
       };
       if (t.community) orderProps.community_name = t.community;
-      if (Number.isFinite(vendorCost)) orderProps.vendor_cost = vendorCost;
       if (Number.isFinite(markupPct)) orderProps.markup_pct = markupPct;
-      if (clientCost !== null) orderProps.client_cost = clientCost;
       if (t.scope === 'property') orderProps.property_id_ref = t.id;
-      else orderProps.community_id_ref = t.id;
+
+      // Community + Landscaping + Grass Cut = a MASTER of individual house cuts.
+      // Snapshot the eligible properties (those with an rrqc_pass_date) and price
+      // the master at count × per-property rate; it splits into per-house records
+      // on close-out (P2). Other community services stay a single line.
+      const isCommunityCut = t.scope === 'community' && worktype === 'landscaping' && subtype === 'cut';
+      if (t.scope === 'community') {
+        const commId = await communityIdByName(t.community || t.address);
+        if (commId) orderProps.community_id_ref = commId;
+        if (isCommunityCut) {
+          // Eligibility is driven by the rule's enrollment criterion (defaults to
+          // "RRQC Pass Date is known" for community grass-cut) — not hard-coded.
+          const rrqcGate = /rrqc/i.test(String(p.enroll_field || ''));
+          const all = commId ? await fetchCommunityProperties(commId) : [];
+          const eligible = rrqcGate ? all.filter((x) => x.rrqcPassDate) : all;
+          if (!eligible.length) { result.items.push({ ...base, action: 'skip-open' }); result.skippedExisting++; continue; }
+          const perRate = Number.isFinite(vendorCost) ? vendorCost : 0;   // rule cost = per-property rate
+          const masterVendor = Math.round(eligible.length * perRate * 100) / 100;
+          orderProps.covered_property_ids = JSON.stringify(eligible.map((x) => x.id));
+          orderProps.covered_property_count = eligible.length;
+          orderProps.per_property_rate = perRate;
+          orderProps.for_billing = 'true';
+          orderProps.vendor_cost = masterVendor;
+          orderProps.client_cost = Number.isFinite(markupPct) ? Math.round(masterVendor * (1 + markupPct / 100) * 100) / 100 : masterVendor;
+        }
+      }
+      if (!isCommunityCut) {
+        if (Number.isFinite(vendorCost)) orderProps.vendor_cost = vendorCost;
+        if (clientCost !== null) orderProps.client_cost = clientCost;
+      }
 
       try {
         const recordId = await createServiceWorkOrder(orderProps);

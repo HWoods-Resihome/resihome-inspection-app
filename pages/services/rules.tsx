@@ -64,10 +64,19 @@ const PROPERTY_FIELDS: { field: string; options: string[] }[] = [
   // Associated leasing-pipeline Deal stage — powers event-triggered, run-once
   // dispatches like move-in cleans (enroll on the transition INTO a stage).
   { field: 'Deal Stage', options: ['Application', 'Approved', 'Lease Signed', 'Move-In Scheduled', 'Moved In', 'Leased'] },
+  // Date field (no enum values) — used with "is known" to gate community grass-cut
+  // eligibility on properties that have passed RRQC (`rrqc_pass_date`).
+  { field: 'RRQC Pass Date', options: [] },
 ];
 const FIELD_NAMES = PROPERTY_FIELDS.map((f) => f.field);
 const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field)?.options ?? [];
-const OPS = ['is', 'is any of', 'is not', 'changes to'];
+const OPS = ['is', 'is any of', 'is not', 'changes to', 'is known'];
+// Community + Landscaping + Grass Cut defaults its enrollment to "RRQC Pass Date
+// is known" (the per-house eligibility gate). Admin can change it after.
+const cutEnroll = (scope: string, worktype: string, subtype: string): Partial<{ enrollField: string; enrollOp: string; enrollVals: string[] }> =>
+  (scope === 'community' && worktype === 'landscaping' && subtype === 'cut')
+    ? { enrollField: 'RRQC Pass Date', enrollOp: 'is known', enrollVals: [] }
+    : {};
 
 // Rules-list sort (mirrors the Services home sort: tap a field, re-tap to flip).
 type RuleSortField = 'name' | 'coverage' | 'worktype' | 'region' | 'community';
@@ -516,7 +525,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
     if (rule.recurring && missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
     if (!rule.recurring && !rule.initialDueDays.trim()) saveErrors.push('Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
     if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
-    if (!rule.enrollVals.length) saveErrors.push('Set an enrollment trigger.');
+    if (rule.enrollOp !== 'is known' && !rule.enrollVals.length) saveErrors.push('Set an enrollment trigger.');
     if (rule.stopEnabled && rule.stopMode === 'date' && !rule.stopDate) saveErrors.push('Set a stop date.');
     if (rule.stopEnabled && rule.stopMode === 'count' && (!rule.stopCount || Number(rule.stopCount) < 1)) saveErrors.push('Set the number of services before stopping.');
   }
@@ -740,19 +749,19 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                 <label className={lbl}>Work Type</label>
                 <ListPicker value={rule.worktype} ariaLabel="Work type" className={`${pick} w-full`}
                   options={defs.filter((w) => w.scopes.includes(rule.scope)).map((w) => ({ value: w.id, label: w.label }))}
-                  onChange={(v) => { const wt = v as Worktype; const sub = firstSubOf(wt); patch({ worktype: wt, subtype: sub, vendorCost: baseRate(wt, sub), description: descriptionFor(wt, sub) }); }} />
+                  onChange={(v) => { const wt = v as Worktype; const sub = firstSubOf(wt); patch({ worktype: wt, subtype: sub, vendorCost: baseRate(wt, sub), description: descriptionFor(wt, sub), ...cutEnroll(rule.scope, wt, sub) }); }} />
               </div>
               <div className="w-40">
                 <label className={lbl}>Subtype</label>
                 <ListPicker value={rule.subtype} ariaLabel="Subtype" className={`${pick} w-full`}
                   options={subsOfD(rule.worktype).map((st) => ({ value: st.id, label: st.label }))}
-                  onChange={(v) => patch({ subtype: v, vendorCost: baseRate(rule.worktype, v), description: descriptionFor(rule.worktype, v) })} />
+                  onChange={(v) => patch({ subtype: v, vendorCost: baseRate(rule.worktype, v), description: descriptionFor(rule.worktype, v), ...cutEnroll(rule.scope, rule.worktype, v) })} />
               </div>
               <div>
                 <label className={lbl}>Coverage</label>
                 <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
                   <button onClick={() => patch({ scope: 'property' })} className={`px-3 py-1.5 rounded-md ${rule.scope === 'property' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}>Property</button>
-                  <button onClick={() => patch({ scope: 'community' })} className={`px-3 py-1.5 rounded-md ${rule.scope === 'community' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-600'}`}>Community</button>
+                  <button onClick={() => patch({ scope: 'community', ...cutEnroll('community', rule.worktype, rule.subtype) })} className={`px-3 py-1.5 rounded-md ${rule.scope === 'community' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-600'}`}>Community</button>
                 </div>
               </div>
             </div>
@@ -967,7 +976,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
               <ListPicker value={rule.enrollOp} ariaLabel="Operator" className={pick}
                 options={OPS.map((o) => ({ value: o, label: o }))}
                 onChange={(v) => patch({ enrollOp: v, ...(v !== 'is any of' && rule.enrollVals.length > 1 ? { enrollVals: rule.enrollVals.slice(0, 1) } : {}) })} />
-              {rule.enrollOp === 'is any of' ? (
+              {rule.enrollOp === 'is known' ? (
+                <span className="text-[12px] text-gray-500 self-center">has any date on the property</span>
+              ) : rule.enrollOp === 'is any of' ? (
                 <MultiFilter label="Values" options={valueOptsFor(rule.enrollField)} selected={rule.enrollVals}
                   onChange={(next) => patch({ enrollVals: next })} className={`${pick} flex-1 min-w-[140px]`} />
               ) : (

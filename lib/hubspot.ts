@@ -1154,6 +1154,41 @@ export async function listServiceCommunities(): Promise<{ id: string; name: stri
   } catch (e) { console.warn('[community] list failed:', e); return null; }
 }
 
+export interface CommunityProperty { id: string; address: string; locality: string; region: string; rrqcPassDate: string }
+
+/** All properties associated to a Community, with address + `rrqc_pass_date`.
+ *  Powers the community grass-cut eligible snapshot (rrqcPassDate set) and the
+ *  reviewer's "add property" picker (all of them). Fail-open → []. */
+export async function fetchCommunityProperties(communityId: string): Promise<CommunityProperty[]> {
+  const ids = await fetchCommunityPropertyIds(communityId);
+  if (!ids.length) return [];
+  const { property } = typeIds();
+  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'rrqc_pass_date'];
+  const out: CommunityProperty[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    try {
+      const resp = await hubspotFetch(`/crm/v3/objects/${property}/batch/read`, {
+        method: 'POST',
+        body: JSON.stringify({ properties: projection, inputs: ids.slice(i, i + 100).map((id) => ({ id })) }),
+      });
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        const city = String(p.city || '').trim();
+        const st = String(p.state_code || p.state || '').trim();
+        const zip = String(p.zip_code || p.zip || '').trim();
+        out.push({
+          id: String(r.id),
+          address: String(p.address || '').trim() || `(Property ${r.id})`,
+          locality: [city, st, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
+          region: String(p.region || '').trim(),
+          rrqcPassDate: String(p.rrqc_pass_date || '').trim(),
+        });
+      }
+    } catch (e) { console.warn('[community] batch read failed:', e); }
+  }
+  return out;
+}
+
 /** Property record ids associated to a Community (all pages). Empty when none. */
 export async function fetchCommunityPropertyIds(communityId: string): Promise<string[]> {
   const meta = await resolveCommunityMeta();
