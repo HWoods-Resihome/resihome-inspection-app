@@ -920,9 +920,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const [reassigning, setReassigning] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState('');
   const canReassign = isInternal && svc.live && !['completed', 'canceled'].includes(svc.status);
-  // Internal users can push a service's due date out (vendor feedback, etc.) any
-  // time before it's terminal.
-  const canEditDue = isInternal && svc.live && !['completed', 'canceled'].includes(svc.status);
+  // Internal users can push a service's due date out (vendor feedback, etc.), but
+  // only BEFORE the vendor submits — once it's submitted/review/completed the due
+  // window is settled.
+  const canEditDue = isInternal && svc.live && ['estimated', 'assigned'].includes(svc.status);
   const [dueOpen, setDueOpen] = useState(false);
   const [newDue, setNewDue] = useState(svc.dueDate || '');
   const [savingDue, setSavingDue] = useState(false);
