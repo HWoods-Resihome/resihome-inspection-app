@@ -1760,7 +1760,8 @@ export async function provisionServicesSchema(apply: boolean): Promise<any> {
         }
       } else {
         const props = await hubspotFetch(`/crm/v3/properties/${typeId}`).catch(() => ({ results: [] }));
-        const have = new Set((props.results || []).map((p: any) => p.name));
+        const liveByName = new Map<string, any>((props.results || []).map((p: any) => [p.name, p]));
+        const have = new Set(liveByName.keys());
         const missing = obj.properties.filter((p) => !have.has(p.name));
         entry.action = 'exists'; entry.typeId = typeId; entry.missingProperties = missing.map((p) => p.name);
         if (apply && missing.length) {
@@ -1768,6 +1769,25 @@ export async function provisionServicesSchema(apply: boolean): Promise<any> {
           for (const p of missing) await createProperty(typeId!, p, group);
           entry.propertiesCreated = missing.length;
         }
+        // Reconcile enum OPTIONS on properties that already exist (e.g. a new
+        // subtype like `common_areas`, or a new worktype/status). Additive only.
+        const optionAdds: { name: string; added: string[] }[] = [];
+        for (const spec of obj.properties as PropSpec[]) {
+          if (!spec.options || !spec.options.length) continue;
+          const live = liveByName.get(spec.name);
+          if (!live || !Array.isArray(live.options)) continue;
+          const liveVals = new Set(live.options.map((o: any) => String(o.value)));
+          const add = spec.options.filter((o) => !liveVals.has(String(o.value)));
+          if (!add.length) continue;
+          optionAdds.push({ name: spec.name, added: add.map((o) => o.value) });
+          if (apply) {
+            await hubspotFetch(`/crm/v3/properties/${typeId}/${spec.name}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ options: [...live.options, ...add.map((o) => ({ label: o.label, value: o.value, hidden: false }))] }),
+            }).catch((err) => { console.warn(`[provision] option add failed for ${spec.name}:`, err); });
+          }
+        }
+        if (optionAdds.length) entry.optionAdds = optionAdds;
       }
     } catch (e: any) {
       entry.action = 'error'; entry.error = String(e?.message || e); entry.detail = e?.detail || null;
