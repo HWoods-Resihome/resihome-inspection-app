@@ -11,6 +11,7 @@ import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { ListPicker } from '@/components/ListPicker';
 import { SettingsMenu } from '@/components/SettingsMenu';
+import { PullToRefresh } from '@/components/PullToRefresh';
 import { AiSparkle } from '@/components/AiSparkle';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
@@ -272,6 +273,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      <PullToRefresh onRefresh={async () => { await router.replace(router.asPath, undefined, { scroll: false }); }} />
       {/* Pink header — mirrors the inspections home. */}
       <header className="bg-brand text-white sticky top-0 z-30 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
         <div className="max-w-3xl mx-auto px-4 pt-2 pb-2.5">

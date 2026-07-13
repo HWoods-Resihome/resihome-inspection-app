@@ -8,6 +8,7 @@ import { InspectionCard } from '@/components/InspectionCard';
 import { INSPECTION_NAV_KEY } from '@/components/InspectionPager';
 import { ListPicker } from '@/components/ListPicker';
 import { SettingsMenu } from '@/components/SettingsMenu';
+import { PullToRefresh } from '@/components/PullToRefresh';
 import {
   loadCachedRateCard, saveCachedRateCard,
   loadCachedMe, saveCachedMe,
@@ -748,6 +749,7 @@ export default function Home() {
       <Head>
         <title>ResiWalk</title>
       </Head>
+      <PullToRefresh onRefresh={() => load({ refresh: true })} />
       {/* On desktop the page becomes a fixed-height flex column: the header +
           filters are frozen at the top, only the card list scrolls, and the
           pagination bar is frozen at the bottom. On mobile it's normal document
