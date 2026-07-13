@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { thumbImageSrc, displayImageSrc } from '@/lib/photoDisplay';
 
 /**
@@ -49,6 +49,17 @@ export function PhotoThumb({
   if (url !== seenUrl) { setSeenUrl(url); setStage(0); setLoaded(false); }
 
   const src = stage >= 2 ? '' : (stage === 0 ? thumbImageSrc(url, width) : displayImageSrc(url));
+
+  // Self-heal a STALL: the proxied thumbnail resize (sharp) can hang on a cold
+  // instance / large original, and a bare <img> that never fires load OR error
+  // leaves a permanent grey box. If the current source hasn't loaded within a few
+  // seconds, advance the fallback chain (proxy → direct url) so a real pixel
+  // arrives instead of staying stuck.
+  useEffect(() => {
+    if (loaded || stage >= 2 || !src) return;
+    const t = setTimeout(() => setStage((s) => s + 1), stage === 0 ? 4000 : 8000);
+    return () => clearTimeout(t);
+  }, [src, stage, loaded]);
   // The wrapper IS the tile (carries the caller's size/border/rounded classes)
   // and shows a neutral fill. The <img> sits on top but stays INVISIBLE until it
   // actually loads — so a still-loading OR failed source never paints the
