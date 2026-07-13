@@ -1346,7 +1346,28 @@ function mapServiceRow(r: any): SampleService {
 
 /** All Service Work Orders (up to `limit`). Returns null when the object type id
  *  env var isn't set yet — the caller then falls back to sample data. */
+// Short-TTL cache for the whole services list. The list is identical for every
+// caller (the page filters/labels client-side), so one shared cache is safe and
+// makes toggling between the Services and Inspections tabs feel instant instead
+// of re-querying HubSpot (up to 500 records) on every navigation. Any Service
+// Work Order write busts it (see createServiceWorkOrder / patchServiceWorkOrder),
+// so post-action refreshes still show fresh data.
+let _svcListData: SampleService[] | null = null;
+let _svcListAt = 0;
+let _svcListInflight: Promise<SampleService[] | null> | null = null;
+const SVC_LIST_TTL_MS = 30_000;
+export function bustServiceListCache(): void { _svcListData = null; _svcListAt = 0; }
+
 export async function searchServiceWorkOrders(limit = 500): Promise<SampleService[] | null> {
+  if (_svcListData && Date.now() - _svcListAt < SVC_LIST_TTL_MS) return _svcListData;
+  if (_svcListInflight) return _svcListInflight;   // single-flight: dedupe concurrent loads
+  _svcListInflight = searchServiceWorkOrdersLive(limit)
+    .then((items) => { if (items) { _svcListData = items; _svcListAt = Date.now(); } return items; })
+    .finally(() => { _svcListInflight = null; });
+  return _svcListInflight;
+}
+
+async function searchServiceWorkOrdersLive(limit = 500): Promise<SampleService[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
   try {
@@ -1675,6 +1696,7 @@ export async function createServiceWorkOrder(props: Record<string, any>): Promis
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
   const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: props }) });
+  bustServiceListCache();   // a new work order → the list changed
   return resp?.id ? String(resp.id) : null;
 }
 
@@ -1753,6 +1775,7 @@ export async function patchServiceWorkOrder(id: string, props: Record<string, an
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId || !id) return false;
   await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) });
+  bustServiceListCache();   // status/vendor/etc changed → invalidate the list
   return true;
 }
 

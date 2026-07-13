@@ -10,6 +10,11 @@ import { renderServicePdfBuffer } from '@/lib/servicePdfRender';
 
 const validEmail = (e?: string | null) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(e || '').trim());
 const pdfName = (kind: string, id: string) => `${kind}-${id}.pdf`;
+// Dates in emails read as M-D-YY (e.g. 2026-07-13 → 7-13-26).
+const fmtMDY = (iso?: string | null): string => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  return m ? `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}` : (String(iso || '').trim() || '—');
+};
 
 /** Inspection completed → the inspector, with the report PDF attached + a link. */
 export async function notifyInspectionCompleted(o: {
@@ -44,7 +49,7 @@ export async function notifyServiceAssigned(o: {
       to, subject: `New Service Assigned — ${o.address}`,
       heading: 'New Service Assigned',
       intro: `A new ${o.worktypeLabel} · ${o.subtypeLabel} service has been assigned to you.`,
-      rows: [['Property', o.address], ['Service', `${o.worktypeLabel} · ${o.subtypeLabel}`], ['Due', o.dueDate || '—'], ['Vendor', o.vendorName || '']],
+      rows: [['Property', o.address], ['Service', `${o.worktypeLabel} · ${o.subtypeLabel}`], ['Due', fmtMDY(o.dueDate)], ['Vendor', o.vendorName || '']],
       linkUrl: `${o.baseUrl}/services/${encodeURIComponent(o.serviceId)}`, linkLabel: 'Open Service',
     });
   } catch (e: any) { console.warn('[notify] service_assigned failed:', String(e?.message || e).slice(0, 160)); }
@@ -86,7 +91,7 @@ export async function notifyServicePastDue(o: {
       to, subject: `Past Due — Please Complete: ${o.address}`,
       heading: 'Service Past Due',
       intro: `Your ${o.worktypeLabel} · ${o.subtypeLabel} at ${o.address} is past due. Please submit the completion as soon as possible.`,
-      rows: [['Property', o.address], ['Service', `${o.worktypeLabel} · ${o.subtypeLabel}`], ['Was due', o.dueDate || '—']],
+      rows: [['Property', o.address], ['Service', `${o.worktypeLabel} · ${o.subtypeLabel}`], ['Was due', fmtMDY(o.dueDate)]],
       linkUrl: `${o.baseUrl}/services/${encodeURIComponent(o.serviceId)}`, linkLabel: 'Complete Service',
     });
   } catch (e: any) { console.warn('[notify] service_past_due failed:', String(e?.message || e).slice(0, 160)); }

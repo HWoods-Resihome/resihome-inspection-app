@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
 import Router from 'next/router';
@@ -150,6 +150,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <ErrorBoundary>
+      <RouteProgress />
       <Head>
         {/* Single global viewport. No maximum-scale so pinch-zoom works
             (accessibility). Individual pages no longer set their own.
@@ -173,5 +174,37 @@ export default function App({ Component, pageProps }: AppProps) {
         </AppDialogProvider>
       </div>
     </ErrorBoundary>
+  );
+}
+
+// A thin brand-pink bar at the very top that animates during client-side route
+// changes — immediate feedback so tab switches (Inspections ↔ Services) feel
+// responsive even while the destination's data loads, instead of "frozen".
+function RouteProgress() {
+  const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
+  useEffect(() => {
+    const start = () => setState('loading');
+    const done = () => { setState('done'); window.setTimeout(() => setState('idle'), 300); };
+    Router.events.on('routeChangeStart', start);
+    Router.events.on('routeChangeComplete', done);
+    Router.events.on('routeChangeError', done);
+    return () => {
+      Router.events.off('routeChangeStart', start);
+      Router.events.off('routeChangeComplete', done);
+      Router.events.off('routeChangeError', done);
+    };
+  }, []);
+  if (state === 'idle') return null;
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 3, zIndex: 9999, pointerEvents: 'none' }}>
+      <div style={{
+        height: '100%', background: '#ff0060', borderRadius: '0 2px 2px 0',
+        width: state === 'loading' ? '90%' : '100%',
+        opacity: state === 'done' ? 0 : 1,
+        transition: state === 'loading'
+          ? 'width 8s cubic-bezier(0.1,0.7,0.2,1)'
+          : 'width 0.2s ease, opacity 0.35s ease 0.1s',
+      }} />
+    </div>
   );
 }
