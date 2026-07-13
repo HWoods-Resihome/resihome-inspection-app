@@ -978,7 +978,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                         <>
                           <div className="flex gap-2">
                             {(['yes', 'no'] as const).map((v) => (
-                              <button key={v} type="button" onClick={() => setAns(q.id, v)}
+                              <button key={v} type="button" onClick={() => setAns(q.id, answers[q.id] === v ? '' : v)}
                                 className={`px-4 py-1.5 rounded-full border text-[13px] font-heading font-semibold ${answers[q.id] === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{v === 'yes' ? 'Yes' : 'No'}</button>
                             ))}
                           </div>
@@ -1006,7 +1006,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                                   : anySelected ? 'bg-white text-gray-700 border-gray-300'
                                     : GRASS_TIER_BORDER[grassTier(o.label)];
                                 return (
-                                  <button key={o.id} type="button" onClick={() => setAns(q.id, o.label)}
+                                  <button key={o.id} type="button" onClick={() => setAns(q.id, answers[q.id] === o.label ? '' : o.label)}
                                     className={`px-2 py-2 rounded-xl border-2 text-[13px] font-heading font-bold text-center leading-tight ${cls}`}>
                                     <div>{main}</div>
                                     {sub && <div className="text-[11px] font-semibold opacity-80 mt-0.5">{sub}</div>}
@@ -1017,7 +1017,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                           ) : (
                             <div className={`gap-2 ${(q.options || []).length === 3 ? 'grid grid-cols-3' : 'flex flex-wrap'}`}>
                               {(q.options || []).map((o) => (
-                                <button key={o.id} type="button" onClick={() => setAns(q.id, o.label)}
+                                <button key={o.id} type="button" onClick={() => setAns(q.id, answers[q.id] === o.label ? '' : o.label)}
                                   className={`px-3 py-1.5 rounded-xl border text-[13px] font-heading font-semibold text-center leading-tight ${answers[q.id] === o.label ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
                               ))}
                             </div>
