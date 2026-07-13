@@ -13,6 +13,8 @@ import { appBaseUrl } from '@/lib/notifications/send';
 import { notifyInspectionCompleted, notifyServiceAssigned, notifyServiceCompleted, notifyServicePastDue } from '@/lib/notifications/triggers';
 import type { NotificationKey } from '@/lib/notifications/catalog';
 
+export const config = { maxDuration: 60 };   // service-completed test renders a PDF
+
 const normDate = (v: any): string => { const t = String(v ?? '').trim(); if (!t) return ''; if (/^\d{10,}$/.test(t)) return new Date(Number(t)).toISOString().slice(0, 10); return t.slice(0, 10); };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {

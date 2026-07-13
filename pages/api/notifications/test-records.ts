@@ -6,9 +6,11 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchInspections, searchServiceWorkOrders } from '@/lib/hubspot';
+import { fetchInspections, searchServicesForPicker } from '@/lib/hubspot';
 import { templateLabel } from '@/lib/templateLabels';
 import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
+
+export const config = { maxDuration: 60 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -26,8 +28,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }));
       return res.status(200).json({ records });
     }
-    const list = (await searchServiceWorkOrders().catch(() => null)) || [];
-    const records = list.filter((s) => !s.masterServiceId).slice(0, 400).map((s) => ({
+    const list = await searchServicesForPicker(400).catch(() => []);
+    const records = list.filter((s) => !s.masterServiceId).map((s) => ({
       id: s.id,
       label: `${worktypeLabel(s.worktype)} · ${subtypeLabel(s.worktype, s.subtype)} — ${s.address}`.slice(0, 120),
       status: s.status || '',

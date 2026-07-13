@@ -1368,6 +1368,38 @@ export async function searchServiceWorkOrders(limit = 500): Promise<SampleServic
   return _svcListInflight;
 }
 
+/** Lightweight service list for pickers (admin test-send): id + label fields
+ *  only, NO locality/status enrichment and NO shared cache — so it returns fast
+ *  and can't be affected by the enriched-list path. Newest first. Fail-open→[]. */
+export async function searchServicesForPicker(limit = 300): Promise<{ id: string; worktype: string; subtype: string; address: string; status: string; masterServiceId: string }[]> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return [];
+  const out: { id: string; worktype: string; subtype: string; address: string; status: string; masterServiceId: string }[] = [];
+  let after: string | undefined;
+  try {
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({
+          limit: 100, after,
+          properties: ['service_name', 'worktype', 'subtype', 'status', 'address_snapshot', 'master_service_id'],
+          sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }],
+        }),
+      });
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        out.push({
+          id: String(r.id), worktype: p.worktype || '', subtype: p.subtype || '',
+          address: p.address_snapshot || p.service_name || `(Service ${r.id})`,
+          status: p.status || '', masterServiceId: String(p.master_service_id || '').trim(),
+        });
+      }
+      after = resp.paging?.next?.after;
+    } while (after && out.length < limit);
+  } catch (e) { console.warn('[services] picker search failed:', e); }
+  return out;
+}
+
 async function searchServiceWorkOrdersLive(limit = 500): Promise<SampleService[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
