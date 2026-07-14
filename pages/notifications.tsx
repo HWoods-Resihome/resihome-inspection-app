@@ -150,11 +150,11 @@ function AllUsersGrid() {
         {rows === null ? (
           <div className="text-[12px] text-gray-400 py-6 text-center">Loading users…</div>
         ) : (
-          <div className="overflow-x-auto -mx-1 px-1">
-            <table className="border-collapse text-[12px]">
+          <div className="w-full max-w-full overflow-x-auto overscroll-x-contain rounded-lg border border-gray-100">
+            <table className="min-w-max border-collapse text-[12px]">
               <thead>
                 <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-gray-400">
-                  <th className="py-1.5 pr-3 min-w-[160px]">User</th>
+                  <th className="py-1.5 pl-3 pr-3 min-w-[160px]">User</th>
                   <th className="px-2 py-1.5 text-left whitespace-nowrap font-bold min-w-[92px]">Last login</th>
                   {NOTIFICATIONS.map((n) => (
                     <th key={n.key} className="px-2 py-1.5 text-center font-bold min-w-[64px]" title={n.description}>
@@ -166,7 +166,7 @@ function AllUsersGrid() {
               <tbody>
                 {filtered.map((r) => (
                   <tr key={r.email} className="border-t border-gray-100">
-                    <td className="py-2 pr-3 align-middle">
+                    <td className="py-2 pl-3 pr-3 align-middle">
                       <div className="font-heading font-semibold text-ink truncate max-w-[180px]">{r.name}{kindBadge(r.kind)}</div>
                       <div className="text-[11px] text-gray-400 truncate max-w-[180px]">{r.email}</div>
                     </td>

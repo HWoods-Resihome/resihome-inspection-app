@@ -73,15 +73,15 @@
     },
     {
       "path": "/api/cron/services-generate",
-      "schedule": "0 7 * * *"
+      "schedule": "0 11 * * *"
     },
     {
       "path": "/api/cron/services-review",
-      "schedule": "30 7 * * *"
+      "schedule": "30 11 * * *"
     },
     {
       "path": "/api/cron/services-due",
-      "schedule": "0 8 * * *"
+      "schedule": "0 12 * * *"
     }
   ]
 }
