@@ -1342,6 +1342,10 @@ function mapServiceRow(r: any): SampleService {
   if (p.hs_createdate) { const e = normServiceDate(p.hs_createdate); if (e) rec.estimatedAt = e; }
   const lat = num(p.latitude); if (lat !== null) rec.lat = lat;
   const lng = num(p.longitude); if (lng !== null) rec.lng = lng;
+  // Property (or Community) ref so the map can geocode via the property's stored
+  // coords when lat/lng aren't stamped on the service yet.
+  const ref = String(p.property_id_ref || p.community_id_ref || '').trim();
+  if (ref) rec.propertyId = ref;
   return rec;
 }
 

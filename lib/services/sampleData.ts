@@ -38,6 +38,8 @@ export interface SampleService {
   onTime?: boolean;       // completed services only — landed on/before due date
   lat?: number;           // approximate property coordinates (for the map view)
   lng?: number;
+  propertyId?: string;    // Property (or Community) record id — lets the map geocode
+                          // via the property's stored coords when lat/lng are absent
   masterServiceId?: string; // set on a per-property billing line split from a community master
   forBilling?: boolean;     // this record is a billing line (children after split; masters before)
 }

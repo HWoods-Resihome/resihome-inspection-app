@@ -41,7 +41,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const s = targets[i];
       processed++;
       try {
-        const c = await resolveCoords({ address: geoAddress(s) });
+        const c = await resolveCoords({ address: geoAddress(s), propertyId: s.propertyId || '' });
         if (c) { await patchServiceWorkOrder(s.id, { latitude: c.lat, longitude: c.lng }); stamped++; }
         else noMatch++;
       } catch (e: any) {

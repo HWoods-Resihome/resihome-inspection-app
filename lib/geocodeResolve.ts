@@ -105,24 +105,34 @@ async function geocodeNominatim(address: string): Promise<Coords | null> {
   // Prefer a STRUCTURED query (street/city/state/postalcode, US only) — it honors
   // the state and ZIP, so it won't drift to a same-named street elsewhere. Fall
   // back to the free-text query only when we can't parse structured parts.
-  const p = parseUsAddress(address);
   const base = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us';
-  const url = p.street && p.city
-    ? `${base}&street=${encodeURIComponent(p.street)}&city=${encodeURIComponent(p.city)}` +
+  const headers = { 'User-Agent': 'ResiHome-Inspection-App/1.0 (property inspections)', Accept: 'application/json' };
+  const hit = async (url: string): Promise<Coords | null> => {
+    const r = await fetchWithTimeout(url, 6000, headers);
+    if (!r.ok) return null;
+    const d = await r.json();
+    const first = Array.isArray(d) ? d[0] : null;
+    const lat = Number(first?.lat);
+    const lng = Number(first?.lon);
+    return (isFinite(lat) && isFinite(lng)) ? { lat, lng, source: 'nominatim' } : null;
+  };
+
+  // 1) STRUCTURED query (street/city/state/ZIP) — precise, and won't drift to a
+  //    same-named street elsewhere. But it's EXACT: if OSM doesn't index that
+  //    exact street, it returns nothing.
+  const p = parseUsAddress(address);
+  let out: Coords | null = null;
+  if (p.street && p.city) {
+    out = await hit(`${base}&street=${encodeURIComponent(p.street)}&city=${encodeURIComponent(p.city)}` +
       (p.state ? `&state=${encodeURIComponent(p.state)}` : '') +
-      (p.postalcode ? `&postalcode=${encodeURIComponent(p.postalcode)}` : '')
-    : `${base}&q=${encodeURIComponent(address)}`;
-  const r = await fetchWithTimeout(url, 6000, {
-    'User-Agent': 'ResiHome-Inspection-App/1.0 (property inspections)',
-    Accept: 'application/json',
-  });
-  if (!r.ok) return null;
-  const d = await r.json();
-  const first = Array.isArray(d) ? d[0] : null;
-  const lat = Number(first?.lat);
-  const lng = Number(first?.lon);
-  if (isFinite(lat) && isFinite(lng)) return { lat, lng, source: 'nominatim' };
-  return null;
+      (p.postalcode ? `&postalcode=${encodeURIComponent(p.postalcode)}` : ''));
+  }
+  // 2) FREE-TEXT fallback — recovers addresses OSM lacks precisely (rural/new
+  //    streets). It may resolve to the ZIP/city area rather than the exact house,
+  //    which is still a usable map pin; the caller's state check rejects a
+  //    wrong-state match either way.
+  if (!out) out = await hit(`${base}&q=${encodeURIComponent(address)}`);
+  return out;
 }
 
 /**

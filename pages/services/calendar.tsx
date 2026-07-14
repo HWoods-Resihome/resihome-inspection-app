@@ -166,7 +166,10 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
         if (cancelled) return;
         await Promise.all(todo.slice(x, x + CONC).map(async (s) => {
           try {
-            const r = await fetch(`/api/geocode?address=${encodeURIComponent(geoAddress(s))}`, { cache: 'no-store' });
+            const qp = new URLSearchParams();
+            if (geoAddress(s)) qp.set('address', geoAddress(s));
+            if (s.propertyId) qp.set('propertyId', s.propertyId);
+            const r = await fetch(`/api/geocode?${qp.toString()}`, { cache: 'no-store' });
             const d = await r.json();
             const ok = d && typeof d.lat === 'number' && typeof d.lng === 'number';
             if (!cancelled) setCoords((c) => ({ ...c, [s.id]: ok ? { lat: d.lat, lng: d.lng } : null }));
