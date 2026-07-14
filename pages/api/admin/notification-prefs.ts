@@ -13,6 +13,7 @@ import { fetchActiveUsers, readNotificationPrefsRaw } from '@/lib/hubspot';
 import { NOTIFICATION_KEYS, type NotificationKey } from '@/lib/notifications/catalog';
 import { setNotificationPrefs } from '@/lib/notifications/prefs';
 import { SERVICE_VENDORS } from '@/lib/services/vendors';
+import { readLoginActivity } from '@/lib/loginActivity';
 
 const norm = (e?: string | null) => String(e || '').trim().toLowerCase();
 
@@ -22,25 +23,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!(await isAppAdmin(session.realEmail || session.email))) return res.status(403).json({ error: 'Admin only.' });
 
   if (req.method === 'GET') {
-    const [staff, raw] = await Promise.all([
+    const [staff, raw, logins] = await Promise.all([
       fetchActiveUsers().catch(() => []),
       readNotificationPrefsRaw().catch(() => ({} as Record<string, Record<string, boolean>>)),
+      readLoginActivity().catch(() => ({} as Record<string, { lastAt: string; count?: number; name?: string }>)),
     ]);
     const all = raw || {};
-    // Union of staff, vendors, and anyone who already has saved prefs.
-    const byEmail = new Map<string, { email: string; name: string; kind: 'staff' | 'vendor' | 'other' }>();
-    for (const u of staff) { const e = norm(u.email); if (e) byEmail.set(e, { email: u.email, name: u.fullName || u.email, kind: 'staff' }); }
-    for (const v of SERVICE_VENDORS) { const e = norm(v.email); if (e && !byEmail.has(e)) byEmail.set(e, { email: v.email, name: v.name, kind: 'vendor' }); }
-    for (const e of Object.keys(all)) { const k = norm(e); if (k && !byEmail.has(k)) byEmail.set(k, { email: e, name: e, kind: 'other' }); }
+    // Name/kind lookups for enrichment.
+    const staffByEmail = new Map(staff.map((u) => [norm(u.email), u]));
+    const vendorByEmail = new Map(SERVICE_VENDORS.map((v) => [norm(v.email), v]));
 
-    const users = Array.from(byEmail.values())
-      .map((u) => {
-        const saved = all[norm(u.email)] || {};
-        const prefs = {} as Record<NotificationKey, boolean>;
-        for (const key of NOTIFICATION_KEYS) prefs[key] = saved[key] !== false; // default ON
-        return { ...u, prefs };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
+    // Only users who have actually SIGNED IN (login store) — plus anyone with
+    // saved prefs, who must have signed in at least once (pre-tracking). This is
+    // the "logged-in users" set the admin asked for, not the full directory.
+    const candidateEmails = new Set<string>([...Object.keys(logins), ...Object.keys(all)].map(norm).filter(Boolean));
+
+    const users = Array.from(candidateEmails).map((e) => {
+      const staffU = staffByEmail.get(e);
+      const vendorU = vendorByEmail.get(e);
+      const login = logins[e];
+      const saved = all[e] || {};
+      const prefs = {} as Record<NotificationKey, boolean>;
+      for (const key of NOTIFICATION_KEYS) prefs[key] = saved[key] !== false; // default ON
+      return {
+        email: staffU?.email || vendorU?.email || e,
+        name: staffU?.fullName || vendorU?.name || login?.name || e,
+        kind: (staffU ? 'staff' : vendorU ? 'vendor' : 'other') as 'staff' | 'vendor' | 'other',
+        lastLoginAt: login?.lastAt || null,
+        prefs,
+      };
+    }).sort((a, b) => {
+      // Most-recent sign-in first; never-tracked (null) last, then by name.
+      if (!!a.lastLoginAt !== !!b.lastLoginAt) return a.lastLoginAt ? -1 : 1;
+      if (a.lastLoginAt && b.lastLoginAt && a.lastLoginAt !== b.lastLoginAt) return a.lastLoginAt < b.lastLoginAt ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
 
     return res.status(200).json({ users });
   }

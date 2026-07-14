@@ -76,6 +76,12 @@ function sessionSecret(): Uint8Array {
 }
 
 export async function createSessionCookie(user: SessionUser): Promise<string> {
+  // Stamp login activity (best-effort, throttled, never blocks). This is the one
+  // choke point every auth method funnels through, so it captures Google /
+  // Microsoft / OTP / review-link / native-exchange sign-ins uniformly. Lazy
+  // import to avoid pulling server-only HubSpot code into any client bundle that
+  // touches the cookie helpers' types.
+  void import('@/lib/loginActivity').then((m) => m.recordLogin(user.email, user.name)).catch(() => {});
   const token = await new SignJWT({
     userId: user.userId,
     email: user.email,

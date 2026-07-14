@@ -91,7 +91,13 @@ export default function NotificationSettings({ initialPrefs, access, isAdmin, em
 // Admin-only: a grid of every known user (staff + vendors + anyone with saved
 // prefs) × each notification, showing on/off and letting the admin flip any
 // toggle on a user's behalf. Reads/writes /api/admin/notification-prefs.
-interface AdminUserRow { email: string; name: string; kind: 'staff' | 'vendor' | 'other'; prefs: Record<NotificationKey, boolean>; }
+interface AdminUserRow { email: string; name: string; kind: 'staff' | 'vendor' | 'other'; lastLoginAt: string | null; prefs: Record<NotificationKey, boolean>; }
+// "Jul 13, 2:45 PM" — compact last-login stamp; em-dash when never tracked.
+function fmtLastLogin(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso); if (isNaN(+d)) return '—';
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
 function AllUsersGrid() {
   const [rows, setRows] = useState<AdminUserRow[] | null>(null);
   const [err, setErr] = useState('');
@@ -126,8 +132,8 @@ function AllUsersGrid() {
   return (
     <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
       <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
-        <div className="font-heading font-bold text-[15px] text-ink">All Users <span className="text-[11px] font-normal text-gray-400 uppercase tracking-wide">Admin</span></div>
-        <p className="text-[12px] text-gray-500 mt-0.5">Every user’s notification toggles. Tap a cell to change it on their behalf. A green switch = they receive that email.</p>
+        <div className="font-heading font-bold text-[15px] text-ink">Signed-In Users <span className="text-[11px] font-normal text-gray-400 uppercase tracking-wide">Admin</span></div>
+        <p className="text-[12px] text-gray-500 mt-0.5">Everyone who has signed in, their last login, and their notification toggles. Tap a cell to change it on their behalf. A green switch = they receive that email.</p>
       </div>
       <div className="p-3">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name or email…"
@@ -141,6 +147,7 @@ function AllUsersGrid() {
               <thead>
                 <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-gray-400">
                   <th className="sticky left-0 bg-white py-1.5 pr-3 min-w-[150px]">User</th>
+                  <th className="px-2 py-1.5 text-left whitespace-nowrap font-bold">Last login</th>
                   {NOTIFICATIONS.map((n) => (
                     <th key={n.key} className="px-2 py-1.5 text-center whitespace-nowrap font-bold" title={n.description}>{n.label}</th>
                   ))}
@@ -153,6 +160,7 @@ function AllUsersGrid() {
                       <div className="font-heading font-semibold text-ink truncate max-w-[180px]">{r.name}{kindBadge(r.kind)}</div>
                       <div className="text-[11px] text-gray-400 truncate max-w-[180px]">{r.email}</div>
                     </td>
+                    <td className="px-2 py-2 align-top whitespace-nowrap text-[11px] text-gray-500 tabular-nums">{fmtLastLogin(r.lastLoginAt)}</td>
                     {NOTIFICATIONS.map((n) => (
                       <td key={n.key} className="px-2 py-2 text-center">
                         <Toggle on={r.prefs[n.key]} disabled={savingCell === `${r.email}:${n.key}`} onClick={() => setCell(r.email, n.key, !r.prefs[n.key])} />
@@ -160,7 +168,7 @@ function AllUsersGrid() {
                     ))}
                   </tr>
                 ))}
-                {!filtered.length && <tr><td colSpan={NOTIFICATIONS.length + 1} className="py-6 text-center text-[12px] text-gray-400">No users.</td></tr>}
+                {!filtered.length && <tr><td colSpan={NOTIFICATIONS.length + 2} className="py-6 text-center text-[12px] text-gray-400">No signed-in users yet.</td></tr>}
               </tbody>
             </table>
           </div>

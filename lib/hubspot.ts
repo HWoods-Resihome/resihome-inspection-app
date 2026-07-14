@@ -5396,6 +5396,15 @@ export function writeNotificationPrefsRaw(map: Record<string, Record<string, boo
   return writeAgentJson('notification_prefs_json', 'Notification Preferences (JSON)', map);
 }
 
+/** Login activity: lowercased email → { lastAt (ISO), count, name }. Stamped at
+ *  every sign-in (see lib/loginActivity). Null when unset. */
+export function readLoginActivityRaw(): Promise<Record<string, { lastAt: string; count?: number; name?: string }> | null> {
+  return readAgentJson<Record<string, { lastAt: string; count?: number; name?: string }>>('login_activity_json');
+}
+export function writeLoginActivityRaw(map: Record<string, { lastAt: string; count?: number; name?: string }>): Promise<boolean> {
+  return writeAgentJson('login_activity_json', 'Login Activity (JSON)', map);
+}
+
 /** A learned service-check candidate produced by the review-learning loop. */
 export interface AutoServiceCheckCandidate {
   signature: string;
