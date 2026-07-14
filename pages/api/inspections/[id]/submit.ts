@@ -379,9 +379,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       detail: isRateCard ? 'Submitted for approval' : 'Submitted (completed)',
     });
 
-    // Notify the inspector their completed inspection is done (non-rate-card:
-    // rate cards CC the inspector on the finalize email instead). Best-effort.
-    if (!isRateCard && inspection) {
+    // NOTE: on a FIRST completion the "Inspection Completed" email is sent from
+    // /api/pdf (after the report PDF is generated), NOT here — at submit time the
+    // PDF doesn't exist yet, so sending here produced the reported attachment-less
+    // email. We only send here when a PDF ALREADY exists (reopen → resubmit): in
+    // that case /api/pdf sees a prior PDF and won't re-send, so this covers it
+    // with the existing report attached. (Rate cards email at finalize; QC uses
+    // qc-finalize.)
+    if (!isRateCard && inspection && (inspection.pdfMasterUrl || inspection.pdfUrl)) {
+      // A PDF already exists (e.g. reopen → resubmit) → /api/pdf won't re-send
+      // (not its first PDF), so send here WITH the existing report attached.
       await notifyInspectionCompleted({
         inspectionId: id,
         inspectorEmail: inspection.inspectorEmail,

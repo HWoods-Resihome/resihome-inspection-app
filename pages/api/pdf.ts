@@ -3,12 +3,15 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
 import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
-import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection } from '@/lib/hubspot';
+import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection, readInspectionProps, fetchInspectionById } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
 import { externalOwnedWriteDenial } from '@/lib/inspectionGuard';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 import { getPosterUrl } from '@/lib/media';
 import type { AnswerInput } from '@/lib/types';
+import { notifyInspectionCompleted } from '@/lib/notifications/triggers';
+import { appBaseUrl } from '@/lib/notifications/send';
+import { templateLabel } from '@/lib/templateLabels';
 
 export const config = {
   api: {
@@ -200,6 +203,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const tUpload = Date.now() - t3;
     console.log(`[pdf] uploaded in ${tUpload}ms`);
 
+    // Whether this is the inspection's FIRST report (no prior PDF) — used to send
+    // the completion email exactly once, WITH the PDF attached (regenerations skip).
+    let hadPdfBefore = true;
+    try {
+      const prior = await readInspectionProps(body.inspectionRecordId, ['pdf_attachment_url']);
+      hadPdfBefore = !!(prior?.pdf_attachment_url || '').toString().trim();
+    } catch { /* unknown → treat as had-before so we don't double-send */ }
+
     // Step 6: patch Inspection record with PDF URL + attach to Attachments card.
     await attachPdfUrlToInspection(body.inspectionRecordId, pdfUrl);
     // Store the clean short link (resolves to this PDF) so the record + UI show
@@ -224,6 +235,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     } else {
       console.warn('[pdf] no pdfFileId returned from upload; cannot attach to record');
+    }
+
+    // Completion email — sent HERE (not at submit) so the report PDF is actually
+    // ready to attach. The submit endpoint fires before this PDF exists, which is
+    // why the emailed report came through with no attachment. One-shot: only on the
+    // first PDF, and only for a COMPLETED non-rate-card inspection (rate cards email
+    // at finalize; QC uses its own finalize). Best-effort — never blocks the PDF.
+    if (!hadPdfBefore) {
+      try {
+        const insp = await fetchInspectionById(body.inspectionRecordId);
+        const st = (insp?.status || '').trim().toLowerCase();
+        const isRateCard = (insp?.templateType || '') === 'pm_scope_rate_card';
+        const completed = st === 'completed' || st === 'complete' || st === 'submitted';
+        if (insp && completed && !isRateCard) {
+          await notifyInspectionCompleted({
+            inspectionId: body.inspectionRecordId,
+            inspectorEmail: insp.inspectorEmail,
+            templateLabel: templateLabel(insp.templateType),
+            address: insp.propertyAddressSnapshot || insp.inspectionName || 'the property',
+            pdfUrl,
+            baseUrl: appBaseUrl(req),
+          });
+        }
+      } catch (e: any) { console.warn('[pdf] completion email skipped:', String(e?.message || e).slice(0, 140)); }
     }
 
     const total = Date.now() - t0;
