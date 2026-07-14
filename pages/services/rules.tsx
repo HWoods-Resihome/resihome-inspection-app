@@ -1044,10 +1044,11 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
               <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: valueOptsFor(rule.stopField)[0]?.value || '' } : {}) })} />
               <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Stop Criteria <span className="normal-case font-normal text-gray-400">(optional)</span></span>
             </label>
-            {/* Stop conditions are captured but NOT yet enforced by the generator
-                (it doesn't cancel/stop on these). Flagged so no one assumes they run. */}
+            {/* Property Status stop conditions ARE enforced (a property matching
+                the stop condition is dropped from generation). Date / "after N
+                services" modes are captured but not yet enforced. */}
             <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
-              Heads up: stop criteria are saved but <b>not yet enforced</b> by the generator — they’re here to capture intent while this logic is built.
+              <b>Property Status</b> stop conditions are enforced (matching homes stop generating). The <b>date</b> and <b>“after N services”</b> modes are saved but <b>not yet enforced</b>.
             </p>
             {rule.stopEnabled && (
               <div className="space-y-2">

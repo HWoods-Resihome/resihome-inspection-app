@@ -110,11 +110,28 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
     return enrollOp === 'is not' ? !hit : hit; // is / is any of / changes to → membership
   };
 
+  // STOP criteria (Property Status only, for now). When a rule's stop condition is
+  // on and its field is Property Status, a property whose CURRENT status meets the
+  // stop condition is dropped from generation — e.g. "stop when Property Status is
+  // Occupied" halts new grass cuts the moment the home is occupied. Date/count stop
+  // modes are still not enforced (flagged in the rule UI).
+  const stopOn = p.stop_enabled === 'true' && (p.stop_mode || 'condition') === 'condition';
+  const stopField = String(p.stop_field || '').toLowerCase();
+  const stopOp = String(p.stop_op || 'is');
+  const stopVal = String(p.stop_value || '').trim().toLowerCase();
+  const stopMatch = (status: string): boolean => {
+    if (!stopOn || !stopVal || !/status/.test(stopField)) return false; // no usable stop → never stop
+    const s = (status || '').trim().toLowerCase();
+    const hit = s === stopVal || s.startsWith(stopVal) || s.includes(stopVal);
+    return stopOp === 'is not' ? !hit : hit; // is / is any of → membership; is not → negated
+  };
+
   const included = new Set(parseArr(p.included_props_json).map(String));
   const listMode = p.props_mode === 'list';
   return props
     .filter((prop) => !listMode || included.has(prop.id))
     .filter((prop) => statusMatch(prop.status))
+    .filter((prop) => !stopMatch(prop.status))   // stop condition met → exclude
     .map((prop) => ({ id: prop.id, scope: 'property' as const, address: prop.address, locality: prop.locality, region: prop.region }));
 }
 

@@ -99,17 +99,20 @@ function fmtLastLogin(iso: string | null): string {
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 function AllUsersGrid() {
+  const [open, setOpen] = useState(false);   // collapsed by default (it's a big grid)
   const [rows, setRows] = useState<AdminUserRow[] | null>(null);
   const [err, setErr] = useState('');
   const [q, setQ] = useState('');
   const [savingCell, setSavingCell] = useState<string>(''); // `${email}:${key}`
 
+  // Fetch lazily the first time the section is expanded.
   useEffect(() => {
+    if (!open || rows !== null) return;
     fetch('/api/admin/notification-prefs')
       .then((r) => r.json())
       .then((d) => { if (Array.isArray(d.users)) setRows(d.users); else setErr(d.error || 'Could not load users.'); })
       .catch(() => setErr('Couldn’t reach the server.'));
-  }, []);
+  }, [open, rows]);
 
   const setCell = async (email: string, key: NotificationKey, next: boolean) => {
     setRows((rs) => rs && rs.map((r) => r.email === email ? { ...r, prefs: { ...r.prefs, [key]: next } } : r));
@@ -131,10 +134,15 @@ function AllUsersGrid() {
 
   return (
     <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
-      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
-        <div className="font-heading font-bold text-[15px] text-ink">Signed-In Users <span className="text-[11px] font-normal text-gray-400 uppercase tracking-wide">Admin</span></div>
-        <p className="text-[12px] text-gray-500 mt-0.5">Everyone who has signed in, their last login, and their notification toggles. Tap a cell to change it on their behalf. A green switch = they receive that email.</p>
-      </div>
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-left">
+        <div className="min-w-0">
+          <div className="font-heading font-bold text-[15px] text-ink">All Users <span className="text-[11px] font-normal text-gray-400 uppercase tracking-wide">Admin</span></div>
+          <p className="text-[12px] text-gray-500 mt-0.5">Vendors + anyone ever assigned to an inspection or service. Tap a cell to change a toggle on their behalf; green = they receive that email.</p>
+        </div>
+        <span className={`shrink-0 text-gray-400 text-lg transition-transform ${open ? 'rotate-90' : ''}`}>&#9654;</span>
+      </button>
+      {open && (
       <div className="p-3">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name or email…"
           className="w-full text-[13px] px-2.5 py-2 border border-gray-300 rounded-lg bg-white text-ink focus:outline-none focus:border-brand mb-2" />
@@ -143,37 +151,40 @@ function AllUsersGrid() {
           <div className="text-[12px] text-gray-400 py-6 text-center">Loading users…</div>
         ) : (
           <div className="overflow-x-auto -mx-1 px-1">
-            <table className="w-full border-collapse text-[12px]">
+            <table className="border-collapse text-[12px]">
               <thead>
                 <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-gray-400">
-                  <th className="sticky left-0 bg-white py-1.5 pr-3 min-w-[150px]">User</th>
-                  <th className="px-2 py-1.5 text-left whitespace-nowrap font-bold">Last login</th>
+                  <th className="py-1.5 pr-3 min-w-[160px]">User</th>
+                  <th className="px-2 py-1.5 text-left whitespace-nowrap font-bold min-w-[92px]">Last login</th>
                   {NOTIFICATIONS.map((n) => (
-                    <th key={n.key} className="px-2 py-1.5 text-center whitespace-nowrap font-bold" title={n.description}>{n.label}</th>
+                    <th key={n.key} className="px-2 py-1.5 text-center font-bold min-w-[64px]" title={n.description}>
+                      <div className="leading-tight normal-case">{n.label}</div>
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((r) => (
                   <tr key={r.email} className="border-t border-gray-100">
-                    <td className="sticky left-0 bg-white py-2 pr-3 align-top">
+                    <td className="py-2 pr-3 align-middle">
                       <div className="font-heading font-semibold text-ink truncate max-w-[180px]">{r.name}{kindBadge(r.kind)}</div>
                       <div className="text-[11px] text-gray-400 truncate max-w-[180px]">{r.email}</div>
                     </td>
-                    <td className="px-2 py-2 align-top whitespace-nowrap text-[11px] text-gray-500 tabular-nums">{fmtLastLogin(r.lastLoginAt)}</td>
+                    <td className="px-2 py-2 align-middle whitespace-nowrap text-[11px] text-gray-500 tabular-nums">{fmtLastLogin(r.lastLoginAt)}</td>
                     {NOTIFICATIONS.map((n) => (
-                      <td key={n.key} className="px-2 py-2 text-center">
+                      <td key={n.key} className="px-2 py-2 text-center align-middle">
                         <Toggle on={r.prefs[n.key]} disabled={savingCell === `${r.email}:${n.key}`} onClick={() => setCell(r.email, n.key, !r.prefs[n.key])} />
                       </td>
                     ))}
                   </tr>
                 ))}
-                {!filtered.length && <tr><td colSpan={NOTIFICATIONS.length + 2} className="py-6 text-center text-[12px] text-gray-400">No signed-in users yet.</td></tr>}
+                {!filtered.length && <tr><td colSpan={NOTIFICATIONS.length + 2} className="py-6 text-center text-[12px] text-gray-400">No assigned users or vendors yet.</td></tr>}
               </tbody>
             </table>
           </div>
         )}
       </div>
+      )}
     </section>
   );
 }

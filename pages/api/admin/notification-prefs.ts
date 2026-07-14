@@ -9,11 +9,13 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchActiveUsers, readNotificationPrefsRaw } from '@/lib/hubspot';
+import { fetchActiveUsers, readNotificationPrefsRaw, fetchInspections, searchServiceWorkOrders } from '@/lib/hubspot';
 import { NOTIFICATION_KEYS, type NotificationKey } from '@/lib/notifications/catalog';
 import { setNotificationPrefs } from '@/lib/notifications/prefs';
-import { SERVICE_VENDORS } from '@/lib/services/vendors';
+import { SERVICE_VENDORS, vendorEmail as vendorEmailFor } from '@/lib/services/vendors';
 import { readLoginActivity } from '@/lib/loginActivity';
+
+export const config = { maxDuration: 60 };
 
 const norm = (e?: string | null) => String(e || '').trim().toLowerCase();
 
@@ -23,22 +25,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!(await isAppAdmin(session.realEmail || session.email))) return res.status(403).json({ error: 'Admin only.' });
 
   if (req.method === 'GET') {
-    const [staff, raw, logins] = await Promise.all([
+    const [staff, raw, logins, inspections, services] = await Promise.all([
       fetchActiveUsers().catch(() => []),
       readNotificationPrefsRaw().catch(() => ({} as Record<string, Record<string, boolean>>)),
       readLoginActivity().catch(() => ({} as Record<string, { lastAt: string; count?: number; name?: string }>)),
+      fetchInspections().catch(() => []),
+      searchServiceWorkOrders().catch(() => null),
     ]);
     const all = raw || {};
-    // Name/kind lookups for enrichment.
     const staffByEmail = new Map(staff.map((u) => [norm(u.email), u]));
     const vendorByEmail = new Map(SERVICE_VENDORS.map((v) => [norm(v.email), v]));
 
-    // Only users who have actually SIGNED IN (login store) — plus anyone with
-    // saved prefs, who must have signed in at least once (pre-tracking). This is
-    // the "logged-in users" set the admin asked for, not the full directory.
-    const candidateEmails = new Set<string>([...Object.keys(logins), ...Object.keys(all)].map(norm).filter(Boolean));
+    // The list is limited to people actually tied to work: anyone ever ASSIGNED
+    // as an inspection's inspector or a service's vendor, plus the vendor
+    // registry. Everyone else (staff who've never been assigned, etc.) is left
+    // off. We collect a best display name from those same records for non-staff
+    // assignees (external 1099 inspectors).
+    const nameByEmail = new Map<string, string>();
+    const candidates = new Set<string>();
+    for (const i of inspections) {
+      const e = norm(i.inspectorEmail);
+      if (e) { candidates.add(e); if (i.inspectorName && !nameByEmail.has(e)) nameByEmail.set(e, i.inspectorName); }
+    }
+    for (const s of (services || [])) {
+      const e = norm(s.vendorEmail || vendorEmailFor(s.vendor) || '');
+      if (e) { candidates.add(e); if (s.vendor && !nameByEmail.has(e)) nameByEmail.set(e, s.vendor); }
+    }
+    for (const v of SERVICE_VENDORS) { const e = norm(v.email); if (e) { candidates.add(e); if (!nameByEmail.has(e)) nameByEmail.set(e, v.name); } }
 
-    const users = Array.from(candidateEmails).map((e) => {
+    const users = Array.from(candidates).map((e) => {
       const staffU = staffByEmail.get(e);
       const vendorU = vendorByEmail.get(e);
       const login = logins[e];
@@ -47,13 +62,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       for (const key of NOTIFICATION_KEYS) prefs[key] = saved[key] !== false; // default ON
       return {
         email: staffU?.email || vendorU?.email || e,
-        name: staffU?.fullName || vendorU?.name || login?.name || e,
-        kind: (staffU ? 'staff' : vendorU ? 'vendor' : 'other') as 'staff' | 'vendor' | 'other',
+        name: staffU?.fullName || vendorU?.name || nameByEmail.get(e) || login?.name || e,
+        kind: (vendorU ? 'vendor' : staffU ? 'staff' : 'other') as 'staff' | 'vendor' | 'other',
         lastLoginAt: login?.lastAt || null,
         prefs,
       };
     }).sort((a, b) => {
-      // Most-recent sign-in first; never-tracked (null) last, then by name.
+      // Vendors first (they're the primary dispatch audience), then most-recent
+      // sign-in, then name.
+      if ((a.kind === 'vendor') !== (b.kind === 'vendor')) return a.kind === 'vendor' ? -1 : 1;
       if (!!a.lastLoginAt !== !!b.lastLoginAt) return a.lastLoginAt ? -1 : 1;
       if (a.lastLoginAt && b.lastLoginAt && a.lastLoginAt !== b.lastLoginAt) return a.lastLoginAt < b.lastLoginAt ? 1 : -1;
       return a.name.localeCompare(b.name);
