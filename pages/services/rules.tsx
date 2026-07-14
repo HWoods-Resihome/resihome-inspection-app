@@ -52,25 +52,25 @@ const VENDOR_OPEN: Record<string, number> = SAMPLE_SERVICES.reduce((m, s) => {
 const DEFAULT_MARKUP = '20';   // default markup % on all services
 const baseRate = (wt: Worktype, sub: string): string => { const r = defaultRateFor(wt, sub); return r != null ? String(r) : ''; };
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-// Curated Property (and associated-Deal) fields for enrollment / stop criteria,
-// each with its own value options so the value picker "flows" from the chosen
-// field. (Sample list for now; expands as we wire the real Property + Deal objects.)
+// Enrollment / stop criteria fields. LIMITED to the fields the generator actually
+// evaluates (lib/services/generate matchCriterion): Property Status (membership/
+// prefix) and RRQC Pass Date (is-known). The old list also offered Home Type,
+// Recurring Services, Has Pool, Occupancy, and Deal Stage — none did any real
+// logic (they fell through to "include everything"), so they were removed to
+// avoid implying rules that don't exist. Re-add a field here only once the
+// generator can evaluate it.
 const PROPERTY_FIELDS: { field: string; options: string[] }[] = [
   { field: 'Property Status', options: ['Vacant', 'Pending MOI/Rekey', 'Occupied', 'Under Turnkey', 'Eviction'] },
-  { field: 'Home Type', options: ['Single-Family', 'Townhome', 'Condo', 'Duplex'] },
-  { field: 'Recurring Services', options: ['Enrolled', 'Paused', 'Not Enrolled'] },
-  { field: 'Has Pool', options: ['Yes', 'No'] },
-  { field: 'Occupancy', options: ['Vacant', 'Occupied'] },
-  // Associated leasing-pipeline Deal stage — powers event-triggered, run-once
-  // dispatches like move-in cleans (enroll on the transition INTO a stage).
-  { field: 'Deal Stage', options: ['Application', 'Approved', 'Lease Signed', 'Move-In Scheduled', 'Moved In', 'Leased'] },
   // Date field (no enum values) — used with "is known" to gate community grass-cut
   // eligibility on properties that have passed RRQC (`rrqc_pass_date`).
   { field: 'RRQC Pass Date', options: [] },
 ];
 const FIELD_NAMES = PROPERTY_FIELDS.map((f) => f.field);
 const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field)?.options ?? [];
-const OPS = ['is', 'is any of', 'is not', 'changes to', 'is known'];
+// Operators the generator honors. "changes to" was removed — it can't detect a
+// transition at generation time (no field history), so it silently behaved as
+// plain membership; keeping it implied event-triggering that isn't built.
+const OPS = ['is', 'is any of', 'is not', 'is known'];
 interface EnrollCriterion { field: string; op: string; vals: string[] }
 // Community + Landscaping + Grass Cut defaults its enrollment to "RRQC Pass Date
 // is known" (the per-house eligibility gate). Admin can add/change criteria after.
@@ -182,7 +182,7 @@ const SEED: Rule[] = [
     initialDueDays: '5', skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
     enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }],
-    stopEnabled: true, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
+    stopEnabled: true, stopMode: 'condition', stopField: 'Property Status', stopOp: 'is', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
@@ -192,19 +192,21 @@ const SEED: Rule[] = [
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
     enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }],
-    stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
+    stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'is', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
   {
-    // Event-triggered, run-once dispatch: a move-in clean created when the
-    // associated leasing Deal reaches "Move-In Scheduled". Non-recurring.
+    // Run-once dispatch: a move-in clean for a home about to be occupied. (The
+    // original Deal-Stage "changes to Move-In Scheduled" trigger was removed —
+    // Deal Stage carried no generator logic; enroll on Property Status until an
+    // event trigger is actually built.)
     id: 3, name: 'ATL Move-In Cleans', active: true, worktype: 'cleaning', subtype: 'move_in_clean', petStations: false, scope: 'property',
     portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('cleaning', 'move_in_clean'),
     recurring: false,
     cadences: [],
     initialDueDays: '2', skipMonths: [],
-    enrollField: 'Deal Stage', enrollOp: 'changes to', enrollVals: ['Move-In Scheduled'],
-    enrollCriteria: [{ field: 'Deal Stage', op: 'changes to', vals: ['Move-In Scheduled'] }],
-    stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
+    enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Pending MOI/Rekey'],
+    enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Pending MOI/Rekey'] }],
+    stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'is', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
 ];
 
@@ -245,7 +247,7 @@ function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule 
     enrollField: p.enroll_field || 'Property Status', enrollOp: p.enroll_op || 'is', enrollVals: parseVals(p.enroll_value),
     enrollCriteria: parseCriteria(p),
     stopEnabled: p.stop_enabled === 'true', stopMode: (p.stop_mode || 'condition') as Rule['stopMode'],
-    stopField: p.stop_field || 'Property Status', stopOp: p.stop_op || 'changes to', stopVal: p.stop_value || '',
+    stopField: p.stop_field || 'Property Status', stopOp: p.stop_op || 'is', stopVal: p.stop_value || '',
     stopDate: p.stop_date ? String(p.stop_date).slice(0, 10) : '', stopCount: p.stop_count != null ? String(p.stop_count) : '',
   };
 }
@@ -1038,10 +1040,15 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
               <button type="button" onClick={addCrit}
                 className="text-[12px] font-semibold text-brand border border-brand/40 rounded-lg px-2.5 py-1 bg-white hover:bg-brand/5">+ Add criterion</button>
             </div>
-            <label className="flex items-center gap-2 mb-2 cursor-pointer">
+            <label className="flex items-center gap-2 mb-1 cursor-pointer">
               <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: valueOptsFor(rule.stopField)[0]?.value || '' } : {}) })} />
               <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Stop Criteria <span className="normal-case font-normal text-gray-400">(optional)</span></span>
             </label>
+            {/* Stop conditions are captured but NOT yet enforced by the generator
+                (it doesn't cancel/stop on these). Flagged so no one assumes they run. */}
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
+              Heads up: stop criteria are saved but <b>not yet enforced</b> by the generator — they’re here to capture intent while this logic is built.
+            </p>
             {rule.stopEnabled && (
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">

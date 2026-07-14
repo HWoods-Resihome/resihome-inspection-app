@@ -81,9 +81,92 @@ export default function NotificationSettings({ initialPrefs, access, isAdmin, em
           </section>
         ))}
         {err && <p className="text-[12px] text-red-600">{err}</p>}
+        {isAdmin && <AllUsersGrid />}
         {isAdmin && <TestSend email={email} access={access} />}
       </main>
     </div>
+  );
+}
+
+// Admin-only: a grid of every known user (staff + vendors + anyone with saved
+// prefs) × each notification, showing on/off and letting the admin flip any
+// toggle on a user's behalf. Reads/writes /api/admin/notification-prefs.
+interface AdminUserRow { email: string; name: string; kind: 'staff' | 'vendor' | 'other'; prefs: Record<NotificationKey, boolean>; }
+function AllUsersGrid() {
+  const [rows, setRows] = useState<AdminUserRow[] | null>(null);
+  const [err, setErr] = useState('');
+  const [q, setQ] = useState('');
+  const [savingCell, setSavingCell] = useState<string>(''); // `${email}:${key}`
+
+  useEffect(() => {
+    fetch('/api/admin/notification-prefs')
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d.users)) setRows(d.users); else setErr(d.error || 'Could not load users.'); })
+      .catch(() => setErr('Couldn’t reach the server.'));
+  }, []);
+
+  const setCell = async (email: string, key: NotificationKey, next: boolean) => {
+    setRows((rs) => rs && rs.map((r) => r.email === email ? { ...r, prefs: { ...r.prefs, [key]: next } } : r));
+    setSavingCell(`${email}:${key}`); setErr('');
+    try {
+      const r = await fetch('/api/admin/notification-prefs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, prefs: { [key]: next } }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); setErr(d.error || 'Could not save.'); setRows((rs) => rs && rs.map((row) => row.email === email ? { ...row, prefs: { ...row.prefs, [key]: !next } } : row)); }
+    } catch { setErr('Couldn’t reach the server.'); setRows((rs) => rs && rs.map((row) => row.email === email ? { ...row, prefs: { ...row.prefs, [key]: !next } } : row)); }
+    finally { setSavingCell(''); }
+  };
+
+  const kindBadge = (k: AdminUserRow['kind']) => k === 'vendor'
+    ? <span className="ml-1.5 text-[9px] font-bold uppercase tracking-wide text-cyan-700 bg-cyan-50 border border-cyan-200 rounded px-1 py-px">Vendor</span>
+    : k === 'other' ? <span className="ml-1.5 text-[9px] font-bold uppercase tracking-wide text-gray-500 bg-gray-100 border border-gray-200 rounded px-1 py-px">Ext</span> : null;
+
+  const filtered = (rows || []).filter((r) => !q.trim() || `${r.name} ${r.email}`.toLowerCase().includes(q.trim().toLowerCase()));
+
+  return (
+    <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+        <div className="font-heading font-bold text-[15px] text-ink">All Users <span className="text-[11px] font-normal text-gray-400 uppercase tracking-wide">Admin</span></div>
+        <p className="text-[12px] text-gray-500 mt-0.5">Every user’s notification toggles. Tap a cell to change it on their behalf. A green switch = they receive that email.</p>
+      </div>
+      <div className="p-3">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name or email…"
+          className="w-full text-[13px] px-2.5 py-2 border border-gray-300 rounded-lg bg-white text-ink focus:outline-none focus:border-brand mb-2" />
+        {err && <p className="text-[12px] text-red-600 mb-2">{err}</p>}
+        {rows === null ? (
+          <div className="text-[12px] text-gray-400 py-6 text-center">Loading users…</div>
+        ) : (
+          <div className="overflow-x-auto -mx-1 px-1">
+            <table className="w-full border-collapse text-[12px]">
+              <thead>
+                <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                  <th className="sticky left-0 bg-white py-1.5 pr-3 min-w-[150px]">User</th>
+                  {NOTIFICATIONS.map((n) => (
+                    <th key={n.key} className="px-2 py-1.5 text-center whitespace-nowrap font-bold" title={n.description}>{n.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r) => (
+                  <tr key={r.email} className="border-t border-gray-100">
+                    <td className="sticky left-0 bg-white py-2 pr-3 align-top">
+                      <div className="font-heading font-semibold text-ink truncate max-w-[180px]">{r.name}{kindBadge(r.kind)}</div>
+                      <div className="text-[11px] text-gray-400 truncate max-w-[180px]">{r.email}</div>
+                    </td>
+                    {NOTIFICATIONS.map((n) => (
+                      <td key={n.key} className="px-2 py-2 text-center">
+                        <Toggle on={r.prefs[n.key]} disabled={savingCell === `${r.email}:${n.key}`} onClick={() => setCell(r.email, n.key, !r.prefs[n.key])} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {!filtered.length && <tr><td colSpan={NOTIFICATIONS.length + 1} className="py-6 text-center text-[12px] text-gray-400">No users.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
