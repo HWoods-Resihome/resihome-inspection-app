@@ -148,8 +148,41 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
     return { order, color, counts, vendors };
   }, [view, visible]);
 
+  // Geocode visible services that don't already carry coordinates. Real Service
+  // Work Orders rarely have latitude/longitude stamped (only the sample data
+  // does), so without this the map has nothing to plot and shows no dots. Mirrors
+  // the inspections calendar: small concurrency, cached per service id, and a
+  // null cache entry marks a confirmed miss so we don't re-request it.
+  const [coords, setCoords] = useState<Record<string, { lat: number; lng: number } | null>>({});
+  const geoAddress = (s: SampleService) => [s.address, s.locality].map((x) => (x || '').trim()).filter(Boolean).join(', ');
+  useEffect(() => {
+    const todo = visible.filter((s) =>
+      !(Number.isFinite(s.lat) && Number.isFinite(s.lng)) && coords[s.id] === undefined && geoAddress(s).length >= 5);
+    if (!todo.length) return;
+    let cancelled = false;
+    (async () => {
+      const CONC = 4;
+      for (let x = 0; x < todo.length; x += CONC) {
+        if (cancelled) return;
+        await Promise.all(todo.slice(x, x + CONC).map(async (s) => {
+          try {
+            const r = await fetch(`/api/geocode?address=${encodeURIComponent(geoAddress(s))}`, { cache: 'no-store' });
+            const d = await r.json();
+            const ok = d && typeof d.lat === 'number' && typeof d.lng === 'number';
+            if (!cancelled) setCoords((c) => ({ ...c, [s.id]: ok ? { lat: d.lat, lng: d.lng } : null }));
+          } catch { if (!cancelled) setCoords((c) => ({ ...c, [s.id]: null })); }
+        }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const mapItems: MapItem[] = visible.flatMap((s) => {
-    if (!Number.isFinite(s.lat) || !Number.isFinite(s.lng)) return [];
+    // Prefer coordinates stamped on the record; otherwise use the geocoded fix.
+    const c = (Number.isFinite(s.lat) && Number.isFinite(s.lng))
+      ? { lat: s.lat as number, lng: s.lng as number }
+      : coords[s.id];
+    if (!c) return [];
     const d = parse(s.dueDate);
     const done = s.status === 'completed';
     const stopNum = view === 'day' && done ? dayRoute.order.get(s.id) : undefined;
@@ -159,7 +192,7 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
     // Uses the shared ServicesMap API: subtitle + detail, and routeOrder/routeGroup
     // (day-view completed) which the map draws as numbered dots joined per vendor.
     return [{
-      id: s.id, lat: s.lat as number, lng: s.lng as number, color,
+      id: s.id, lat: c.lat, lng: c.lng, color,
       title: s.address, href: `/services/${s.id}`,
       subtitle: `${worktypeLabel(s.worktype)} · ${subtypeLabel(s.worktype, s.subtype)} · ${serviceStatusText(s.status, canSeeAll)}`,
       detail: [`${done ? 'Done' : 'Due'} ${d.getMonth() + 1}/${d.getDate()}`, t, vendor].filter(Boolean).join(' · '),
