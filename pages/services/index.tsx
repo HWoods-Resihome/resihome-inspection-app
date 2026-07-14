@@ -20,7 +20,8 @@ import {
   type ServiceStatus, type SampleService,
 } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
-import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
+import { setViewAsVendor } from '@/lib/services/viewAs';
+import { resolveServiceViewer, scopeServices } from '@/lib/services/scope';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
@@ -30,10 +31,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   // Per-property billing lines split from a community grass-cut master roll UP
   // into the master — hide the children from the operational list (the master
   // drill-down and the billing view surface them). See RECURRING_SERVICES_PLAN.md.
-  const services = (real ?? SAMPLE_SERVICES).filter((s) => !s.masterServiceId);
-  // "View as Vendor" persists via cookie (whole-app), with the legacy ?as=vendor
-  // query still honored as an entry point.
-  const asVendor = isViewingAsVendor(ctx.req) || ctx.query.as === 'vendor';
+  const operational = (real ?? SAMPLE_SERVICES).filter((s) => !s.masterServiceId);
+  // Scope to the viewer: a vendor (real login OR "View as Vendor" preview) only
+  // ever RECEIVES their own services — never the whole operational list.
+  const viewer = resolveServiceViewer(session?.email, ctx.req);
+  const services = scopeServices(operational, viewer);
+  const asVendor = !viewer.canSeeAll || ctx.query.as === 'vendor';
   return {
     props: {
       userName: session?.name || session?.email || '',

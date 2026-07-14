@@ -8,7 +8,8 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
-import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, easternTodayISO, type ServiceStatus } from '@/lib/services/sampleData';
+import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, easternTodayISO, type ServiceStatus, type SampleService } from '@/lib/services/sampleData';
+import { resolveServiceViewer, serviceVisibleTo } from '@/lib/services/scope';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
 import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
@@ -74,10 +75,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const id = String(ctx.params?.id || '');
 
   let svc: ServiceView | null = null;
+  let svcVendorEmail: string | null = null;  // for the vendor-ownership guard below
   if (/^\d+$/.test(id)) {
     const rec = await fetchServiceWorkOrder(id).catch(() => null);
     if (rec) {
       const p = rec.props;
+      svcVendorEmail = String(p.vendor_email || '').trim() || null;
       svc = {
         id: rec.id, live: true,
         worktype: (p.worktype || 'landscaping') as Worktype, subtype: p.subtype || '',
@@ -102,6 +105,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     }
   } else {
     const s = SAMPLE_SERVICES.find((x) => x.id === id);
+    if (s) svcVendorEmail = s.vendorEmail || null;
     if (s) svc = {
       id: s.id, live: false, worktype: s.worktype, subtype: s.subtype, scope: s.scope,
       address: s.address, locality: s.locality, vendor: s.vendor, dueDate: s.dueDate,
@@ -115,6 +119,13 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     };
   }
   if (!svc) return { redirect: { destination: '/services', permanent: false } };
+  // Vendor-ownership guard: a vendor (real login OR "View as Vendor" preview) may
+  // only open a service assigned to them — a direct URL to someone else's service
+  // bounces back to the list. Internal admins (canSeeAll) are unrestricted.
+  const viewer = resolveServiceViewer(session?.email, ctx.req);
+  if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: svc.vendor, vendorEmail: svcVendorEmail } as SampleService, viewer)) {
+    return { redirect: { destination: '/services', permanent: false } };
+  }
   const savedForms = await readServiceForms().catch(() => null);
   const formSet: Record<string, any[]> = { ...SAMPLE_FORMS, ...(savedForms || {}) };
   const form = (formSet[formKey(svc.worktype, svc.subtype)] || []).filter((q: any) => q.enabled);

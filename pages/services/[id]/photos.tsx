@@ -10,6 +10,8 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
+import { resolveServiceViewer, serviceVisibleTo } from '@/lib/services/scope';
+import type { SampleService } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder } from '@/lib/hubspot';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 
@@ -31,6 +33,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const rec = await fetchServiceWorkOrder(id).catch(() => null);
   if (!rec) return { redirect: { destination: '/services', permanent: false } };
   const p = rec.props;
+  // Vendor-ownership guard (mirrors the service detail page): a vendor may only
+  // view photos for a service assigned to them.
+  const viewer = resolveServiceViewer(session?.email, ctx.req);
+  if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: p.vendor_name || null, vendorEmail: String(p.vendor_email || '').trim() || null } as SampleService, viewer)) {
+    return { redirect: { destination: '/services', permanent: false } };
+  }
   const groups: { id: string; name: string }[] = [];
   const photosByGroup: Record<string, string[]> = {};
   const add = (gid: string, name: string, urls: string[]) => { if (urls.length) { groups.push({ id: gid, name }); photosByGroup[gid] = urls; } };

@@ -32,6 +32,7 @@ export interface SampleService {
   propertyStatus?: string; // the PROPERTY's status (SFR only), like the inspection cards
   petStations?: boolean;   // community services that include dedicated pet-station photos
   vendor: string | null;
+  vendorEmail?: string | null; // assigned vendor's email — used to scope a vendor's view to their own
   dueDate: string;        // ISO date (YYYY-MM-DD)
   estimatedAt?: string;   // ISO date — when an estimated (bid) service was created
   completedAt?: string;   // ISO datetime — completed services only (drives day-view route order)

@@ -1326,6 +1326,7 @@ function mapServiceRow(r: any): SampleService {
     vendor: p.vendor_name || null,
     dueDate: normServiceDate(p.due_date),
   };
+  if (String(p.vendor_email || '').trim()) rec.vendorEmail = String(p.vendor_email).trim();
   if (p.is_bid_item === 'true') rec.isBidItem = true;
   if (String(p.master_service_id || '').trim()) rec.masterServiceId = String(p.master_service_id).trim();
   if (p.for_billing === 'true') rec.forBilling = true;

@@ -6,8 +6,7 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { isInternalEmail } from '@/lib/userAccess';
-import { isViewingAsVendor } from '@/lib/services/viewAs';
+import { resolveServiceViewer, scopeServices } from '@/lib/services/scope';
 import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
@@ -26,8 +25,11 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   const real = await searchServiceWorkOrders().catch(() => null);
-  const canSeeAll = isInternalEmail(session?.email) && !isViewingAsVendor(ctx.req);
-  return { props: { canSeeAll, services: real ?? SAMPLE_SERVICES, live: !!real } };
+  // Scope to the viewer: internal admins see all; a vendor (real login OR an
+  // internal "View as Vendor" preview) only ever RECEIVES their own services.
+  const viewer = resolveServiceViewer(session?.email, ctx.req);
+  const services = scopeServices(real ?? SAMPLE_SERVICES, viewer);
+  return { props: { canSeeAll: viewer.canSeeAll, services, live: !!real } };
 };
 
 type View = 'month' | 'week' | 'day';
