@@ -131,13 +131,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (isHeic) {
       const jpeg = await sharp(buf).rotate().jpeg({ quality: 82 }).toBuffer();
       res.setHeader('Content-Type', 'image/jpeg');
-      res.setHeader('Cache-Control', 'private, max-age=86400');
+      // A given file URL's bytes are immutable, so cache hard (like thumbnails).
+      // The old 1-day/5-min windows made the SAME photo re-fetch repeatedly during
+      // a session — hundreds of proxy hits from one phone, which trips Vercel's
+      // automatic DDoS challenge and then blocks fetch() calls (AI review, upload).
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
       return res.status(200).send(jpeg);
     }
 
     if (ct && !ct.startsWith('image/')) return res.status(415).json({ error: 'Not an image' });
     res.setHeader('Content-Type', ct || 'image/jpeg');
-    res.setHeader('Cache-Control', 'private, max-age=300');
+    // Immutable per URL → cache hard so repeat renders hit the browser/edge cache
+    // instead of re-requesting (was max-age=300, which re-fetched every 5 min and
+    // inflated the request burst that triggers the DDoS challenge).
+    res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
     return res.status(200).send(buf);
   } catch (e) {
     if (e instanceof ProxyFetchError) return res.status(e.status).json({ error: e.message });
