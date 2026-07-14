@@ -322,15 +322,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const host = req.headers['x-forwarded-host'] || req.headers.host;
         const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
         if (host) {
-          const r = await fetch(`${proto}://${host}/api/inspections/${id}/finalize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', cookie: req.headers.cookie || '' },
-            body: JSON.stringify({ regenerateOnly: true }),
-          });
-          if (!r.ok) console.warn(`[submit] review PDF pre-generate returned HTTP ${r.status}`);
+          // BOUND this self-call so it can never starve the Slack post below. It's
+          // an awaited fetch to finalize (which downloads + embeds + downscales
+          // photos and is capped at 60s); with no timeout a hung/slow finalize
+          // could block submit until its own limit and the pending-approval Slack
+          // card would never fire (observed: big scopes submitted but no card
+          // posted). If the PDF isn't ready in time we post the card WITHOUT the
+          // "Open report" link — finalize regenerates the PDF at approval anyway.
+          const ctrl = new AbortController();
+          const to = setTimeout(() => ctrl.abort(), 75000);
+          try {
+            const r = await fetch(`${proto}://${host}/api/inspections/${id}/finalize`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', cookie: req.headers.cookie || '' },
+              body: JSON.stringify({ regenerateOnly: true }),
+              signal: ctrl.signal,
+            });
+            if (!r.ok) console.warn(`[submit] review PDF pre-generate returned HTTP ${r.status}`);
+          } finally {
+            clearTimeout(to);
+          }
         }
       } catch (e) {
-        console.warn('[submit] review PDF pre-generate failed (continuing):', e);
+        console.warn('[submit] review PDF pre-generate failed/timed out (continuing to Slack post):', e);
       }
       // Scope PENDING APPROVAL Slack notification (ported from HubSpot Workflow
       // A): region → POD channel → post the pending card → write back the
