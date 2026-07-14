@@ -9,6 +9,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { createServiceWorkOrder } from '@/lib/hubspot';
 import { vendorEmail } from '@/lib/services/vendors';
+import { resolveCoords } from '@/lib/geocodeResolve';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -39,6 +40,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ...(b.markupPct !== '' && b.markupPct != null ? { markup_pct: Number(b.markupPct) } : {}),
     ...(b.clientCost !== '' && b.clientCost != null ? { client_cost: Number(b.clientCost) } : {}),
   };
+
+  // Stamp reference coordinates (best-effort) so the map plots it without a live
+  // geocode. Property scope resolves via the property; community via its name/loc.
+  try {
+    const c = await resolveCoords({
+      address: [address, locality].filter(Boolean).join(', '),
+      propertyId: scope === 'property' ? String(b.propertyId || '') : String(b.communityId || ''),
+    });
+    if (c) { props.latitude = c.lat; props.longitude = c.lng; }
+  } catch { /* non-fatal — map falls back to live geocoding */ }
 
   try {
     const id = await createServiceWorkOrder(props);

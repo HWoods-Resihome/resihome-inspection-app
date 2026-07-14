@@ -143,6 +143,11 @@ export interface InspectionSummary {
   // HubSpot Property record id (property_id_ref) — lets Insights join rows to the
   // property (e.g. future map). Optional; list mapper only.
   propertyRecordId?: string | null;
+  // Reference coordinates stamped at creation (property coords / geocoded), so the
+  // calendar map can plot the pin without a live geocode. Null when absent (older
+  // records) — the map then falls back to client-side geocoding. List mapper only.
+  lat?: number | null;
+  lng?: number | null;
   // TRUE for an inspection that was STARTED OFFLINE and hasn't synced to HubSpot
   // yet (lib/pendingInspections). The home list merges these in so they're
   // re-openable, and the card shows a "Not synced" badge. Cleared once the

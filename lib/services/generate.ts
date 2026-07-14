@@ -22,6 +22,7 @@
  *  - No vendor rotation — the first assigned vendor is used for every order.
  */
 import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties } from '@/lib/hubspot';
+import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { vendorEmail } from './vendors';
 import { notifyServiceAssigned } from '@/lib/notifications/triggers';
@@ -264,6 +265,18 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         if (Number.isFinite(vendorCost)) orderProps.vendor_cost = vendorCost;
         if (clientCost !== null) orderProps.client_cost = clientCost;
       }
+
+      // Stamp reference coordinates NOW (best-effort) so the calendar map can plot
+      // this service without a live geocode. Property scope resolves via the
+      // property's stored coords/address; community scope via the community's
+      // first property; both fall back to geocoding the address text.
+      try {
+        const c = await resolveCoords({
+          address: [t.address, t.locality].filter(Boolean).join(', '),
+          propertyId: t.scope === 'property' ? t.id : (commId || ''),
+        });
+        if (c) { orderProps.latitude = c.lat; orderProps.longitude = c.lng; }
+      } catch { /* non-fatal — the map falls back to live geocoding */ }
 
       try {
         const recordId = await createServiceWorkOrder(orderProps);

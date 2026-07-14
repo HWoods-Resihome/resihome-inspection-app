@@ -7,6 +7,7 @@ import { externalAccessDenial, isExternalEmail, EXTERNAL_TEMPLATE, externalCanCr
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { recordErrorEvent } from '@/lib/errorLog';
+import { resolveCoords } from '@/lib/geocodeResolve';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -312,6 +313,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         } catch (e) {
           console.warn(`[create] QC totals recompute failed for ${inspectionId}:`, e);
         }
+      }
+    }
+
+    // Stamp reference coordinates so the calendar map can plot this inspection
+    // without a live geocode. Resolves via the property's stored coords/address
+    // (community via its first property), validated against the address state.
+    // Best-effort + guarded: a miss or absent latitude/longitude property just
+    // leaves it to the map's client-side geocoding fallback.
+    try {
+      const c = await resolveCoords({ address: addressSnapshot, propertyId: (isCommunity ? body.communityRecordId : body.propertyRecordId) || '' });
+      if (c) await updateInspection(inspectionId, { latitude: c.lat, longitude: c.lng });
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (!(msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist')))) {
+        console.warn(`[create] coordinate stamp skipped for ${inspectionId}:`, msg);
       }
     }
 

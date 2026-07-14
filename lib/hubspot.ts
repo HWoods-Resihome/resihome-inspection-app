@@ -2014,6 +2014,9 @@ const INSPECTION_LIST_PROPERTIES = [
   // (kept fresh by enrichPropertyStatuses), and the property ref so active rows
   // can be enriched with the live status (see enrichPropertyStatuses).
   'property_status_at_completion', 'property_status_snapshot', 'property_id_ref',
+  // Reference coordinates stamped at creation so the calendar map can plot the
+  // pin without a live geocode (falls back to client geocoding when absent).
+  'latitude', 'longitude',
   // Record Owner — kept in sync TO inspector_name/email by enrichInspectorFromOwner.
   'hubspot_owner_id',
 ];
@@ -2070,6 +2073,8 @@ function mapInspectionRow(r: any): InspectionSummary {
     // active rows get the live status filled in by enrichPropertyStatuses.
     propertyStatus: (p.property_status_at_completion || '').toString().trim() || null,
     propertyRecordId: p.property_id_ref || null,
+    lat: (() => { const n = Number(p.latitude); return Number.isFinite(n) && n !== 0 ? n : null; })(),
+    lng: (() => { const n = Number(p.longitude); return Number.isFinite(n) && n !== 0 ? n : null; })(),
   };
 }
 
@@ -6098,6 +6103,14 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureGroup(inspection, 'inspection_results', 'Inspection Results');
   await ensureProp(inspection, 'property_status_at_completion', {
     name: 'property_status_at_completion', label: 'Property Status at Completion', type: 'string', fieldType: 'text', groupName: 'inspection_results',
+  });
+  // Reference coordinates stamped at creation so the calendar map plots the pin
+  // without a live geocode (falls back to client geocoding when absent).
+  await ensureProp(inspection, 'latitude', {
+    name: 'latitude', label: 'Latitude', type: 'number', fieldType: 'number', groupName: 'inspection_results',
+  });
+  await ensureProp(inspection, 'longitude', {
+    name: 'longitude', label: 'Longitude', type: 'number', fieldType: 'number', groupName: 'inspection_results',
   });
   // Sortable property-status snapshot (seeded at create, kept fresh by the home
   // list enrichment, frozen at completion). Powers the "Property Status" sort.

@@ -292,8 +292,12 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   }, [view, visible]);
 
   // Geocode the visible inspections for the map (small concurrency; cached by id).
+  // Skip ones that already carry coordinates stamped at creation — only older
+  // records without them need a live geocode.
   useEffect(() => {
-    const todo = visible.filter((i) => coords[i.recordId] === undefined && (i.propertyAddressSnapshot || i.propertyRecordId));
+    const todo = visible.filter((i) =>
+      !(Number.isFinite(i.lat) && Number.isFinite(i.lng))
+      && coords[i.recordId] === undefined && (i.propertyAddressSnapshot || i.propertyRecordId));
     if (!todo.length) return;
     let cancelled = false;
     (async () => {
@@ -317,7 +321,10 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   }, [visible]);
 
   const mapItems: MapItem[] = visible.flatMap((i) => {
-    const c = coords[i.recordId];
+    // Prefer coordinates stamped at creation; otherwise the live-geocoded fix.
+    const c = (Number.isFinite(i.lat) && Number.isFinite(i.lng))
+      ? { lat: i.lat as number, lng: i.lng as number }
+      : coords[i.recordId];
     if (!c) return [];
     const k = statusKey(i.status);
     const meta = k ? STATUS_META[k] : undefined;
