@@ -174,11 +174,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Best-effort — never blocks the completion above; no-op until the fields are
     // provisioned (/admin/setup).
     if ((existing?.templateType || '') === 'leasing_agent_1099_property_inspection') {
+      // Load answers once. If this fails the alerts below simply find no answer
+      // and skip — but a field-stamp failure must NOT skip them (see below).
+      let answers: Awaited<ReturnType<typeof fetchAnswersForInspection>> = [];
+      try { answers = await fetchAnswersForInspection(id); }
+      catch (e) { console.warn('[submit] 1099 answers read failed (alerts may skip):', e); }
+
+      // Stamp the standardized 1099 report fields in its OWN try — a HubSpot
+      // hiccup or an unprovisioned property here previously fell through to the
+      // outer catch and SKIPPED both Slack alerts. Isolated so the alerts always
+      // get their chance to fire.
       try {
-        const answers = await fetchAnswersForInspection(id);
         const fields = extractLeasingAgent1099Fields(answers);
         if (Object.keys(fields).length > 0) await updateInspection(id, fields as Record<string, any>);
+      } catch (e) {
+        console.warn('[submit] 1099 field stamp skipped (provision via /admin/setup):', e);
+      }
 
+      {
         // Listing-price Slack alert: when the agent recommends Reduce/Increase on
         // "Evaluate Listing Price", post the property + active-listing price +
         // RentCast comps to Slack. Best-effort; gated per inspection.
@@ -224,8 +237,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         } catch (e) {
           console.warn('[submit] grass-fail alert skipped (continuing):', e);
         }
-      } catch (e) {
-        console.warn('[submit] 1099 field stamp skipped (provision via /admin/setup):', e);
       }
     }
 

@@ -84,7 +84,19 @@ async function fetchRentAvm(subject: RentSubject, sp: typeof SEARCH_ATTEMPTS[num
   if (subject.sqft) params.squareFootage = String(subject.sqft);
 
   const url = `${API_BASE}${AVM_ENDPOINT}?${buildQuery(params)}`;
-  const doFetch = () => fetch(url, { method: 'GET', headers: { 'X-Api-Key': API_KEY, Accept: 'application/json' } });
+  // Bounded so a hung RentCast connection can't stall the caller — the listing-
+  // price Slack alert runs inline in submit before the grass-fail alert, so an
+  // un-timed hang here could starve both. On timeout the fetch aborts (rejects),
+  // and the alert proceeds without comps (comps are optional in the card).
+  const doFetch = async () => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      return await fetch(url, { method: 'GET', headers: { 'X-Api-Key': API_KEY, Accept: 'application/json' }, signal: ctrl.signal });
+    } finally {
+      clearTimeout(t);
+    }
+  };
 
   let resp = await doFetch();
   if (resp.status === 429) { await sleep(3000); resp = await doFetch(); }
