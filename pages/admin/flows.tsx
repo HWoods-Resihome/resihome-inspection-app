@@ -112,6 +112,22 @@ export default function AdminFlowsPage() {
     finally { setMigBusy(false); }
   }
 
+  // Read-only "how much is left to migrate?" tally.
+  const [remBusy, setRemBusy] = useState(false);
+  const [remErr, setRemErr] = useState<string | null>(null);
+  const [rem, setRem] = useState<null | { inspections: { records: number; photos: number }; services: { records: number; photos: number } }>(null);
+  async function checkRemaining() {
+    if (remBusy) return;
+    setRemBusy(true); setRemErr(null);
+    try {
+      const r = await fetch('/api/admin/migration-status');
+      const d = await r.json();
+      if (!r.ok) { setRemErr(d.error || 'Failed.'); return; }
+      setRem({ inspections: d.inspections, services: d.services });
+    } catch (e: any) { setRemErr(String(e?.message || e)); }
+    finally { setRemBusy(false); }
+  }
+
   // Reclaim HubSpot space: delete the now-orphaned HubSpot photo originals after
   // migration. Dry-run preview first, then a confirmed delete. Both loop pages.
   const [delBusy, setDelBusy] = useState<'preview' | 'delete' | null>(null);
@@ -193,6 +209,26 @@ export default function AdminFlowsPage() {
             </div>
           )}
           {migErr && <p className="text-red-600 text-[13px] mt-2">{migErr}</p>}
+
+          {/* Read-only: how many records still reference a HubSpot photo (i.e. left to migrate). */}
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <button type="button" onClick={checkRemaining} disabled={remBusy}
+              className="inline-flex items-center gap-2 h-9 px-3 rounded-lg border border-gray-300 bg-white text-ink font-heading font-semibold text-[13px] hover:border-brand/50 disabled:opacity-50">
+              {remBusy && <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.5" /></svg>}
+              {remBusy ? 'Checking…' : 'Check remaining'}
+            </button>
+            {rem && (
+              <div className="mt-2 text-[13px] text-gray-700 tabular-nums">
+                {rem.inspections.records === 0 && rem.services.records === 0
+                  ? <span className="font-heading font-bold text-emerald-700">Nothing left — all photos are on Blob ✓</span>
+                  : <>
+                      <div><b>{rem.inspections.records}</b> inspection record(s) left ({rem.inspections.photos} photo(s))</div>
+                      <div><b>{rem.services.records}</b> service record(s) left ({rem.services.photos} photo(s))</div>
+                    </>}
+              </div>
+            )}
+            {remErr && <p className="text-red-600 text-[13px] mt-1">{remErr}</p>}
+          </div>
         </Section>
 
         {/* ---- Reclaim HubSpot space: delete migrated originals ---- */}

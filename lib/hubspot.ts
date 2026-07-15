@@ -5402,6 +5402,40 @@ export async function deleteHubspotFileById(id: string): Promise<void> {
   await hubspotFetch(`/files/v3/files/${id}`, { method: 'DELETE' });
 }
 
+// Read-only tally of what's LEFT to migrate: records that still reference at
+// least one HubSpot-hosted photo (i.e. not yet moved to Blob), plus the photo
+// count. Fully paginated. Answers "how many more inspections to migrate?".
+export interface MigrationRemaining {
+  inspections: { records: number; photos: number };
+  services: { records: number; photos: number };
+  configured: boolean;
+}
+export async function migrationRemainingCounts(): Promise<MigrationRemaining> {
+  const split = (raw: any): string[] => String(raw || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  const tally = async (typeId: string, fields: string[], filter: boolean) => {
+    let records = 0, photos = 0; let after: string | undefined;
+    do {
+      const body: any = { limit: 100, after, properties: fields };
+      if (filter) body.filterGroups = fields.map((f) => ({ filters: [{ propertyName: f, operator: 'HAS_PROPERTY' }] }));
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, { method: 'POST', body: JSON.stringify(body) });
+      for (const r of resp.results || []) {
+        let n = 0;
+        for (const f of fields) for (const u of split(r.properties?.[f])) if (isHubspotFileUrl(u)) n++;
+        if (n > 0) { records++; photos += n; }
+      }
+      after = resp.paging?.next?.after || undefined;
+    } while (after);
+    return { records, photos };
+  };
+  const hasAfter = await answerHasProperty('after_photo_urls').catch(() => false);
+  const inspections = await tally(typeIds().answer, ['photo_urls', ...(hasAfter ? ['after_photo_urls'] : [])], true);
+  const svcType = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  const services = svcType
+    ? await tally(svcType, ['before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls', 'pet_after_photo_urls'], false)
+    : { records: 0, photos: 0 };
+  return { inspections, services, configured: true };
+}
+
 // COMPLETE set of HubSpot photo URLs still referenced by any inspection answer or
 // service record. FULLY paginated (never budget-cut) so the orphan check can't
 // false-positive and delete a live photo. Cached briefly for batch reuse.
