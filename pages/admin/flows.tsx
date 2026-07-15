@@ -112,6 +112,34 @@ export default function AdminFlowsPage() {
     finally { setMigBusy(false); }
   }
 
+  // Reclaim HubSpot space: delete the now-orphaned HubSpot photo originals after
+  // migration. Dry-run preview first, then a confirmed delete. Both loop pages.
+  const [delBusy, setDelBusy] = useState<'preview' | 'delete' | null>(null);
+  const [delErr, setDelErr] = useState<string | null>(null);
+  const [delProg, setDelProg] = useState<null | { mode: 'preview' | 'delete'; appPhotos: number; orphaned: number; kept: number; deleted: number; errors: number; referencedCount: number; done: boolean }>(null);
+  async function runDeleteMigrated(apply: boolean) {
+    if (delBusy) return;
+    if (apply && typeof window !== 'undefined' && !window.confirm('Permanently DELETE the migrated photo originals from HubSpot? Only files already copied to Vercel Blob and no longer referenced by any record are removed — this cannot be undone. Run a Preview first. Keep this tab open until it finishes.')) return;
+    setDelBusy(apply ? 'delete' : 'preview'); setDelErr(null);
+    const totals = { appPhotos: 0, orphaned: 0, kept: 0, deleted: 0, errors: 0, referencedCount: 0 };
+    try {
+      let after: string | undefined; let done = false; let guard = 0;
+      do {
+        const qs = new URLSearchParams(); if (apply) qs.set('apply', '1'); if (after) qs.set('after', after);
+        const r = await fetch(`/api/admin/delete-migrated-photos?${qs.toString()}`, { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) { setDelErr(d.error || 'Failed.'); setDelBusy(null); return; }
+        totals.appPhotos += d.appPhotos || 0; totals.orphaned += d.orphaned || 0; totals.kept += d.referencedKept || 0;
+        totals.deleted += d.deleted || 0; totals.errors += d.errors || 0; totals.referencedCount = d.referencedCount || totals.referencedCount;
+        setDelProg({ mode: apply ? 'delete' : 'preview', ...totals, done: false });
+        after = d.after || undefined; done = !!d.done;
+        if (++guard > 10000) { setDelErr('Stopped after 10000 pages (safety cap).'); done = true; }
+      } while (!done);
+      setDelProg({ mode: apply ? 'delete' : 'preview', ...totals, done: true });
+    } catch (e: any) { setDelErr(String(e?.message || e)); }
+    finally { setDelBusy(null); }
+  }
+
   if (!authChecked) return null;
   if (!isAdmin) {
     return (
@@ -165,6 +193,39 @@ export default function AdminFlowsPage() {
             </div>
           )}
           {migErr && <p className="text-red-600 text-[13px] mt-2">{migErr}</p>}
+        </Section>
+
+        {/* ---- Reclaim HubSpot space: delete migrated originals ---- */}
+        <Section title="Delete Migrated Photos from HubSpot" desc="After migrating, this reclaims HubSpot storage by deleting the photo originals that are now safely on Vercel Blob. SAFE: only files in the app's photo folder that NO record still references are removed — anything still in use (not yet migrated) is left untouched. Always Preview first; deletion cannot be undone.">
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => runDeleteMigrated(false)} disabled={!!delBusy}
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-gray-300 bg-white text-ink font-heading font-bold text-sm hover:border-brand/50 disabled:opacity-50">
+              {delBusy === 'preview' && <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.5" /></svg>}
+              {delBusy === 'preview' ? 'Previewing…' : 'Preview (dry-run)'}
+            </button>
+            <button type="button" onClick={() => runDeleteMigrated(true)} disabled={!!delBusy}
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-red-600 text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300">
+              {delBusy === 'delete' && <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.5" /></svg>}
+              {delBusy === 'delete' ? 'Deleting…' : 'Delete orphaned files'}
+            </button>
+          </div>
+          {delProg && (
+            <div className="mt-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2.5 text-[13px]">
+              <div className={`font-heading font-bold ${delProg.done ? (delProg.errors ? 'text-amber-700' : 'text-emerald-700') : 'text-ink'}`}>
+                {!delProg.done
+                  ? (delProg.mode === 'delete' ? 'Deleting…' : 'Scanning…')
+                  : delProg.mode === 'preview'
+                    ? `Preview: ${delProg.orphaned} orphaned file(s) can be deleted`
+                    : `Done ✓ — ${delProg.deleted} file(s) deleted${delProg.errors ? `, ${delProg.errors} error(s)` : ''}`}
+              </div>
+              <div className="text-gray-600 mt-1 tabular-nums">
+                {delProg.appPhotos} app photos checked · {delProg.orphaned} orphaned · {delProg.kept} still referenced (kept)
+                {delProg.mode === 'delete' ? ` · ${delProg.deleted} deleted` : ''}
+              </div>
+              <div className="text-gray-400 mt-0.5 text-[11px] tabular-nums">Safety set: {delProg.referencedCount} photo URL(s) still referenced by records are protected.</div>
+            </div>
+          )}
+          {delErr && <p className="text-red-600 text-[13px] mt-2">{delErr}</p>}
         </Section>
 
         {/* ---- Approval Routing (PODs / Regions) — self-contained collapsible card ---- */}

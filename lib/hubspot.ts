@@ -5388,6 +5388,88 @@ export async function migratePhotosBatch(opts: { object: MigratePhotoObject; aft
   return rep;
 }
 
+// ─── Reclaim HubSpot space: delete photos that are now safely on Blob ──────────
+// The migration rewrote each record's reference to the Blob URL, leaving the
+// HubSpot original orphaned. This deletes those originals — but SAFE-BY-DESIGN:
+// a file is removed ONLY if its exact URL is absent from the COMPLETE set of URLs
+// still referenced by any record (so an un-migrated photo is never touched), and
+// ONLY within the app's /inspection_photos folder (never other portal files).
+
+const normFileUrl = (u: string) => String(u || '').split('#')[0].split('?')[0].trim();
+
+/** DELETE one HubSpot file by id. */
+export async function deleteHubspotFileById(id: string): Promise<void> {
+  await hubspotFetch(`/files/v3/files/${id}`, { method: 'DELETE' });
+}
+
+// COMPLETE set of HubSpot photo URLs still referenced by any inspection answer or
+// service record. FULLY paginated (never budget-cut) so the orphan check can't
+// false-positive and delete a live photo. Cached briefly for batch reuse.
+let _referencedHsPhotos: { at: number; urls: Set<string> } | null = null;
+async function referencedHubspotPhotoUrls(force = false): Promise<Set<string>> {
+  if (!force && _referencedHsPhotos && Date.now() - _referencedHsPhotos.at < 5 * 60 * 1000) return _referencedHsPhotos.urls;
+  const urls = new Set<string>();
+  const split = (raw: any): string[] => String(raw || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  const scan = async (typeId: string, fields: string[], filter: boolean) => {
+    let after: string | undefined;
+    do {
+      const body: any = { limit: 100, after, properties: fields };
+      if (filter) body.filterGroups = fields.map((f) => ({ filters: [{ propertyName: f, operator: 'HAS_PROPERTY' }] }));
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, { method: 'POST', body: JSON.stringify(body) });
+      for (const r of resp.results || []) for (const f of fields) for (const u of split(r.properties?.[f])) if (isHubspotFileUrl(u)) urls.add(normFileUrl(u));
+      after = resp.paging?.next?.after || undefined;
+    } while (after);
+  };
+  const hasAfter = await answerHasProperty('after_photo_urls').catch(() => false);
+  await scan(typeIds().answer, ['photo_urls', ...(hasAfter ? ['after_photo_urls'] : [])], true);
+  const svcType = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (svcType) await scan(svcType, ['before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls', 'pet_after_photo_urls'], false);
+  _referencedHsPhotos = { at: Date.now(), urls };
+  return urls;
+}
+
+export interface DeleteMigratedBatch {
+  after: string | null; done: boolean; referencedCount: number;
+  listed: number; appPhotos: number; skippedNonApp: number;
+  orphaned: number; referencedKept: number; deleted: number; errors: number; errorSamples: string[];
+}
+/**
+ * ONE page of the "delete migrated originals from HubSpot" sweep. Dry-run unless
+ * apply=true. Lists HubSpot files, keeps only the app's /inspection_photos, and
+ * deletes those whose URL is NOT in the (complete) referenced set. Client loops
+ * with the returned `after` until done.
+ */
+export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; after?: string }): Promise<DeleteMigratedBatch> {
+  const rep: DeleteMigratedBatch = { after: opts.after ?? null, done: false, referencedCount: 0, listed: 0, appPhotos: 0, skippedNonApp: 0, orphaned: 0, referencedKept: 0, deleted: 0, errors: 0, errorSamples: [] };
+  const referenced = await referencedHubspotPhotoUrls();
+  rep.referencedCount = referenced.size;
+
+  const qs = new URLSearchParams({ limit: '100', properties: 'id,name,path,url,parentFolderId' });
+  if (opts.after) qs.set('after', opts.after);
+  const resp = await hubspotFetch(`/files/v3/files?${qs.toString()}`);
+  const results = resp.results || [];
+  rep.after = resp.paging?.next?.after || null;
+  rep.done = !rep.after;
+
+  for (const f of results) {
+    rep.listed++;
+    const path = String(f.path || '');
+    const rawUrl = String(f.url || '');
+    // ONLY the app's inspection photos — never any other portal file.
+    const isAppPhoto = /(^|\/)inspection_photos(\/|$)/i.test(path) || /inspection_photos/i.test(rawUrl);
+    if (!isAppPhoto) { rep.skippedNonApp++; continue; }
+    rep.appPhotos++;
+    if (referenced.has(normFileUrl(rawUrl))) { rep.referencedKept++; continue; } // still in use → keep
+    rep.orphaned++;
+    if (!opts.apply) continue;
+    // Process the WHOLE page (≤100) before advancing the cursor — deleting mid-
+    // page and then advancing would skip the rest. 100 deletes fit the budget.
+    try { await deleteHubspotFileById(String(f.id)); rep.deleted++; }
+    catch (e: any) { rep.errors++; if (rep.errorSamples.length < 10) rep.errorSamples.push(`${f.id}: ${String(e?.message || e).slice(0, 80)}`); }
+  }
+  return rep;
+}
+
 /**
  * Update an Inspection record's properties (status, etc.).
  */
