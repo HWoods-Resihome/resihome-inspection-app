@@ -348,6 +348,12 @@ export function CameraCaptureLegacy({
   // latest value without depending on state closures.
   const itemsRef = useRef<CaptureItem[]>([]);
   useEffect(() => { itemsRef.current = items; }, [items]);
+  // Done re-entrancy guards (see CameraCaptureModern): stop a double-tap on Done,
+  // or Done racing the back-to-close handler, from calling onComplete twice and
+  // duplicating the captures. Reset when the camera (re)opens.
+  const doneRef = useRef(false);
+  const busyDoneRef = useRef(false);
+  useEffect(() => { if (isOpen) { doneRef.current = false; busyDoneRef.current = false; } }, [isOpen]);
 
   // Tell every form a camera is open (so they free their photo grids — iOS memory),
   // and so the offline store engages its camera-open safeguards AND kicks the flush
@@ -1574,17 +1580,25 @@ export function CameraCaptureLegacy({
   }, [multiRoom, rooms, currentIdx, switchToRoom]);
 
   const handleDone = useCallback(async () => {
-    const { urls, failures } = await flushUploads();
-    if (failures > 0) {
-      const ok = await dialog.confirm(
-        `${failures} photo${failures === 1 ? '' : 's'} did not upload successfully. ` +
-        `Continue with the ${urls.length} that succeeded?`,
-        { confirmLabel: 'Continue' }
-      );
-      if (!ok) return;
+    if (doneRef.current || busyDoneRef.current) return;
+    busyDoneRef.current = true;
+    try {
+      const { urls, failures } = await flushUploads();
+      if (failures > 0) {
+        const ok = await dialog.confirm(
+          `${failures} photo${failures === 1 ? '' : 's'} did not upload successfully. ` +
+          `Continue with the ${urls.length} that succeeded?`,
+          { confirmLabel: 'Continue' }
+        );
+        if (!ok) { busyDoneRef.current = false; return; }
+      }
+      if (doneRef.current) return;
+      doneRef.current = true;
+      stopStream();
+      onComplete(urls);
+    } finally {
+      busyDoneRef.current = false;
     }
-    stopStream();
-    onComplete(urls);
   }, [flushUploads, onComplete, stopStream, dialog]);
 
   const handleCancel = useCallback(() => {

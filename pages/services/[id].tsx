@@ -179,7 +179,7 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
       </div>
       <CameraCapture isOpen={open} onClose={() => setOpen(false)} uploadPhoto={upload}
         addressSnapshot={address} propertyRecordId={propertyRecordId || undefined}
-        onComplete={(newUrls) => { setOpen(false); if (newUrls.length) onChange([...urls, ...newUrls]); }} />
+        onComplete={(newUrls) => { setOpen(false); const add = newUrls.filter((u) => u && !urls.includes(u)); if (add.length) onChange([...urls, ...add]); }} />
     </div>
   );
 }

@@ -433,6 +433,14 @@ export function CameraCaptureModern({
   // latest value without depending on state closures.
   const itemsRef = useRef<CaptureItem[]>([]);
   useEffect(() => { itemsRef.current = items; }, [items]);
+  // Done re-entrancy guards: a double-tap on Done, or Done + the Android
+  // back-to-close handler firing together, would otherwise call onComplete
+  // TWICE and append the same captures twice to the parent. `busyDoneRef` blocks
+  // a concurrent second call; `doneRef` blocks any repeat after onComplete has
+  // fired. Both reset when the camera (re)opens.
+  const doneRef = useRef(false);
+  const busyDoneRef = useRef(false);
+  useEffect(() => { if (isOpen) { doneRef.current = false; busyDoneRef.current = false; } }, [isOpen]);
   // Captured-photo strip auto-scroll: always reveal the LATEST shot (appended at
   // the end) as photos come in — horizontally in portrait, vertically in
   // landscape. Setting both axes is safe; the non-scrollable one clamps to 0.
@@ -2495,17 +2503,27 @@ export function CameraCaptureModern({
   }, [multiRoom, rooms, currentIdx, switchToRoom]);
 
   const handleDone = useCallback(async () => {
-    const { urls, failures } = await flushUploads();
-    if (failures > 0) {
-      const ok = await dialog.confirm(
-        `${failures} photo${failures === 1 ? '' : 's'} did not upload successfully. ` +
-        `Continue with the ${urls.length} that succeeded?`,
-        { confirmLabel: 'Continue' }
-      );
-      if (!ok) return;
+    // Guard against double-fire (double-tap Done, or Done racing the back
+    // handler): either would call onComplete twice and duplicate the captures.
+    if (doneRef.current || busyDoneRef.current) return;
+    busyDoneRef.current = true;
+    try {
+      const { urls, failures } = await flushUploads();
+      if (failures > 0) {
+        const ok = await dialog.confirm(
+          `${failures} photo${failures === 1 ? '' : 's'} did not upload successfully. ` +
+          `Continue with the ${urls.length} that succeeded?`,
+          { confirmLabel: 'Continue' }
+        );
+        if (!ok) { busyDoneRef.current = false; return; }  // let them retry
+      }
+      if (doneRef.current) return;   // a concurrent call already completed
+      doneRef.current = true;
+      stopStream();
+      onComplete(urls);
+    } finally {
+      busyDoneRef.current = false;
     }
-    stopStream();
-    onComplete(urls);
   }, [flushUploads, onComplete, stopStream, dialog]);
 
   const handleCancel = useCallback(() => {
