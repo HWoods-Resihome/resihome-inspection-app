@@ -149,12 +149,13 @@ export default function AdminFlowsPage() {
   // migration. Dry-run preview first, then a confirmed delete. Both loop pages.
   const [delBusy, setDelBusy] = useState<'preview' | 'delete' | null>(null);
   const [delErr, setDelErr] = useState<string | null>(null);
-  const [delProg, setDelProg] = useState<null | { mode: 'preview' | 'delete'; appPhotos: number; orphaned: number; kept: number; deleted: number; errors: number; referencedCount: number; done: boolean }>(null);
+  const [delProg, setDelProg] = useState<null | { mode: 'preview' | 'delete'; appPhotos: number; orphaned: number; kept: number; deleted: number; errors: number; referencedCount: number; done: boolean; capped?: boolean }>(null);
   async function runDeleteMigrated(apply: boolean) {
     if (delBusy) return;
     if (apply && typeof window !== 'undefined' && !window.confirm('Permanently DELETE the migrated photo originals from HubSpot? Only files already copied to Vercel Blob and no longer referenced by any record are removed — this cannot be undone. Run a Preview first. Keep this tab open until it finishes.')) return;
     setDelBusy(apply ? 'delete' : 'preview'); setDelErr(null);
     const totals = { appPhotos: 0, orphaned: 0, kept: 0, deleted: 0, errors: 0, referencedCount: 0 };
+    let capped = false;
     try {
       let after: string | undefined; let done = false; let guard = 0;
       do {
@@ -164,11 +165,12 @@ export default function AdminFlowsPage() {
         if (!r.ok) { setDelErr(d.error || 'Failed.'); setDelBusy(null); return; }
         totals.appPhotos += d.appPhotos || 0; totals.orphaned += d.orphaned || 0; totals.kept += d.referencedKept || 0;
         totals.deleted += d.deleted || 0; totals.errors += d.errors || 0; totals.referencedCount = d.referencedCount || totals.referencedCount;
-        setDelProg({ mode: apply ? 'delete' : 'preview', ...totals, done: false });
+        if (d.capped) capped = true;
+        setDelProg({ mode: apply ? 'delete' : 'preview', ...totals, done: false, capped });
         after = d.after || undefined; done = !!d.done;
         if (++guard > 10000) { setDelErr('Stopped after 10000 pages (safety cap).'); done = true; }
       } while (!done);
-      setDelProg({ mode: apply ? 'delete' : 'preview', ...totals, done: true });
+      setDelProg({ mode: apply ? 'delete' : 'preview', ...totals, done: true, capped });
     } catch (e: any) { setDelErr(String(e?.message || e)); }
     finally { setDelBusy(null); }
   }
@@ -318,6 +320,9 @@ export default function AdminFlowsPage() {
                 {delProg.mode === 'delete' ? ` · ${delProg.deleted} deleted` : ''}
               </div>
               <div className="text-gray-400 mt-0.5 text-[11px] tabular-nums">Safety set: {delProg.referencedCount} photo URL(s) still referenced by records are protected.</div>
+              {delProg.capped && (
+                <div className="text-amber-700 mt-1 text-[11px]">Note: HubSpot stopped the scan early (list cap/blip). Counts are a partial pass — run again to continue where it left off.</div>
+              )}
             </div>
           )}
           {delErr && <p className="text-red-600 text-[13px] mt-2">{delErr}</p>}

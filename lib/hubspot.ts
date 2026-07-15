@@ -5466,28 +5466,63 @@ export interface DeleteMigratedBatch {
   after: string | null; done: boolean; referencedCount: number;
   listed: number; appPhotos: number; skippedNonApp: number;
   orphaned: number; referencedKept: number; deleted: number; errors: number; errorSamples: string[];
+  capped?: boolean;   // scan stopped early on a HubSpot list error (e.g. the ~10k scroll cap)
 }
+
+/**
+ * List one page of files via the SEARCH endpoint (the bare collection path only
+ * accepts POST/upload → GET 405). PREFER a folder-scoped query (path=/inspection_
+ * photos): HubSpot caps a single paginated scroll at ~10k results, so scanning the
+ * whole portal (app photos + every other file) 400s partway; scoping to our photo
+ * folder keeps the scroll to just app photos (~thousands), well under the cap. One
+ * retry for a transient blip; fall back to an unscoped query if `path` is rejected.
+ */
+async function listHubspotFilesPage(after?: string): Promise<{ results: any[]; next: string | null }> {
+  const build = (scoped: boolean) => {
+    const qs = new URLSearchParams({ limit: '100' });
+    if (after) qs.set('after', after);
+    if (scoped) qs.set('path', '/inspection_photos');
+    return `/files/v3/files/search?${qs.toString()}`;
+  };
+  const call = async (scoped: boolean) => {
+    const r = await hubspotFetch(build(scoped));
+    return { results: r.results || [], next: r.paging?.next?.after || null };
+  };
+  try { return await call(true); }               // folder-scoped (preferred)
+  catch (e1: any) {
+    try { return await call(true); }             // one retry — transient blip
+    catch {
+      try { return await call(false); }          // `path` unsupported → unscoped
+      catch { throw e1; }                        // give the caller the original error
+    }
+  }
+}
+
 /**
  * ONE page of the "delete migrated originals from HubSpot" sweep. Dry-run unless
  * apply=true. Lists HubSpot files, keeps only the app's /inspection_photos, and
  * deletes those whose URL is NOT in the (complete) referenced set. Client loops
- * with the returned `after` until done.
+ * with the returned `after` until done. A hard list failure ends the run
+ * gracefully (done + capped) so gathered counts survive instead of erroring out.
  */
 export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; after?: string }): Promise<DeleteMigratedBatch> {
   const rep: DeleteMigratedBatch = { after: opts.after ?? null, done: false, referencedCount: 0, listed: 0, appPhotos: 0, skippedNonApp: 0, orphaned: 0, referencedKept: 0, deleted: 0, errors: 0, errorSamples: [] };
   const referenced = await referencedHubspotPhotoUrls();
   rep.referencedCount = referenced.size;
 
-  // List files via the SEARCH endpoint. The bare collection path (/files/v3/files)
-  // only accepts POST (upload); a GET there returns 405. /files/v3/files/search
-  // returns full file objects (id, name, path, url, parentFolderId) with limit/
-  // after paging.
-  const qs = new URLSearchParams({ limit: '100' });
-  if (opts.after) qs.set('after', opts.after);
-  const resp = await hubspotFetch(`/files/v3/files/search?${qs.toString()}`);
-  const results = resp.results || [];
-  rep.after = resp.paging?.next?.after || null;
-  rep.done = !rep.after;
+  let results: any[];
+  try {
+    const page = await listHubspotFilesPage(opts.after);
+    results = page.results;
+    rep.after = page.next;
+    rep.done = !page.next;
+  } catch (e: any) {
+    // Couldn't list this page even after retry/fallback (HubSpot ~10k scroll cap
+    // or an outage). Stop cleanly: keep what we counted, flag it, don't throw.
+    rep.done = true; rep.capped = true; rep.after = null;
+    rep.errorSamples.push(`list: ${String(e?.message || e).slice(0, 80)}`);
+    return rep;
+  }
 
   for (const f of results) {
     rep.listed++;
