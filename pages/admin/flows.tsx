@@ -81,12 +81,12 @@ export default function AdminFlowsPage() {
   // batches so progress is visible. Copies inspections THEN services; never deletes.
   const [migBusy, setMigBusy] = useState(false);
   const [migErr, setMigErr] = useState<string | null>(null);
-  const [migProg, setMigProg] = useState<null | { phase: string; copied: number; verified: number; records: number; scanned: number; errors: number; done: boolean }>(null);
+  const [migProg, setMigProg] = useState<null | { phase: string; found: number; copied: number; verified: number; records: number; scanned: number; errors: number; done: boolean }>(null);
   async function runMigratePhotos() {
     if (migBusy) return;
     if (typeof window !== 'undefined' && !window.confirm('Copy ALL remaining HubSpot-hosted photos (inspections + services) into Vercel Blob and rewrite references? This does NOT delete anything from HubSpot. Keep this tab open until it finishes.')) return;
     setMigBusy(true); setMigErr(null);
-    const totals = { copied: 0, verified: 0, records: 0, scanned: 0, errors: 0 };
+    const totals = { found: 0, copied: 0, verified: 0, records: 0, scanned: 0, errors: 0 };
     const objects: { key: 'answer' | 'service'; label: string }[] = [{ key: 'answer', label: 'Inspections' }, { key: 'service', label: 'Services' }];
     try {
       for (const obj of objects) {
@@ -97,7 +97,7 @@ export default function AdminFlowsPage() {
           const r = await fetch(`/api/admin/migrate-photos?${qs.toString()}`, { method: 'POST' });
           const d = await r.json();
           if (!r.ok) { setMigErr(d.error || 'Migration failed.'); setMigBusy(false); return; }
-          totals.copied += d.copied || 0; totals.verified += d.verified || 0; totals.records += d.recordsUpdated || 0; totals.scanned += d.scanned || 0; totals.errors += d.errors || 0;
+          totals.found += d.hubspotSeen || 0; totals.copied += d.copied || 0; totals.verified += d.verified || 0; totals.records += d.recordsUpdated || 0; totals.scanned += d.scanned || 0; totals.errors += d.errors || 0;
           setMigProg({ phase: obj.label, ...totals, done: false });
           const prevAfter = after;
           after = d.after || undefined; done = !!d.done;
@@ -145,12 +145,22 @@ export default function AdminFlowsPage() {
           </button>
           {migProg && (
             <div className="mt-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2.5 text-[13px]">
-              <div className={`font-heading font-bold ${migProg.done ? 'text-emerald-700' : 'text-ink'}`}>
-                {migProg.done ? 'Complete ✓' : `Migrating ${migProg.phase}…`}
+              <div className={`font-heading font-bold ${migProg.done ? (migProg.errors || migProg.verified < migProg.found ? 'text-amber-700' : 'text-emerald-700') : 'text-ink'}`}>
+                {migProg.done
+                  ? (migProg.errors || migProg.verified < migProg.found
+                      ? `Finished with issues — ${migProg.found - migProg.verified} photo(s) not confirmed, ${migProg.errors} error(s)`
+                      : `Complete ✓ — all ${migProg.verified} photos migrated & verified`)
+                  : `Migrating ${migProg.phase}…`}
               </div>
+              {/* Photos: found = HubSpot-hosted photos seen; verified = confirmed in
+                  Blob. When done, verified should equal found with 0 errors. */}
               <div className="text-gray-600 mt-1 tabular-nums">
-                {migProg.copied} copied · {migProg.verified} verified · {migProg.records} records updated · {migProg.scanned} scanned
-                {migProg.errors ? ` · ${migProg.errors} errors` : ''}
+                Photos: {migProg.copied} copied · {migProg.verified}/{migProg.found} verified{migProg.errors ? ` · ${migProg.errors} error(s)` : ''}
+              </div>
+              {/* Records: how many inspections/services had their photo references
+                  rewritten, out of how many were scanned. */}
+              <div className="text-gray-600 mt-0.5 tabular-nums">
+                {migProg.phase === 'Services' || migProg.phase === 'Complete' ? 'Records' : 'Inspections'}: {migProg.records} updated · {migProg.scanned} scanned
               </div>
             </div>
           )}
