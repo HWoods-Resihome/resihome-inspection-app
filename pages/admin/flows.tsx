@@ -114,6 +114,21 @@ export default function AdminFlowsPage() {
     finally { setMigBusy(false); }
   }
 
+  // Background (server-side, unattended) migration: start it and it runs on the
+  // server with no browser open. Poll status every 10s.
+  type BgState = { running: boolean; stopRequested?: boolean; object: string; totals: { found: number; copied: number; verified: number; records: number; scanned: number; errors: number }; startedAt: string; heartbeatAt: string; finishedAt?: string; lastError?: string } | null;
+  const [bg, setBg] = useState<BgState>(null);
+  const [bgBusy, setBgBusy] = useState(false);
+  useEffect(() => {
+    let stopped = false;
+    const load = async () => { try { const r = await fetch('/api/admin/migrate-photos-bg'); const d = await r.json(); if (!stopped) setBg(d.state || null); } catch { /* ignore */ } };
+    load();
+    const id = setInterval(load, 10000);
+    return () => { stopped = true; clearInterval(id); };
+  }, []);
+  async function startBg() { if (bgBusy) return; if (typeof window !== 'undefined' && !window.confirm('Start the migration on the SERVER? It runs unattended — you can close this tab. It copies photos to Vercel Blob and rewrites references; it never deletes from HubSpot.')) return; setBgBusy(true); try { const r = await fetch('/api/admin/migrate-photos-bg?action=start', { method: 'POST' }); const d = await r.json(); if (d.state) setBg(d.state); } finally { setBgBusy(false); } }
+  async function stopBg() { if (bgBusy) return; setBgBusy(true); try { await fetch('/api/admin/migrate-photos-bg?action=stop', { method: 'POST' }); } finally { setBgBusy(false); } }
+
   // Read-only "how much is left to migrate?" tally.
   const [remBusy, setRemBusy] = useState(false);
   const [remErr, setRemErr] = useState<string | null>(null);
@@ -219,6 +234,39 @@ export default function AdminFlowsPage() {
             </div>
           )}
           {migErr && <p className="text-red-600 text-[13px] mt-2">{migErr}</p>}
+
+          {/* Server-side (unattended) migration — runs overnight, no open tab. */}
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <div className="text-[12px] font-heading font-bold text-ink mb-1">Run on the server (overnight)</div>
+            <p className="text-[11px] text-gray-500 mb-2 leading-relaxed">Starts the same migration on the server so you can close this tab. It processes continuously and a watchdog resumes it if interrupted. Best for a large backlog.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={startBg} disabled={bgBusy || !!bg?.running}
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-brand text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300">
+                {bg?.running ? 'Running on server…' : bgBusy ? 'Starting…' : 'Start background migration'}
+              </button>
+              {bg?.running && (
+                <button type="button" onClick={stopBg} disabled={bgBusy}
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-gray-300 bg-white text-gray-700 font-heading font-bold text-sm hover:border-red-400 hover:text-red-600 disabled:opacity-50">
+                  {bg?.stopRequested ? 'Stopping…' : 'Stop'}
+                </button>
+              )}
+            </div>
+            {bg && (
+              <div className="mt-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2.5 text-[13px]">
+                <div className={`font-heading font-bold ${bg.running ? 'text-ink' : (bg.totals.errors ? 'text-amber-700' : 'text-emerald-700')}`}>
+                  {bg.running
+                    ? `Running on server — ${bg.object === 'service' ? 'services' : 'inspections'}${bg.stopRequested ? ' (stopping…)' : ''}`
+                    : bg.finishedAt ? `Finished ✓${bg.totals.errors ? ` — ${bg.totals.errors} error(s)` : ''}` : 'Idle'}
+                </div>
+                <div className="text-gray-600 mt-1 tabular-nums">
+                  Photos: {bg.totals.copied} copied · {bg.totals.verified}/{bg.totals.found} verified{bg.totals.errors ? ` · ${bg.totals.errors} error(s)` : ''}
+                </div>
+                <div className="text-gray-600 mt-0.5 tabular-nums">Answer/service records: {bg.totals.records} updated · {bg.totals.scanned} scanned</div>
+                {bg.running && <div className="text-gray-400 mt-0.5 text-[11px]">Last activity {Math.max(0, Math.round((Date.now() - Date.parse(bg.heartbeatAt)) / 1000))}s ago · safe to close this tab.</div>}
+                {bg.lastError && <div className="text-amber-700 mt-0.5 text-[11px] break-all">Last error: {bg.lastError}</div>}
+              </div>
+            )}
+          </div>
 
           {/* Read-only: how many records still reference a HubSpot photo (i.e. left to migrate). */}
           <div className="mt-3 pt-3 border-t border-gray-100">

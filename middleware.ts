@@ -51,6 +51,11 @@ const PUBLIC_PATHS = new Set<string>([
   '/api/cron/warm-inspections',
   '/api/cron/services-generate',
   '/api/cron/services-review',
+  '/api/cron/migrate-photos-worker',
+  // Background photo migration. The worker (?action=work) is called machine-to-
+  // machine with no session cookie and self-enforces CRON_SECRET; the status/
+  // start/stop actions self-enforce an app-admin session inside the handler.
+  '/api/admin/migrate-photos-bg',
   // HubSpot change webhook → cache invalidation. Called with no session cookie;
   // self-enforces HUBSPOT_WEBHOOK_SECRET (Bearer / ?key=) inside the handler.
   '/api/webhooks/hubspot',

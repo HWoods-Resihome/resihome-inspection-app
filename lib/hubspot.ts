@@ -5841,6 +5841,11 @@ export function writeLoginActivityRaw(map: Record<string, { lastAt: string; coun
   return writeAgentJson('login_activity_json', 'Login Activity (JSON)', map);
 }
 
+/** Background photo-migration job state (single shared record) — see
+ *  /api/admin/migrate-photos-bg. Null when never started. */
+export function readPhotoMigrationState<T = any>(): Promise<T | null> { return readAgentJson<T>('photo_migration_state_json'); }
+export function writePhotoMigrationState(state: any): Promise<boolean> { return writeAgentJson('photo_migration_state_json', 'Photo Migration State (JSON)', state); }
+
 /** A learned service-check candidate produced by the review-learning loop. */
 export interface AutoServiceCheckCandidate {
   signature: string;
