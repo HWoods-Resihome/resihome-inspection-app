@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { put } from '@vercel/blob';
 import { getSessionFromRequest } from '@/lib/auth';
-import { uploadFile } from '@/lib/hubspot';
 import { transcodeToH264Mp4 } from '@/lib/videoFaststart';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { reportServerError } from '@/lib/serverErrorReporter';
@@ -90,8 +90,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       outType = 'video/mp4';
       outName = safeName.replace(/\.[a-zA-Z0-9]{1,5}$/, '') + '.mp4';
     }
-    const url = await uploadFile(buffer, outName, outType);
-    return res.status(200).json({ url });
+    // Store in Vercel Blob (public URL), NOT HubSpot File Manager — keeps
+    // resident-home photos off HubSpot's storage cap while the read/display path
+    // is unchanged (it just renders whatever URL we return). Key is deterministic
+    // from the (dedupe-folded) filename so an offline retry of the SAME capture
+    // overwrites the same object and yields the same URL — no duplicates. A store
+    // failure throws → caught below → surfaced as a 500 (loud, never a silent
+    // success with no image).
+    const idMatch = /idbph_(\d+)__/.exec(outName);
+    const key = idMatch ? `inspections/${idMatch[1]}/${outName}` : `photos/${outName}`;
+    const blob = await put(key, buffer, {
+      access: 'public',
+      contentType: outType,
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    });
+    return res.status(200).json({ url: blob.url });
   } catch (e: any) {
     reportServerError(e, { route: 'POST /api/upload', method: 'POST', userEmail: session.email });
     return res.status(500).json({ error: String(e.message || e) });
