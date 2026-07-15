@@ -5278,6 +5278,117 @@ export async function backfillPhotosCopyForInspection(opts: { inspectionId: stri
 }
 
 /**
+ * ONE time-budgeted batch of the HubSpot Files → Vercel Blob photo migration,
+ * for a browser-driven admin loop with visible progress. Covers BOTH photo
+ * homes: inspection_answer records (photo_urls / after_photo_urls) and Service
+ * Work Orders (before/after/pet_before/pet_after_photo_urls).
+ *
+ * Each call processes one search page under a time + photo budget, copies each
+ * HubSpot-hosted photo to Blob (verified by re-download + byte match), rewrites
+ * the reference in place (deduping), and PATCHes the record. Does NOT delete
+ * from HubSpot. Idempotent + resumable: already-on-Blob URLs are skipped, and if
+ * the budget trips mid-page the SAME `after` is returned so the next call
+ * re-scans that page (done records skip fast) and continues. `done:true` when
+ * that object's pages are exhausted. Errors are counted + sampled, never fatal.
+ */
+export type MigratePhotoObject = 'answer' | 'service';
+export interface MigratePhotoBatch {
+  object: MigratePhotoObject; after: string | null; done: boolean;
+  scanned: number; hubspotSeen: number; copied: number; verified: number;
+  recordsUpdated: number; errors: number; errorSamples: string[]; configured: boolean;
+}
+export async function migratePhotosBatch(opts: { object: MigratePhotoObject; after?: string; apply: boolean; budgetMs?: number; photoCap?: number }): Promise<MigratePhotoBatch> {
+  const start = Date.now();
+  const budgetMs = opts.budgetMs ?? 45000;
+  const photoCap = opts.photoCap ?? 60;
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN || '';
+  if (opts.apply && !blobToken) throw new Error('BLOB_READ_WRITE_TOKEN is not set — cannot copy to Blob.');
+  const rep: MigratePhotoBatch = { object: opts.object, after: opts.after ?? null, done: false, scanned: 0, hubspotSeen: 0, copied: 0, verified: 0, recordsUpdated: 0, errors: 0, errorSamples: [], configured: true };
+  const split = (raw: any): string[] => String(raw || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  const err = (m: string) => { rep.errors++; if (rep.errorSamples.length < 10) rep.errorSamples.push(m.slice(0, 100)); };
+
+  let typeId: string; let fields: string[]; let filterGroups: any[] | undefined; let keyBase: string;
+  if (opts.object === 'answer') {
+    typeId = typeIds().answer;
+    const hasAfter = await answerHasProperty('after_photo_urls').catch(() => false);
+    fields = ['photo_urls', ...(hasAfter ? ['after_photo_urls'] : [])];
+    filterGroups = [{ filters: [{ propertyName: 'photo_urls', operator: 'HAS_PROPERTY' }] },
+      ...(hasAfter ? [{ filters: [{ propertyName: 'after_photo_urls', operator: 'HAS_PROPERTY' }] }] : [])];
+    keyBase = 'inspections';
+  } else {
+    typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+    if (!typeId) return { ...rep, done: true, configured: false };
+    fields = ['before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls', 'pet_after_photo_urls'];
+    filterGroups = undefined; // service set is small — scan all, check every photo field
+    keyBase = 'services';
+  }
+
+  const urlMap = new Map<string, string>();
+  const migrate = async (url: string, prefixId: string): Promise<string> => {
+    if (urlMap.has(url)) return urlMap.get(url)!;
+    const res = await fetch(url.split('#')[0]);
+    if (!res.ok) throw new Error(`download ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const name = decodeURIComponent(url.split('#')[0].split('?')[0].split('/').pop() || `photo_${Date.now()}.jpg`);
+    const m = /idbph_(\d+)__/.exec(name);
+    const key = `${keyBase}/${(opts.object === 'answer' && m) ? m[1] : prefixId}/${name}`;
+    const putRes = await put(key, buf, { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: res.headers.get('content-type') || 'image/jpeg', token: blobToken });
+    rep.copied++;
+    const vr = await fetch(putRes.url);
+    if (!vr.ok) throw new Error(`verify ${vr.status}`);
+    if (Buffer.from(await vr.arrayBuffer()).length !== buf.length) throw new Error('size mismatch');
+    rep.verified++;
+    urlMap.set(url, putRes.url);
+    return putRes.url;
+  };
+
+  const body: any = { limit: 100, after: opts.after || undefined, properties: fields };
+  if (filterGroups) body.filterGroups = filterGroups;
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, { method: 'POST', body: JSON.stringify(body) });
+  const results = resp.results || [];
+  const nextAfter: string | null = resp.paging?.next?.after || null;
+  const overBudget = () => Date.now() - start > budgetMs || rep.copied >= photoCap;
+
+  let budgetHit = false;
+  for (const r of results) {
+    if (overBudget()) { budgetHit = true; break; }
+    rep.scanned++;
+    const p = r.properties || {};
+    const patch: Record<string, any> = {};
+    let anyChange = false;
+    for (const field of fields) {
+      const urls = split(p[field]);
+      if (!urls.length) continue;
+      const next: string[] = [];
+      let touched = false;
+      for (const u of urls) {
+        if (isBlobFileUrl(u) || !isHubspotFileUrl(u)) { next.push(u); continue; }
+        rep.hubspotSeen++;
+        if (!opts.apply) { next.push(u); touched = true; continue; }
+        if (overBudget()) { next.push(u); budgetHit = true; continue; }
+        try { next.push(await migrate(u, String(r.id))); touched = true; }
+        catch (e: any) { err(`${u.slice(0, 50)}: ${String(e?.message || e)}`); next.push(u); }
+      }
+      if (opts.apply && touched) {
+        const finalUrls = Array.from(new Set(next));
+        patch[field] = finalUrls.join(PHOTO_URL_DELIMITER);
+        if (field === 'photo_urls') patch.photo_count = finalUrls.length;
+        anyChange = true;
+      }
+    }
+    if (opts.apply && anyChange && Object.keys(patch).length) {
+      try { await hubspotFetch(`/crm/v3/objects/${typeId}/${r.id}`, { method: 'PATCH', body: JSON.stringify({ properties: patch }) }); rep.recordsUpdated++; }
+      catch (e: any) { err(`patch ${r.id}: ${String(e?.message || e)}`); }
+    }
+    if (budgetHit) break;
+  }
+
+  if (budgetHit) { rep.after = opts.after ?? null; rep.done = false; }   // re-scan this page next call
+  else { rep.after = nextAfter; rep.done = !nextAfter; }
+  return rep;
+}
+
+/**
  * Update an Inspection record's properties (status, etc.).
  */
 /**

@@ -100,6 +100,41 @@ export default function AdminFlowsPage() {
     } finally { setReviewBusy(false); }
   }
 
+  // Photo migration (HubSpot Files → Vercel Blob): a browser-driven loop over
+  // batches so progress is visible. Copies inspections THEN services; never deletes.
+  const [migBusy, setMigBusy] = useState(false);
+  const [migErr, setMigErr] = useState<string | null>(null);
+  const [migProg, setMigProg] = useState<null | { phase: string; copied: number; verified: number; records: number; scanned: number; errors: number; done: boolean }>(null);
+  async function runMigratePhotos() {
+    if (migBusy) return;
+    if (typeof window !== 'undefined' && !window.confirm('Copy ALL remaining HubSpot-hosted photos (inspections + services) into Vercel Blob and rewrite references? This does NOT delete anything from HubSpot. Keep this tab open until it finishes.')) return;
+    setMigBusy(true); setMigErr(null);
+    const totals = { copied: 0, verified: 0, records: 0, scanned: 0, errors: 0 };
+    const objects: { key: 'answer' | 'service'; label: string }[] = [{ key: 'answer', label: 'Inspections' }, { key: 'service', label: 'Services' }];
+    try {
+      for (const obj of objects) {
+        let after: string | undefined; let done = false; let stalls = 0; let guard = 0;
+        do {
+          const qs = new URLSearchParams({ object: obj.key, apply: '1' });
+          if (after) qs.set('after', after);
+          const r = await fetch(`/api/admin/migrate-photos?${qs.toString()}`, { method: 'POST' });
+          const d = await r.json();
+          if (!r.ok) { setMigErr(d.error || 'Migration failed.'); setMigBusy(false); return; }
+          totals.copied += d.copied || 0; totals.verified += d.verified || 0; totals.records += d.recordsUpdated || 0; totals.scanned += d.scanned || 0; totals.errors += d.errors || 0;
+          setMigProg({ phase: obj.label, ...totals, done: false });
+          const prevAfter = after;
+          after = d.after || undefined; done = !!d.done;
+          const progressed = (d.copied || 0) > 0 || (d.recordsUpdated || 0) > 0 || after !== prevAfter;
+          stalls = progressed ? 0 : stalls + 1;
+          if (stalls >= 3) { done = true; } // no progress for 3 batches → move on
+          if (++guard > 5000) { setMigErr('Stopped after 5000 batches (safety cap).'); done = true; }
+        } while (!done);
+      }
+      setMigProg((p) => (p ? { ...p, phase: 'Complete', done: true } : { phase: 'Complete', ...totals, done: true }));
+    } catch (e: any) { setMigErr(String(e?.message || e)); }
+    finally { setMigBusy(false); }
+  }
+
   if (!authChecked) return null;
   if (!isAdmin) {
     return (
@@ -132,6 +167,27 @@ export default function AdminFlowsPage() {
             {reviewBusy ? 'Rerunning…' : 'Rerun AI Review'}
           </button>
           {reviewMsg && <p className={`text-[13px] mt-2 font-heading font-semibold ${reviewMsg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{reviewMsg.text}</p>}
+        </Section>
+
+        {/* ---- Photo migration: HubSpot Files → Vercel Blob ---- */}
+        <Section title="Migrate Photos out of HubSpot" desc="Copies every remaining HubSpot-hosted photo (inspections + services) into Vercel Blob and rewrites the references. Does NOT delete from HubSpot — reclaiming that space is a separate step. Safe to re-run; already-migrated photos are skipped. Keep this tab open while it runs.">
+          <button type="button" onClick={runMigratePhotos} disabled={migBusy}
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-brand text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300">
+            {migBusy && <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.5" /></svg>}
+            {migBusy ? 'Migrating…' : 'Start migration'}
+          </button>
+          {migProg && (
+            <div className="mt-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2.5 text-[13px]">
+              <div className={`font-heading font-bold ${migProg.done ? 'text-emerald-700' : 'text-ink'}`}>
+                {migProg.done ? 'Complete ✓' : `Migrating ${migProg.phase}…`}
+              </div>
+              <div className="text-gray-600 mt-1 tabular-nums">
+                {migProg.copied} copied · {migProg.verified} verified · {migProg.records} records updated · {migProg.scanned} scanned
+                {migProg.errors ? ` · ${migProg.errors} errors` : ''}
+              </div>
+            </div>
+          )}
+          {migErr && <p className="text-red-600 text-[13px] mt-2">{migErr}</p>}
         </Section>
 
         {/* ---- Approval Routing (PODs / Regions) — self-contained collapsible card ---- */}
