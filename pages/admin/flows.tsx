@@ -81,12 +81,13 @@ export default function AdminFlowsPage() {
   // batches so progress is visible. Copies inspections THEN services; never deletes.
   const [migBusy, setMigBusy] = useState(false);
   const [migErr, setMigErr] = useState<string | null>(null);
-  const [migProg, setMigProg] = useState<null | { phase: string; found: number; copied: number; verified: number; records: number; scanned: number; errors: number; done: boolean }>(null);
+  const [migProg, setMigProg] = useState<null | { phase: string; found: number; copied: number; verified: number; records: number; scanned: number; errors: number; samples: string[]; done: boolean }>(null);
   async function runMigratePhotos() {
     if (migBusy) return;
     if (typeof window !== 'undefined' && !window.confirm('Copy ALL remaining HubSpot-hosted photos (inspections + services) into Vercel Blob and rewrite references? This does NOT delete anything from HubSpot. Keep this tab open until it finishes.')) return;
     setMigBusy(true); setMigErr(null);
     const totals = { found: 0, copied: 0, verified: 0, records: 0, scanned: 0, errors: 0 };
+    const samples: string[] = [];
     const objects: { key: 'answer' | 'service'; label: string }[] = [{ key: 'answer', label: 'Inspections' }, { key: 'service', label: 'Services' }];
     try {
       for (const obj of objects) {
@@ -98,7 +99,8 @@ export default function AdminFlowsPage() {
           const d = await r.json();
           if (!r.ok) { setMigErr(d.error || 'Migration failed.'); setMigBusy(false); return; }
           totals.found += d.hubspotSeen || 0; totals.copied += d.copied || 0; totals.verified += d.verified || 0; totals.records += d.recordsUpdated || 0; totals.scanned += d.scanned || 0; totals.errors += d.errors || 0;
-          setMigProg({ phase: obj.label, ...totals, done: false });
+          for (const s of (d.errorSamples || [])) if (samples.length < 8 && !samples.includes(s)) samples.push(s);
+          setMigProg({ phase: obj.label, ...totals, samples, done: false });
           const prevAfter = after;
           after = d.after || undefined; done = !!d.done;
           const progressed = (d.copied || 0) > 0 || (d.recordsUpdated || 0) > 0 || after !== prevAfter;
@@ -107,7 +109,7 @@ export default function AdminFlowsPage() {
           if (++guard > 5000) { setMigErr('Stopped after 5000 batches (safety cap).'); done = true; }
         } while (!done);
       }
-      setMigProg((p) => (p ? { ...p, phase: 'Complete', done: true } : { phase: 'Complete', ...totals, done: true }));
+      setMigProg((p) => (p ? { ...p, phase: 'Complete', done: true } : { phase: 'Complete', ...totals, samples, done: true }));
     } catch (e: any) { setMigErr(String(e?.message || e)); }
     finally { setMigBusy(false); }
   }
@@ -206,6 +208,14 @@ export default function AdminFlowsPage() {
               <div className="text-gray-600 mt-0.5 tabular-nums">
                 {migProg.phase === 'Services' || migProg.phase === 'Complete' ? 'Records' : 'Inspections'}: {migProg.records} updated · {migProg.scanned} scanned
               </div>
+              {migProg.samples.length > 0 && (
+                <details className="mt-1.5">
+                  <summary className="text-[11px] text-amber-700 cursor-pointer">Why photos failed ({migProg.errors})</summary>
+                  <ul className="mt-1 text-[11px] text-gray-500 list-disc pl-4 space-y-0.5">
+                    {migProg.samples.map((s, i) => <li key={i} className="break-all">{s}</li>)}
+                  </ul>
+                </details>
+              )}
             </div>
           )}
           {migErr && <p className="text-red-600 text-[13px] mt-2">{migErr}</p>}
