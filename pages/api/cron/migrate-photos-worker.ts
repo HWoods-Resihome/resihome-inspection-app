@@ -19,7 +19,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const st = await readPhotoMigrationState<PhotoMigrationState>().catch(() => null);
   if (!st || !st.running || st.stopRequested) return res.status(200).json({ resumed: false, reason: 'not running' });
-  const stale = !st.heartbeatAt || Date.now() - Date.parse(st.heartbeatAt) > 5 * 60_000;
+  // Resume as soon as no worker is actively beating. A live worker refreshes its
+  // heartbeat after every batch (≤~40s), so a >120s-old heartbeat means the chain
+  // died (or the serverless self-kick never spawned one). This cron runs every
+  // minute, so a dead chain resumes within ~2 min — the reliable engine even when
+  // the in-process self-kick is flaky. 120s > max batch time avoids double-runners.
+  const stale = !st.heartbeatAt || Date.now() - Date.parse(st.heartbeatAt) > 120_000;
   if (!stale) return res.status(200).json({ resumed: false, reason: 'worker active' });
 
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
