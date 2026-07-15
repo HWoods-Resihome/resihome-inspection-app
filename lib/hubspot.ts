@@ -5554,6 +5554,43 @@ export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; a
 }
 
 /**
+ * Read-only diagnostic: for one inspection (by record id, or the first match of a
+ * search query like an address), report what photos each of its answer records
+ * actually holds — classified as HubSpot-hosted, Vercel Blob, offline draft
+ * (blob:/data:), or other — so a "report saved but photos missing" incident can
+ * be triaged (records with 0 photos where photos were expected = the photos
+ * never made it off the device; drafts persisted = stuck, still recoverable).
+ */
+export interface PhotoAuditAnswer { recordId: string; type: string; section: string; total: number; hubspot: number; blob: number; draft: number; other: number; }
+export interface PhotoAuditReport { inspectionId: string | null; found: boolean; answers: PhotoAuditAnswer[]; totals: { answers: number; photos: number; hubspot: number; blob: number; draft: number; other: number }; }
+export async function auditInspectionPhotos(opts: { inspectionId?: string; query?: string }): Promise<PhotoAuditReport> {
+  let id = (opts.inspectionId || '').trim();
+  if (!id && opts.query) {
+    const matches = await fetchInspections({ search: opts.query }).catch(() => []);
+    id = matches[0]?.recordId || '';
+  }
+  const empty: PhotoAuditReport = { inspectionId: id || null, found: false, answers: [], totals: { answers: 0, photos: 0, hubspot: 0, blob: 0, draft: 0, other: 0 } };
+  if (!id) return empty;
+  const answers = await fetchAnswersForInspection(id).catch(() => []);
+  const t = { answers: 0, photos: 0, hubspot: 0, blob: 0, draft: 0, other: 0 };
+  const rows: PhotoAuditAnswer[] = [];
+  for (const a of answers) {
+    const urls = [...(a.photoUrls || []), ...(a.afterPhotoUrls || [])];
+    if (!urls.length && a.answerType !== 'section_photo') continue;
+    const row: PhotoAuditAnswer = { recordId: a.recordId, type: a.answerType || '', section: a.section || '', total: urls.length, hubspot: 0, blob: 0, draft: 0, other: 0 };
+    for (const u of urls) {
+      if (/^(blob:|data:)/.test(u)) row.draft++;
+      else if (isBlobFileUrl(u)) row.blob++;
+      else if (isHubspotFileUrl(u)) row.hubspot++;
+      else row.other++;
+    }
+    t.answers++; t.photos += row.total; t.hubspot += row.hubspot; t.blob += row.blob; t.draft += row.draft; t.other += row.other;
+    rows.push(row);
+  }
+  return { inspectionId: id, found: true, answers: rows, totals: t };
+}
+
+/**
  * Update an Inspection record's properties (status, etc.).
  */
 /**

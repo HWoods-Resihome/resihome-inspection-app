@@ -1044,6 +1044,31 @@ export function QuestionForm({
     return () => { clearInterval(id); void flushSectionPhotosRef.current(); };
   }, [readOnly]);
 
+  // Live "photos still saving" signal — so an inspector on weak signal knows NOT
+  // to leave (incl. via Save & Close, which has no submit-time guard). Counts
+  // device-local drafts (blob:/data: not yet uploaded) + the durable upload queue
+  // + the durable attach outbox for this inspection. > 0 ⇒ photos aren't safe yet.
+  const [unsyncedPhotos, setUnsyncedPhotos] = useState(0);
+  useEffect(() => {
+    if (readOnly) return;
+    let stop = false;
+    const draftCount = () => {
+      let n = 0;
+      for (const arr of Object.values(sectionPhotos)) for (const u of arr) if (u && (u.startsWith('blob:') || u.startsWith('data:'))) n++;
+      for (const a of Object.values(answers)) for (const u of (a.photoUrls || [])) if (u && (u.startsWith('blob:') || u.startsWith('data:'))) n++;
+      return n;
+    };
+    const tick = async () => {
+      let q = 0; let at = 0;
+      try { q = await countQueuedPhotos(inspectionRecordId); } catch { /* ignore */ }
+      try { at = countPhotoAttach(inspectionRecordId); } catch { /* ignore */ }
+      if (!stop) setUnsyncedPhotos(Math.max(draftCount(), q + at));
+    };
+    void tick();
+    const id = setInterval(() => { void tick(); }, 3000);
+    return () => { stop = true; clearInterval(id); };
+  }, [readOnly, inspectionRecordId, sectionPhotos, answers]);
+
   const hasEverHadSectionSave = useRef(false);
 
   // ---- Offline photo cache + auto-sync -----------------------------------
@@ -2214,6 +2239,16 @@ export function QuestionForm({
       </header>
 
       <div className="lz-content max-w-3xl mx-auto px-4 py-6 pb-32">
+        {/* Weak-signal safety net: photos aren't durable until this clears. Warns
+            throughout the session (Save & Close has no submit-time photo guard). */}
+        {!readOnly && unsyncedPhotos > 0 && (
+          <div className="mb-3 rounded-xl bg-amber-50 border border-amber-300 px-3 py-2.5 flex items-start gap-2.5">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600 shrink-0 mt-0.5 animate-pulse"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" /></svg>
+            <div className="text-[13px] text-amber-900">
+              <b>{unsyncedPhotos} photo{unsyncedPhotos === 1 ? '' : 's'} still saving.</b> Stay on this screen with a good signal until this message clears — don’t leave the property yet. Photos aren’t safely saved to the report until it disappears.
+            </div>
+          </div>
+        )}
         {/* Collapse / Expand all — top-right, just above the sections. */}
         {/* Answered counter (moved off the header so the property text gets full
             width) on the left; Collapse/Expand-all on the right. */}
