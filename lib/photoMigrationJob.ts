@@ -23,38 +23,44 @@ export interface PhotoMigrationState {
 }
 
 const nowIso = () => new Date().toISOString();
+const staleIso = () => new Date(Date.now() - 100_000).toISOString(); // ~100s old → "unclaimed"
 const zeroTotals = () => ({ found: 0, copied: 0, verified: 0, records: 0, scanned: 0, errors: 0 });
 const ageMs = (iso?: string) => (iso ? Date.now() - Date.parse(iso) : Infinity);
 
 export function freshState(): PhotoMigrationState {
-  return { running: true, stopRequested: false, object: 'answer', cursor: null, totals: zeroTotals(), errorSamples: [], startedAt: nowIso(), heartbeatAt: nowIso() };
+  // heartbeat starts STALE so the very first worker claims it (a fresh heartbeat
+  // is the signal that another worker is actively running).
+  return { running: true, stopRequested: false, object: 'answer', cursor: null, totals: zeroTotals(), errorSamples: [], startedAt: nowIso(), heartbeatAt: staleIso() };
 }
 
-/** Fire-and-forget: spawn the next worker invocation without waiting for it to
- *  finish. The short abort just ensures the request is dispatched — Vercel keeps
- *  the spawned function running after we abort our side. */
-export function kickWorker(origin: string, secret: string): void {
+/** Spawn the next worker invocation. AWAITED with a short abort so the request is
+ *  actually dispatched (and the worker function spawned by Vercel) before the
+ *  caller returns/freezes — a bare fire-and-forget often never leaves the box on
+ *  serverless. The abort only drops OUR connection; the spawned function runs on. */
+export async function kickWorker(origin: string, secret: string): Promise<void> {
   if (!origin || !secret) return;
   try {
-    void fetch(`${origin}/api/admin/migrate-photos-bg?action=work&token=${encodeURIComponent(secret)}`, {
+    await fetch(`${origin}/api/admin/migrate-photos-bg?action=work&token=${encodeURIComponent(secret)}`, {
       method: 'POST',
-      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(2500) : undefined,
-    }).catch(() => {});
-  } catch { /* dispatch best-effort */ }
+      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(3000) : undefined,
+    });
+  } catch { /* AbortError after ~3s is expected — the worker is already running */ }
 }
 
 /**
  * Run migration batches until a time budget is spent, then chain the next
- * invocation. Single-runner: bails if another worker's heartbeat is fresh.
+ * invocation. Single-runner: bails only if another worker's heartbeat is FRESH.
  */
 export async function runMigrationWorker(origin: string, secret: string): Promise<void> {
   const start = Date.now();
-  const BUDGET_MS = 240_000; // stay under the 300s function ceiling
+  const BUDGET_MS = 230_000; // stay under the 300s function ceiling (+ chain kick)
   let st = await readPhotoMigrationState<PhotoMigrationState>().catch(() => null);
   if (!st || !st.running) return;                 // nothing to do
   if (st.stopRequested) { await writePhotoMigrationState({ ...st, running: false, stopRequested: false, finishedAt: nowIso() }); return; }
-  // Single-runner lock: a fresh heartbeat means another worker is active.
-  if (ageMs(st.heartbeatAt) < 90_000 && ageMs(st.startedAt) > 3_000) return;
+  // Single-runner lock: a FRESH heartbeat (<90s) means another worker is beating.
+  // A stale/absent one means we're clear to claim (start seeds it stale; a
+  // chaining worker sets it stale before handing off).
+  if (ageMs(st.heartbeatAt) < 90_000) return;
   // Claim it.
   st = { ...st, heartbeatAt: nowIso() };
   await writePhotoMigrationState(st);
@@ -89,6 +95,8 @@ export async function runMigrationWorker(origin: string, secret: string): Promis
     if (!running) return;   // finished
   }
 
-  // Budget spent but not done → hand off to the next invocation.
-  kickWorker(origin, secret);
+  // Budget spent but not done → RELEASE the lock (stale heartbeat) so the next
+  // worker can claim immediately, then hand off. Await the kick so it dispatches.
+  await writePhotoMigrationState({ ...st, heartbeatAt: staleIso() });
+  await kickWorker(origin, secret);
 }

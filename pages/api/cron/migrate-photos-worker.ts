@@ -25,6 +25,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const origin = host ? `${proto}://${host}` : '';
-  kickWorker(origin, secret);
+  await kickWorker(origin, secret);
   return res.status(200).json({ resumed: true });
 }
