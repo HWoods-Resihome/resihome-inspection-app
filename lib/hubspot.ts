@@ -1,6 +1,7 @@
 // HubSpot API client. SERVER-SIDE ONLY -- never import in client code.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { put } from '@vercel/blob';
 import type { Question, Property, HubSpotUser, InspectionSummary } from './types';
 import type { SampleService, ServiceStatus } from './services/sampleData';
 import type { Worktype } from './services/worktypes';
@@ -5198,6 +5199,81 @@ export async function backfillPhotosDryRun(opts: { inspectionId?: string; limit?
     }
     after = report.truncated ? undefined : resp.paging?.next?.after;
   } while (after);
+  return report;
+}
+
+/**
+ * Copy one inspection's HubSpot-hosted answer photos into Vercel Blob and rewrite
+ * the answer references (photo_urls / after_photo_urls) to the new public Blob
+ * URLs. Verified per photo (re-download + byte match). Does NOT delete from
+ * HubSpot — reclaim is a separate, deliberate step (the standalone script's
+ * --delete). Idempotent + resumable: already-on-Blob URLs are skipped, so a
+ * re-run after a timeout continues cleanly. `apply:false` counts only.
+ */
+export interface BackfillCopyReport {
+  mode: 'apply' | 'dry-run'; inspectionId: string;
+  hubspotPhotos: number; copied: number; verified: number; skippedAlreadyBlob: number;
+  recordsUpdated: number; errors: number; errorSamples: string[]; truncated: boolean;
+}
+export async function backfillPhotosCopyForInspection(opts: { inspectionId: string; apply: boolean; limit?: number }): Promise<BackfillCopyReport> {
+  const { inspectionId, apply } = opts;
+  const limit = opts.limit && opts.limit > 0 ? opts.limit : 100000;
+  const { answer: answerType } = typeIds();
+  const report: BackfillCopyReport = { mode: apply ? 'apply' : 'dry-run', inspectionId, hubspotPhotos: 0, copied: 0, verified: 0, skippedAlreadyBlob: 0, recordsUpdated: 0, errors: 0, errorSamples: [], truncated: false };
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN || '';
+  if (apply && !blobToken) throw new Error('BLOB_READ_WRITE_TOKEN is not set — cannot copy to Blob.');
+  const hasAfter = await answerHasProperty('after_photo_urls').catch(() => false);
+  const answers = await fetchAnswersForInspection(inspectionId);
+
+  const urlMap = new Map<string, string>();   // old HubSpot URL → new Blob URL (this run)
+  const migrate = async (url: string): Promise<string> => {
+    if (urlMap.has(url)) return urlMap.get(url)!;
+    const res = await fetch(url.split('#')[0]);
+    if (!res.ok) throw new Error(`download ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const name = decodeURIComponent(url.split('#')[0].split('?')[0].split('/').pop() || `photo_${Date.now()}.jpg`);
+    const m = /idbph_(\d+)__/.exec(name);
+    const key = `inspections/${m ? m[1] : inspectionId}/${name}`;
+    const putRes = await put(key, buf, { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: res.headers.get('content-type') || 'image/jpeg', token: blobToken });
+    report.copied++;
+    const vr = await fetch(putRes.url);   // verify: re-download + byte match
+    if (!vr.ok) throw new Error(`verify ${vr.status}`);
+    const vbuf = Buffer.from(await vr.arrayBuffer());
+    if (vbuf.length !== buf.length) throw new Error(`size mismatch ${vbuf.length}!=${buf.length}`);
+    report.verified++;
+    urlMap.set(url, putRes.url);
+    return putRes.url;
+  };
+
+  for (const a of answers) {
+    if (report.hubspotPhotos >= limit) { report.truncated = true; break; }
+    const fields: { key: string; urls: string[] }[] = [
+      { key: 'photo_urls', urls: a.photoUrls || [] },
+      ...(hasAfter ? [{ key: 'after_photo_urls', urls: a.afterPhotoUrls || [] }] : []),
+    ];
+    const patch: Record<string, any> = {};
+    for (const f of fields) {
+      let touched = false;
+      const nextUrls: string[] = [];
+      for (const u of f.urls) {
+        if (isBlobFileUrl(u)) { report.skippedAlreadyBlob++; nextUrls.push(u); continue; }
+        if (!isHubspotFileUrl(u)) { nextUrls.push(u); continue; }
+        report.hubspotPhotos++;
+        if (!apply) { nextUrls.push(u); touched = true; continue; }
+        try { nextUrls.push(await migrate(u)); touched = true; }
+        catch (e: any) { report.errors++; if (report.errorSamples.length < 10) report.errorSamples.push(`${u.slice(0, 60)}: ${String(e?.message || e).slice(0, 80)}`); nextUrls.push(u); }
+      }
+      if (apply && touched) {
+        const finalUrls = Array.from(new Set(nextUrls));   // also dedupes in the same pass
+        patch[f.key] = finalUrls.join(PHOTO_URL_DELIMITER);
+        if (f.key === 'photo_urls') patch.photo_count = finalUrls.length;
+      }
+    }
+    if (apply && Object.keys(patch).length) {
+      try { await hubspotFetch(`/crm/v3/objects/${answerType}/${a.recordId}`, { method: 'PATCH', body: JSON.stringify({ properties: patch }) }); report.recordsUpdated++; }
+      catch (e: any) { report.errors++; if (report.errorSamples.length < 10) report.errorSamples.push(`patch ${a.recordId}: ${String(e?.message || e).slice(0, 80)}`); }
+    }
+  }
   return report;
 }
 
