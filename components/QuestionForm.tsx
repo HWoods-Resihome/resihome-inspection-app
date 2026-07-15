@@ -893,6 +893,11 @@ export function QuestionForm({
 
   function removeSectionPhoto(instanceKey: string, idx: number) {
     if (readOnly) return;
+    // Cancel any pending durable attach for this URL AND discard its queued draft
+    // — otherwise the background attach outbox re-attaches the just-deleted photo
+    // to the record (it re-appears on reload). Mirrors replaceSectionPhoto.
+    const removed = (sectionPhotos[instanceKey] || [])[idx];
+    if (removed) { try { void discardQueuedByUrls([removed]); removePhotoAttachByUrl([removed]); } catch { /* best-effort */ } }
     setSectionPhotos((prev) => ({
       ...prev,
       [instanceKey]: (prev[instanceKey] || []).filter((_, i) => i !== idx),
@@ -941,9 +946,13 @@ export function QuestionForm({
     }
   }, [sectionPhotos, readOnly]);
 
+  // Keep the latest flush closure in a ref so BOTH the 2.5s interval and the
+  // unmount cleanup persist the CURRENT section photos — a delete made right
+  // before Save & Close would otherwise be lost if the interval hadn't ticked.
+  const flushSectionPhotosRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
-    if (readOnly) return;
-    const id = setInterval(async () => {
+    flushSectionPhotosRef.current = async () => {
+      if (readOnly) return;
       if (sectionPhotoDirtyRef.current.size === 0) return;
       const dirtyKeys = Array.from(sectionPhotoDirtyRef.current);
       sectionPhotoDirtyRef.current.clear();
@@ -1025,10 +1034,15 @@ export function QuestionForm({
         console.error('Section photo save error:', e);
         for (const k of dirtyKeys) sectionPhotoDirtyRef.current.add(k);
       }
-    }, 2500);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly, inspectionRecordId, inspectionExternalId, sectionPhotos, sectionInstances]);
+    };
+  });
+  useEffect(() => {
+    if (readOnly) return;
+    const id = setInterval(() => { void flushSectionPhotosRef.current(); }, 2500);
+    // Flush on unmount too: Save & Close navigates away before the next tick,
+    // which would otherwise drop a just-made deletion/addition.
+    return () => { clearInterval(id); void flushSectionPhotosRef.current(); };
+  }, [readOnly]);
 
   const hasEverHadSectionSave = useRef(false);
 
