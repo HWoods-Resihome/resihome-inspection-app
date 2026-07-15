@@ -5146,6 +5146,62 @@ export async function dedupeAnswerPhotos(opts: { apply: boolean; inspectionId?: 
 }
 
 /**
+ * Read-only inventory for the HubSpot Files → Vercel Blob photo backfill: counts
+ * how many photos on inspection_answer records still live in HubSpot Files (would
+ * migrate), how many are already on Blob, and how many are other/external. Writes
+ * nothing and downloads nothing (unlike the standalone script's dry run, which
+ * also measures bytes). Scope to one inspection with `inspectionId`, else scans
+ * all answers with photos (paged).
+ */
+const isHubspotFileUrl = (u: string) => /hubspotusercontent|hubfs|hs-fs\./i.test(String(u || ''));
+const isBlobFileUrl = (u: string) => /\.blob\.vercel-storage\.com/i.test(String(u || ''));
+export interface BackfillDryRunReport {
+  mode: 'dry-run'; scanned: number; answersWithHubspotPhotos: number;
+  hubspotPhotos: number; alreadyOnBlob: number; otherExternal: number;
+  samples: { recordId: string; hubspot: number; blob: number }[]; truncated: boolean;
+}
+export async function backfillPhotosDryRun(opts: { inspectionId?: string; limit?: number }): Promise<BackfillDryRunReport> {
+  const limit = opts.limit && opts.limit > 0 ? opts.limit : 100000;
+  const { answer: answerType } = typeIds();
+  const hasAfter = await answerHasProperty('after_photo_urls').catch(() => false);
+  const fields = ['photo_urls', ...(hasAfter ? ['after_photo_urls'] : [])];
+  const report: BackfillDryRunReport = { mode: 'dry-run', scanned: 0, answersWithHubspotPhotos: 0, hubspotPhotos: 0, alreadyOnBlob: 0, otherExternal: 0, samples: [], truncated: false };
+  const split = (raw: any): string[] => String(raw || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  const proc = (recordId: string, p: Record<string, any>) => {
+    report.scanned++;
+    let hs = 0; let blob = 0;
+    for (const f of fields) for (const u of split(p[f])) {
+      if (isHubspotFileUrl(u)) hs++;
+      else if (isBlobFileUrl(u)) blob++;
+      else report.otherExternal++;
+    }
+    report.hubspotPhotos += hs; report.alreadyOnBlob += blob;
+    if (hs > 0) { report.answersWithHubspotPhotos++; if (report.samples.length < 25) report.samples.push({ recordId, hubspot: hs, blob }); }
+  };
+  if (opts.inspectionId) {
+    const answers = await fetchAnswersForInspection(opts.inspectionId);
+    for (const a of answers) {
+      if (report.scanned >= limit) { report.truncated = true; break; }
+      proc(a.recordId, { photo_urls: (a.photoUrls || []).join(PHOTO_URL_DELIMITER), after_photo_urls: (a.afterPhotoUrls || []).join(PHOTO_URL_DELIMITER) });
+    }
+    return report;
+  }
+  let after: string | undefined;
+  do {
+    const resp = await hubspotFetch(`/crm/v3/objects/${answerType}/search`, {
+      method: 'POST',
+      body: JSON.stringify({ limit: 100, after, properties: fields, filterGroups: [{ filters: [{ propertyName: 'photo_urls', operator: 'HAS_PROPERTY' }] }] }),
+    });
+    for (const r of resp.results || []) {
+      if (report.scanned >= limit) { report.truncated = true; break; }
+      proc(String(r.id), r.properties || {});
+    }
+    after = report.truncated ? undefined : resp.paging?.next?.after;
+  } while (after);
+  return report;
+}
+
+/**
  * Update an Inspection record's properties (status, etc.).
  */
 /**
