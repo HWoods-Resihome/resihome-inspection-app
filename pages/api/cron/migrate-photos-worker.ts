@@ -5,7 +5,7 @@
  * Vercel attaches Authorization: Bearer $CRON_SECRET; we require it.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { readPhotoMigrationState } from '@/lib/hubspot';
+import { readPhotoMigrationState, writePhotoMigrationState } from '@/lib/hubspot';
 import { kickWorker, type PhotoMigrationState } from '@/lib/photoMigrationJob';
 
 export const config = { maxDuration: 30 };
@@ -18,13 +18,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (provided !== secret) return res.status(401).json({ error: 'Unauthorized' });
 
   const st = await readPhotoMigrationState<PhotoMigrationState>().catch(() => null);
-  if (!st || !st.running || st.stopRequested) return res.status(200).json({ resumed: false, reason: 'not running' });
+  if (!st || !st.running) return res.status(200).json({ resumed: false, reason: 'not running' });
+
+  // Janitor for a wedged "stopping" job: a stop was requested but no worker is
+  // alive to consume it (stale heartbeat). Finalize it here so it can't hang on
+  // "Stopping…" forever. If a worker is still beating, leave it — it'll honor the
+  // stop after its current batch.
+  const stale = !st.heartbeatAt || Date.now() - Date.parse(st.heartbeatAt) > 120_000;
+  if (st.stopRequested) {
+    if (stale) {
+      await writePhotoMigrationState({ ...st, stopRequested: false, running: false, finishedAt: new Date().toISOString() });
+      return res.status(200).json({ resumed: false, reason: 'stop finalized' });
+    }
+    return res.status(200).json({ resumed: false, reason: 'stopping' });
+  }
   // Resume as soon as no worker is actively beating. A live worker refreshes its
   // heartbeat after every batch (≤~40s), so a >120s-old heartbeat means the chain
   // died (or the serverless self-kick never spawned one). This cron runs every
   // minute, so a dead chain resumes within ~2 min — the reliable engine even when
   // the in-process self-kick is flaky. 120s > max batch time avoids double-runners.
-  const stale = !st.heartbeatAt || Date.now() - Date.parse(st.heartbeatAt) > 120_000;
   if (!stale) return res.status(200).json({ resumed: false, reason: 'worker active' });
 
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https';

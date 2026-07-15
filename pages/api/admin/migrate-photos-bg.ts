@@ -50,13 +50,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (action === 'stop') {
     const st = await readPhotoMigrationState<PhotoMigrationState>().catch(() => null);
     if (st) {
-      // If a worker is actively beating (fresh heartbeat), just flag it — it will
-      // stop gracefully after the current batch and record its progress. If NO
-      // worker is alive (stale/absent heartbeat), finalize now so the UI unblocks
-      // instead of showing "Stopping…" forever with nobody to consume the flag.
+      // First press with a worker actively beating (fresh heartbeat) → flag a
+      // graceful stop; the worker halts after its current batch and keeps its
+      // progress. Otherwise — no live worker (stale heartbeat) OR a second press
+      // on a job that's already flagged but wedged — force-finalize NOW so the UI
+      // unblocks instead of showing "Stopping…" forever with nobody to consume it.
       const active = !!st.heartbeatAt && Date.now() - Date.parse(st.heartbeatAt) < 120_000;
+      const alreadyAsked = st.stopRequested === true;
       await writePhotoMigrationState(
-        active
+        active && !alreadyAsked
           ? { ...st, stopRequested: true }
           : { ...st, stopRequested: false, running: false, finishedAt: new Date().toISOString() },
       );

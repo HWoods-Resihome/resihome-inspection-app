@@ -85,11 +85,13 @@ export async function runMigrationWorker(origin: string, secret: string): Promis
     const errorSamples = [...(st.errorSamples || [])];
     for (const s of (rep.errorSamples || [])) if (errorSamples.length < 20 && !errorSamples.includes(s)) errorSamples.push(s);
 
-    // A batch runs up to ~40s. If the user pressed Stop DURING it, that flag was
-    // written after we last read state — re-read so this progress write honors it
-    // instead of clobbering it back to false (the "can't stop it" bug).
+    // A batch runs up to ~40s. If the user pressed Stop (or a force-stop set
+    // running=false) DURING it, that was written after we last read state —
+    // re-read so this progress write honors it instead of clobbering it back to
+    // running (the "can't stop it" bug). Honoring running===false too prevents a
+    // force-finalize from being resurrected by this end-of-batch write.
     const latest = await readPhotoMigrationState<PhotoMigrationState>().catch(() => null);
-    const stopNow = !!latest?.stopRequested;
+    const stopNow = !!latest && (latest.stopRequested === true || latest.running === false);
 
     let object = st.object; let cursor = rep.after; let running = true; let finishedAt: string | undefined;
     if (rep.done) {
