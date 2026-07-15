@@ -362,7 +362,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ success: true, inspectionId, externalId, inspectionName, copiedLines });
   } catch (e: any) {
     console.error('POST /api/inspections/create failed:', e);
-    void recordErrorEvent({ kind: 'inspection_start', message: String(e?.message || e), email: session.email, template: (req.body as CreateBody)?.templateType, source: 'server' });
+    // Capture the RAW HubSpot detail (e.detail from hubspotFetch) so the admin
+    // error log shows WHICH property/association a 400 actually failed on — the
+    // sanitized "Upstream request failed (400)" alone can't be diagnosed.
+    void recordErrorEvent({
+      kind: 'inspection_start', message: String(e?.message || e),
+      email: session.email, template: (req.body as CreateBody)?.templateType, source: 'server',
+      meta: { detail: String(e?.detail || '').slice(0, 600), status: e?.status ?? null, propertyId: (req.body as CreateBody)?.propertyRecordId || (req.body as CreateBody)?.communityRecordId || null },
+    });
     return res.status(500).json({ error: String(e.message || e) });
   }
 }

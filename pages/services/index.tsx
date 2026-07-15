@@ -202,7 +202,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
       const parts = [`${d.canceled} canceled`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
       setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Cancel — ${parts.join(' · ')}` });
       exitSelect();
-      router.replace(router.asPath, undefined, { scroll: false });
+      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});
     } catch { setActionMsg({ status: 'error', msg: 'Cancel — couldn’t reach the server. Try again.' }); }
     finally { setActionBusy(false); }
   };
@@ -220,7 +220,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
       const parts = [`${d.reassigned} reassigned to ${d.vendorName}`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
       setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Reassign — ${parts.join(' · ')}` });
       exitSelect();
-      router.replace(router.asPath, undefined, { scroll: false });
+      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});
     } catch { setActionMsg({ status: 'error', msg: 'Reassign — couldn’t reach the server. Try again.' }); }
     finally { setActionBusy(false); }
   };
@@ -303,7 +303,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <PullToRefresh onRefresh={async () => { await router.replace(router.asPath, undefined, { scroll: false }); }} />
+      <PullToRefresh onRefresh={async () => { await router.replace(router.asPath, undefined, { scroll: false }).catch(() => {}); }} />
       {/* Pink header — mirrors the inspections home. */}
       <header className="bg-brand text-white sticky top-0 z-30 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
         <div className="max-w-3xl mx-auto px-4 pt-2 pb-2.5">

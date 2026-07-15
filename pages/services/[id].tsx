@@ -313,7 +313,7 @@ function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boo
       const d = await r.json();
       if (!r.ok) { setErr(d.error || 'Save failed.'); return; }
       setDirty(false);
-      router.replace(router.asPath);   // reflect the new count + pricing
+      router.replace(router.asPath).catch(() => {});   // reflect the new count + pricing (ignore same-URL invariant)
     } catch { setErr('Save failed.'); }
     finally { setSaving(false); }
   };
@@ -957,7 +957,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       const d = await r.json();
       if (!r.ok) { setSettingsMsg(d.error || 'Could not reassign.'); return; }
       setReassignOpen(false);
-      router.replace(router.asPath, undefined, { scroll: false });   // refresh the record
+      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});   // refresh the record
     } catch { setSettingsMsg('Couldn’t reach the server. Try again.'); }
     finally { setReassigning(false); }
   };
@@ -971,7 +971,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       const d = await r.json();
       if (!r.ok) { setSettingsMsg(d.error || 'Could not change the due date.'); return; }
       setDueOpen(false);
-      router.replace(router.asPath, undefined, { scroll: false });   // refresh with the new due date
+      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});   // refresh with the new due date
     } catch { setSettingsMsg('Couldn’t reach the server. Try again.'); }
     finally { setSavingDue(false); }
   };
@@ -1065,7 +1065,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 </div></>)}
             </div>
           )}
-          <ServicePager currentId={svc.id} onNavigate={(id) => { flushDraft(true); router.replace(`/services/${id}`); }} />
+          <ServicePager currentId={svc.id} onNavigate={(id) => { if (id === svc.id) return; flushDraft(true); router.replace(`/services/${id}`).catch(() => {}); }} />
           {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7 shrink-0" />}
           <Link href="/services" aria-label="Back to Services" className="shrink-0 text-gray-400 hover:text-ink">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
