@@ -206,7 +206,7 @@ export default function AdminFlowsPage() {
               {/* Records: how many inspections/services had their photo references
                   rewritten, out of how many were scanned. */}
               <div className="text-gray-600 mt-0.5 tabular-nums">
-                {migProg.phase === 'Services' || migProg.phase === 'Complete' ? 'Records' : 'Inspections'}: {migProg.records} updated · {migProg.scanned} scanned
+                {migProg.phase === 'Services' || migProg.phase === 'Complete' ? 'Service records' : 'Answer records'}: {migProg.records} updated · {migProg.scanned} scanned
               </div>
               {migProg.samples.length > 0 && (
                 <details className="mt-1.5">
@@ -232,8 +232,9 @@ export default function AdminFlowsPage() {
                 {rem.inspections.records === 0 && rem.services.records === 0
                   ? <span className="font-heading font-bold text-emerald-700">Nothing left — all photos are on Blob ✓</span>
                   : <>
-                      <div><b>{rem.inspections.records}</b> inspection record(s) left ({rem.inspections.photos} photo(s))</div>
-                      <div><b>{rem.services.records}</b> service record(s) left ({rem.services.photos} photo(s))</div>
+                      <div><b>{rem.inspections.photos}</b> inspection photo(s) left, across <b>{rem.inspections.records}</b> answer record(s)</div>
+                      <div><b>{rem.services.photos}</b> service photo(s) left, across <b>{rem.services.records}</b> record(s)</div>
+                      <div className="text-gray-400 text-[11px] mt-0.5">Answer records are the per-question/section photo holders — many per inspection, not the ~parent inspection count.</div>
                     </>}
               </div>
             )}
