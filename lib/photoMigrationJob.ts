@@ -85,14 +85,23 @@ export async function runMigrationWorker(origin: string, secret: string): Promis
     const errorSamples = [...(st.errorSamples || [])];
     for (const s of (rep.errorSamples || [])) if (errorSamples.length < 20 && !errorSamples.includes(s)) errorSamples.push(s);
 
+    // A batch runs up to ~40s. If the user pressed Stop DURING it, that flag was
+    // written after we last read state — re-read so this progress write honors it
+    // instead of clobbering it back to false (the "can't stop it" bug).
+    const latest = await readPhotoMigrationState<PhotoMigrationState>().catch(() => null);
+    const stopNow = !!latest?.stopRequested;
+
     let object = st.object; let cursor = rep.after; let running = true; let finishedAt: string | undefined;
     if (rep.done) {
       if (object === 'answer') { object = 'service'; cursor = null; }   // move to services
       else { running = false; finishedAt = nowIso(); }                  // all done
     }
-    st = { ...st, object, cursor, totals, errorSamples, heartbeatAt: nowIso(), running, ...(finishedAt ? { finishedAt } : {}), lastError: undefined };
+    if (stopNow) { running = false; finishedAt = finishedAt || nowIso(); }   // user requested stop
+    // Always clear stopRequested here (we've now consumed it); persist accumulated
+    // progress even when stopping so counts aren't lost.
+    st = { ...st, object, cursor, totals, errorSamples, heartbeatAt: nowIso(), running, stopRequested: false, ...(finishedAt ? { finishedAt } : {}), lastError: undefined };
     await writePhotoMigrationState(st);
-    if (!running) return;   // finished
+    if (!running) return;   // finished or stopped
   }
 
   // Budget spent but not done → RELEASE the lock (stale heartbeat) so the next
