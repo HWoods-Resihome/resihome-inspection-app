@@ -5,7 +5,7 @@ import type { Question, Property, HubSpotUser, InspectionSummary } from './types
 import type { SampleService, ServiceStatus } from './services/sampleData';
 import type { Worktype } from './services/worktypes';
 import { isInternalResolution } from './vendors';
-import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
+import { buildSectionPhotoAnswerProps, joinPhotoUrls, PHOTO_URL_DELIMITER } from './answerProps';
 import { extractLeasingAgent1099Fields } from './leasingAgent1099';
 import { calculateLine, roundMoney } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
@@ -5066,6 +5066,83 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
     }
   }
   return out;
+}
+
+/**
+ * One-time cleanup: rewrite inspection_answer records whose photo_urls /
+ * after_photo_urls hold duplicate URLs (from the old autosave + attach-outbox
+ * dual write) down to their de-duplicated set, fixing photo_count to match.
+ * Dry-run by default; `apply` performs the PATCHes. Scope to one inspection with
+ * `inspectionId`, else scans all answers that have photos (paged). Idempotent —
+ * only records that actually have dupes are touched.
+ */
+export interface DedupePhotosReport {
+  mode: 'dry-run' | 'apply';
+  scanned: number; withDupes: number; rewritten: number; errors: number;
+  removedUrls: number;
+  samples: { recordId: string; field: string; before: number; after: number }[];
+  truncated: boolean;
+}
+export async function dedupeAnswerPhotos(opts: { apply: boolean; inspectionId?: string; limit?: number }): Promise<DedupePhotosReport> {
+  const { apply, inspectionId } = opts;
+  const limit = opts.limit && opts.limit > 0 ? opts.limit : 100000;
+  const { answer: answerType } = typeIds();
+  const hasAfter = await answerHasProperty('after_photo_urls').catch(() => false);
+  const fields = ['photo_urls', ...(hasAfter ? ['after_photo_urls'] : [])];
+  const report: DedupePhotosReport = { mode: apply ? 'apply' : 'dry-run', scanned: 0, withDupes: 0, rewritten: 0, errors: 0, removedUrls: 0, samples: [], truncated: false };
+
+  const splitUrls = (raw: any): string[] => String(raw || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+
+  const processRecord = async (recordId: string, p: Record<string, any>) => {
+    report.scanned++;
+    const patch: Record<string, any> = {};
+    for (const field of fields) {
+      const urls = splitUrls(p[field]);
+      if (!urls.length) continue;
+      const deduped = Array.from(new Set(urls));
+      if (deduped.length < urls.length) {
+        patch[field] = deduped.join(PHOTO_URL_DELIMITER);
+        if (field === 'photo_urls') patch.photo_count = deduped.length;
+        report.removedUrls += urls.length - deduped.length;
+        if (report.samples.length < 25) report.samples.push({ recordId, field, before: urls.length, after: deduped.length });
+      }
+    }
+    if (!Object.keys(patch).length) return;
+    report.withDupes++;
+    if (apply) {
+      try {
+        await hubspotFetch(`/crm/v3/objects/${answerType}/${recordId}`, { method: 'PATCH', body: JSON.stringify({ properties: patch }) });
+        report.rewritten++;
+        await new Promise((r) => setTimeout(r, 60)); // gentle on the API
+      } catch (e) { report.errors++; console.warn('[dedupeAnswerPhotos] patch failed', recordId, e); }
+    }
+  };
+
+  if (inspectionId) {
+    const answers = await fetchAnswersForInspection(inspectionId);
+    for (const a of answers) {
+      if (report.scanned >= limit) { report.truncated = true; break; }
+      await processRecord(a.recordId, {
+        photo_urls: (a.photoUrls || []).join(PHOTO_URL_DELIMITER),
+        after_photo_urls: (a.afterPhotoUrls || []).join(PHOTO_URL_DELIMITER),
+      });
+    }
+    return report;
+  }
+
+  let after: string | undefined;
+  do {
+    const resp = await hubspotFetch(`/crm/v3/objects/${answerType}/search`, {
+      method: 'POST',
+      body: JSON.stringify({ limit: 100, after, properties: fields, filterGroups: [{ filters: [{ propertyName: 'photo_urls', operator: 'HAS_PROPERTY' }] }] }),
+    });
+    for (const r of resp.results || []) {
+      if (report.scanned >= limit) { report.truncated = true; break; }
+      await processRecord(String(r.id), r.properties || {});
+    }
+    after = report.truncated ? undefined : resp.paging?.next?.after;
+  } while (after);
+  return report;
 }
 
 /**
