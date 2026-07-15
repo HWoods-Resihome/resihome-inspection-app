@@ -5478,9 +5478,13 @@ export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; a
   const referenced = await referencedHubspotPhotoUrls();
   rep.referencedCount = referenced.size;
 
-  const qs = new URLSearchParams({ limit: '100', properties: 'id,name,path,url,parentFolderId' });
+  // List files via the SEARCH endpoint. The bare collection path (/files/v3/files)
+  // only accepts POST (upload); a GET there returns 405. /files/v3/files/search
+  // returns full file objects (id, name, path, url, parentFolderId) with limit/
+  // after paging.
+  const qs = new URLSearchParams({ limit: '100' });
   if (opts.after) qs.set('after', opts.after);
-  const resp = await hubspotFetch(`/files/v3/files?${qs.toString()}`);
+  const resp = await hubspotFetch(`/files/v3/files/search?${qs.toString()}`);
   const results = resp.results || [];
   rep.after = resp.paging?.next?.after || null;
   rep.done = !rep.after;
