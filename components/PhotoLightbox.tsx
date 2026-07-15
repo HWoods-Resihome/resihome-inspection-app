@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry, playableVideoSrc, getPosterUrl } from '@/lib/media';
+import { savePhotoToDevice } from '@/lib/savePhoto';
 
 interface Props {
   groups: { id: string; name: string }[];
@@ -129,6 +130,25 @@ export function PhotoLightbox({
     (e.currentTarget as HTMLElement).blur(); // clear the sticky touch highlight
   }
 
+  // Manual backup: save the current photo to the phone (share sheet → Save to
+  // Photos, else download). Local in-camera captures (blob:/data:) save offline;
+  // uploaded photos fetch through the same-origin proxy to avoid CORS read blocks.
+  const [saving, setSaving] = useState(false);
+  async function handleSave() {
+    const u = photos[index];
+    if (!u || isVideoEntry(u) || saving) return;
+    setSaving(true); showToast('Saving…');
+    const local = /^(blob:|data:)/.test(u);
+    const fetchUrl = local ? u : `/api/photo-proxy?url=${encodeURIComponent(getPosterUrl(u))}`;
+    const base = (u.split('#')[0].split('?')[0].split('/').pop() || '').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const fname = /\.[a-z0-9]{2,5}$/i.test(base) ? base : `resiwalk-photo-${index + 1}.jpg`;
+    const r = await savePhotoToDevice(fetchUrl, fname);
+    setSaving(false);
+    if (r === 'shared' || r === 'downloaded') showToast('Saved to phone');
+    else if (r === 'failed') showToast('Save failed');
+    else setToast(null); // cancelled
+  }
+
   const url = photos[index];
 
   return (
@@ -230,6 +250,17 @@ export function PhotoLightbox({
               <span className="hidden sm:inline">Delete</span>
             </button>
           </>
+        )}
+
+        {/* Save to phone — manual backup; available even in read-only. Photos only. */}
+        {!isVideoEntry(url) && (
+          <button type="button" onClick={handleSave} disabled={saving} title="Save to phone"
+            className="shrink-0 flex items-center gap-2 h-11 px-3 bg-white/15 active:bg-white/30 text-white font-heading text-sm rounded-lg disabled:opacity-50">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span className="hidden sm:inline">Save</span>
+          </button>
         )}
 
         {/* Tag / untag to line (rooms only) — fills the middle. Always shown when
