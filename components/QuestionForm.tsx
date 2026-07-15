@@ -617,7 +617,9 @@ export function QuestionForm({
         const key = matchingInst?.instanceKey ?? locationToInstanceKey(sa.location, sa.section);
         if (sa.photoUrls && sa.photoUrls.length > 0) {
           if (!out[key]) out[key] = [];
-          out[key].push(...sa.photoUrls);
+          // Dedupe: two write paths (autosave + attach outbox) could historically
+          // store a URL twice; never seed the grid with duplicates.
+          for (const u of sa.photoUrls) if (u && !out[key].includes(u)) out[key].push(u);
         }
       }
     }
@@ -853,10 +855,10 @@ export function QuestionForm({
         (url) => {
           // Append the URL to section state as soon as that one upload finishes.
           // Inspector sees thumbnails appearing one by one.
-          setSectionPhotos((prev) => ({
-            ...prev,
-            [instanceKey]: [...(prev[instanceKey] || []), url],
-          }));
+          setSectionPhotos((prev) => {
+            const cur = prev[instanceKey] || [];
+            return cur.includes(url) ? prev : { ...prev, [instanceKey]: [...cur, url] };
+          });
         },
         (current) => setUploadingSection((prev) => prev ? { ...prev, current } : prev),
         // Offline-aware: caches to IndexedDB on weak signal (draft), syncs later.
@@ -2591,10 +2593,11 @@ export function QuestionForm({
         currentRoomId={sectionCameraInstance || undefined}
         onRoomChange={(leavingKey, capturedUrls, enteringKey) => {
           if (capturedUrls.length > 0) {
-            setSectionPhotos((prev) => ({
-              ...prev,
-              [leavingKey]: [...(prev[leavingKey] || []), ...capturedUrls],
-            }));
+            setSectionPhotos((prev) => {
+              const cur = prev[leavingKey] || [];
+              const add = capturedUrls.filter((u) => u && !cur.includes(u));
+              return add.length ? { ...prev, [leavingKey]: [...cur, ...add] } : prev;
+            });
           }
           setSectionCameraInstance(enteringKey);
         }}
@@ -2602,10 +2605,11 @@ export function QuestionForm({
           const ikey = sectionCameraInstance;
           setSectionCameraInstance(null);
           if (ikey && urls.length > 0) {
-            setSectionPhotos((prev) => ({
-              ...prev,
-              [ikey]: [...(prev[ikey] || []), ...urls],
-            }));
+            setSectionPhotos((prev) => {
+              const cur = prev[ikey] || [];
+              const add = urls.filter((u) => u && !cur.includes(u));
+              return add.length ? { ...prev, [ikey]: [...cur, ...add] } : prev;
+            });
           }
         }}
       />

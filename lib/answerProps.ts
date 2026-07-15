@@ -25,8 +25,16 @@
 // the data is consistent going forward.
 export const PHOTO_URL_DELIMITER = ';';
 
+/** De-duplicate photo URLs, order-preserving. Two write paths can target the same
+ *  answer record (the section-photo autosave SETS photo_urls; the durable attach
+ *  outbox APPENDS the same URL after a background sync), so the same photo could
+ *  otherwise land twice. Deduping at the write is the single guaranteed fix. */
+export function dedupeUrls(urls: string[]): string[] {
+  return Array.from(new Set((urls || []).filter(Boolean)));
+}
+
 export function joinPhotoUrls(urls: string[]): string {
-  return urls.filter(Boolean).join(PHOTO_URL_DELIMITER);
+  return dedupeUrls(urls).join(PHOTO_URL_DELIMITER);
 }
 
 /** The minimal answer fields a Q&A answer carries. */
@@ -89,8 +97,9 @@ export function buildQaAnswerProps(
     if (f.assignedTo) props.assigned_to = f.assignedTo;
   }
   if (f.photoUrls != null) {
-    props.photo_urls = joinPhotoUrls(f.photoUrls); // '' clears all photos
-    props.photo_count = f.photoUrls.length;
+    const photos = dedupeUrls(f.photoUrls);
+    props.photo_urls = photos.join(PHOTO_URL_DELIMITER); // '' clears all photos
+    props.photo_count = photos.length;
   }
   // Dependent numeric input (1099 recommended rent). Written when managed
   // (!== undefined); '' clears the number. The answers API strips this when the
@@ -138,14 +147,15 @@ export function buildSectionPhotoAnswerProps(
     : f.photoPhase === 'before'
       ? 'Before Photos'
       : 'Section Photo';
+  const photos = dedupeUrls(f.photoUrls);
   const props: Record<string, any> = {
     answer_id_external: f.answerIdExternal,
     // Cap to dodge HubSpot's answer_summary length ceiling (see buildQaAnswerProps).
-    answer_summary: `${f.summaryLabel} / ${phaseLabel} (${f.photoUrls.length})`.slice(0, 250),
+    answer_summary: `${f.summaryLabel} / ${phaseLabel} (${photos.length})`.slice(0, 250),
     answer_type: 'section_photo',
     section: f.section,
-    photo_urls: joinPhotoUrls(f.photoUrls),
-    photo_count: f.photoUrls.length,
+    photo_urls: photos.join(PHOTO_URL_DELIMITER),
+    photo_count: photos.length,
     submitted_at: new Date().toISOString(),
   };
   if (f.inspectionIdExternal) props.inspection_id_external = f.inspectionIdExternal;
