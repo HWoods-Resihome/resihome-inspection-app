@@ -5493,8 +5493,18 @@ export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; a
     rep.listed++;
     const path = String(f.path || '');
     const rawUrl = String(f.url || '');
-    // ONLY the app's inspection photos — never any other portal file.
-    const isAppPhoto = /(^|\/)inspection_photos(\/|$)/i.test(path) || /inspection_photos/i.test(rawUrl);
+    // ONLY the app's photo folder — /inspection_photos — which holds BOTH
+    // inspection and service photos (services reuse the same uploader; there is
+    // no separate service folder). HARD DENY the app's other folders (report PDFs,
+    // compliance-ticket photos) and every non-app portal file: match the folder as
+    // a real PATH SEGMENT (authoritative `path`), with a segment-anchored URL
+    // fallback only when `path` is absent. Nothing outside this folder is ever
+    // deleted — it's counted as skippedNonApp and left untouched.
+    const inOtherAppFolder = /(^|\/)(inspection_pdfs|compliance_ticket_photos)(\/|$)/i.test(path);
+    const isAppPhoto = !inOtherAppFolder && (
+      /(^|\/)inspection_photos(\/|$)/i.test(path) ||
+      (!path && /\/inspection_photos\//i.test(rawUrl))
+    );
     if (!isAppPhoto) { rep.skippedNonApp++; continue; }
     rep.appPhotos++;
     if (referenced.has(normFileUrl(rawUrl))) { rep.referencedKept++; continue; } // still in use → keep
