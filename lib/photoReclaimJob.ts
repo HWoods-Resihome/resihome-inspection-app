@@ -49,9 +49,9 @@ export async function kickReclaimWorker(origin: string, secret: string): Promise
  * deleted files no longer appear, so passes converge. A stall guard (a pass that
  * deletes nothing new) finalizes so it can't loop forever on stuck/errored files.
  */
-export async function runReclaimWorker(origin: string, secret: string): Promise<void> {
+export async function runReclaimWorker(origin: string, secret: string, budgetMs = 230_000): Promise<void> {
   const start = Date.now();
-  const BUDGET_MS = 230_000;
+  const BUDGET_MS = budgetMs;
   const MAX_PASSES = 40;   // 40 × ~10k = 400k files ceiling; a hard backstop
   let st = await readPhotoReclaimState<PhotoReclaimState>().catch(() => null);
   if (!st || !st.running) return;

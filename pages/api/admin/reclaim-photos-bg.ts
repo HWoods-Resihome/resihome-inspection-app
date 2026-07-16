@@ -15,7 +15,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { readPhotoReclaimState, writePhotoReclaimState } from '@/lib/hubspot';
-import { freshReclaimState, runReclaimWorker, type PhotoReclaimState } from '@/lib/photoReclaimJob';
+import { freshReclaimState, kickReclaimWorker, runReclaimWorker, type PhotoReclaimState } from '@/lib/photoReclaimJob';
 
 export const config = { maxDuration: 300 };
 
@@ -68,15 +68,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     const state = freshReclaimState();
     await writePhotoReclaimState(state);
-    // Run the FIRST worker invocation INLINE on this request. The detached
-    // self-kick can silently fail to spawn on serverless (and a brand-new cron
-    // watchdog may not have fired yet), which left the job stuck at "0 · pass 0".
-    // Running it here guarantees progress starts now; it chains the next itself
-    // and the cron covers any dropped link. The client aborts its wait after a
-    // few seconds and watches via status polling — the server keeps running.
-    await runReclaimWorker(originOf(req), secret);
-    const latest = await readPhotoReclaimState<PhotoReclaimState>().catch(() => state);
-    return res.status(200).json({ ok: true, state: latest });
+    // Kick a DETACHED worker invocation (separate serverless request) that runs
+    // the delete batches for its full time budget and chains itself; the
+    // every-minute cron watchdog resumes the chain if a link dies. This is the
+    // proven migrate-photos-bg pattern — Start returns immediately and the status
+    // poll surfaces live progress. It runs unattended (close the tab / overnight).
+    await kickReclaimWorker(originOf(req), secret);
+    return res.status(200).json({ ok: true, state });
   }
 
   res.setHeader('Allow', 'GET, POST');
