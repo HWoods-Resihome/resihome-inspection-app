@@ -145,6 +145,27 @@ export default function AdminFlowsPage() {
     finally { setRemBusy(false); }
   }
 
+  // Diagnose & repair the stragglers: records still holding HubSpot photo URLs
+  // that the normal migration keeps reporting but not clearing.
+  const [probeBusy, setProbeBusy] = useState<null | 'diagnose' | 'fix' | 'prune'>(null);
+  const [probe, setProbe] = useState<any>(null);
+  const [probeErr, setProbeErr] = useState<string | null>(null);
+  async function runProbe(mode: 'diagnose' | 'fix' | 'prune') {
+    if (probeBusy) return;
+    if (mode === 'prune' && typeof window !== 'undefined' && !window.confirm('Migrate what downloads, and DROP references to any HubSpot photo that no longer exists (dead 404). Dropping a dead reference removes that photo from the record permanently. Proceed?')) return;
+    setProbeBusy(mode); setProbeErr(null);
+    try {
+      const qs = new URLSearchParams();
+      if (mode !== 'diagnose') qs.set('apply', '1');
+      if (mode === 'prune') qs.set('prune', '1');
+      const r = await fetch(`/api/admin/migrate-photos-probe?${qs.toString()}`, { method: mode === 'diagnose' ? 'GET' : 'POST' });
+      const d = await r.json();
+      if (!r.ok) { setProbeErr(d.error || 'Failed.'); return; }
+      setProbe(d);
+    } catch (e: any) { setProbeErr(String(e?.message || e)); }
+    finally { setProbeBusy(null); }
+  }
+
   // Reclaim HubSpot space: delete the now-orphaned HubSpot photo originals after
   // migration. Dry-run preview first, then a confirmed delete. Both loop pages.
   const [delBusy, setDelBusy] = useState<'preview' | 'delete' | null>(null);
@@ -324,6 +345,52 @@ export default function AdminFlowsPage() {
               </div>
             )}
             {remErr && <p className="text-red-600 text-[13px] mt-1">{remErr}</p>}
+          </div>
+
+          {/* Straggler diagnose & repair — for records the counter keeps reporting
+              but the batch migration doesn't clear. */}
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <div className="text-[12px] font-heading font-bold text-ink mb-1">Stuck stragglers?</div>
+            <p className="text-[11px] text-gray-500 mb-2 leading-relaxed">If “remaining” won’t reach 0, diagnose the exact records still on HubSpot (record id · field · URL), then migrate them directly. Prune also drops references to photos that no longer exist in HubSpot (dead links) so the count can finish.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => runProbe('diagnose')} disabled={!!probeBusy}
+                className="inline-flex items-center gap-2 h-9 px-3 rounded-lg border border-gray-300 bg-white text-ink font-heading font-semibold text-[13px] hover:border-brand/50 disabled:opacity-50">
+                {probeBusy === 'diagnose' ? 'Diagnosing…' : 'Diagnose stragglers'}
+              </button>
+              <button type="button" onClick={() => runProbe('fix')} disabled={!!probeBusy}
+                className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-brand text-white font-heading font-bold text-[13px] hover:opacity-90 disabled:bg-gray-300">
+                {probeBusy === 'fix' ? 'Migrating…' : 'Migrate stragglers'}
+              </button>
+              <button type="button" onClick={() => runProbe('prune')} disabled={!!probeBusy}
+                className="inline-flex items-center gap-2 h-9 px-3 rounded-lg border border-red-300 bg-white text-red-600 font-heading font-bold text-[13px] hover:bg-red-50 disabled:opacity-50">
+                {probeBusy === 'prune' ? 'Working…' : 'Migrate + prune dead'}
+              </button>
+            </div>
+            {probe && (
+              <div className="mt-2 text-[12px] text-gray-700">
+                <div className="tabular-nums">
+                  {probe.stragglerRecords} record(s) · {probe.stragglerUrls} HubSpot URL(s) found
+                  {typeof probe.migrated === 'number' ? ` · ${probe.migrated} migrated` : ''}
+                  {probe.dead ? ` · ${probe.dead} dead` : ''}
+                  {probe.pruned ? ` · ${probe.pruned} pruned` : ''}
+                  {probe.errors ? ` · ${probe.errors} error(s)` : ''}
+                </div>
+                {Array.isArray(probe.samples) && probe.samples.length > 0 && (
+                  <details className="mt-1" open>
+                    <summary className="cursor-pointer text-[11px] text-gray-500">Details ({probe.samples.length})</summary>
+                    <ul className="mt-1 space-y-1">
+                      {probe.samples.map((s: any, i: number) => (
+                        <li key={i} className="break-all border-l-2 border-gray-200 pl-2">
+                          <span className="font-semibold">{s.outcome}</span> · <span className="text-gray-500">{s.field}</span> · rec {s.recordId}
+                          <div className="text-gray-400">{s.url}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+            {probeErr && <p className="text-red-600 text-[13px] mt-1">{probeErr}</p>}
           </div>
         </Section>
 

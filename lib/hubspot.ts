@@ -5485,6 +5485,92 @@ export async function migrationRemainingCounts(): Promise<MigrationRemaining> {
   return { inspections, services, configured: true };
 }
 
+/**
+ * Diagnose the exact answer records still holding HubSpot photo URLs, and
+ * (apply=true) migrate them directly — one record at a time, bypassing the
+ * batch/cursor machinery — so a straggler set that the normal migration keeps
+ * reporting-but-not-touching gets resolved. For each straggler URL it downloads,
+ * copies to Blob, and rewrites the reference; a URL that no longer exists in
+ * HubSpot (dead 404/410) is reported and, with prune=true, dropped from the
+ * record so the "remaining" count can reach 0. Returns per-URL outcomes.
+ */
+export interface StragglerReport {
+  scannedRecords: number; stragglerRecords: number; stragglerUrls: number;
+  migrated: number; pruned: number; dead: number; errors: number;
+  samples: Array<{ recordId: string; field: string; url: string; outcome: string }>;
+}
+export async function reconcileStragglerPhotos(opts: { apply: boolean; prune: boolean; max?: number }): Promise<StragglerReport> {
+  const max = opts.max ?? 500;
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN || '';
+  if (opts.apply && !blobToken) throw new Error('BLOB_READ_WRITE_TOKEN is not set — cannot copy to Blob.');
+  const split = (raw: any): string[] => String(raw || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  const rep: StragglerReport = { scannedRecords: 0, stragglerRecords: 0, stragglerUrls: 0, migrated: 0, pruned: 0, dead: 0, errors: 0, samples: [] };
+  const answerType = typeIds().answer;
+  const fields = await answerPhotoScanFields(answerType);
+  const addSample = (recordId: string, field: string, url: string, outcome: string) => {
+    if (rep.samples.length < 40) rep.samples.push({ recordId, field, url: url.slice(0, 160), outcome });
+  };
+
+  let after: string | undefined;
+  outer: do {
+    const body: any = { limit: 100, after, properties: fields, filterGroups: fields.map((f) => ({ filters: [{ propertyName: f, operator: 'HAS_PROPERTY' }] })) };
+    const resp = await hubspotFetch(`/crm/v3/objects/${answerType}/search`, { method: 'POST', body: JSON.stringify(body) });
+    for (const r of resp.results || []) {
+      rep.scannedRecords++;
+      const p = r.properties || {};
+      let recordHadStraggler = false;
+      const patch: Record<string, any> = {};
+      for (const field of fields) {
+        const urls = split(p[field]);
+        if (!urls.length) continue;
+        const next: string[] = [];
+        let changed = false;
+        for (const u of urls) {
+          if (isBlobFileUrl(u) || !isHubspotFileUrl(u)) { next.push(u); continue; }
+          // A HubSpot straggler.
+          rep.stragglerUrls++; recordHadStraggler = true;
+          if (!opts.apply) { addSample(String(r.id), field, u, 'found'); next.push(u); continue; }
+          try {
+            const dl = await fetchWithTimeout(u.split('#')[0], {}, 25000);
+            if (dl.status === 404 || dl.status === 410) {   // file gone from HubSpot
+              rep.dead++;
+              if (opts.prune) { changed = true; addSample(String(r.id), field, u, 'pruned-dead'); /* drop */ }
+              else { next.push(u); addSample(String(r.id), field, u, `dead ${dl.status}`); }
+              continue;
+            }
+            if (!dl.ok) { rep.errors++; next.push(u); addSample(String(r.id), field, u, `download ${dl.status}`); continue; }
+            const buf = Buffer.from(await dl.arrayBuffer());
+            const name = decodeURIComponent(u.split('#')[0].split('?')[0].split('/').pop() || `photo_${Date.now()}.jpg`);
+            const m = /idbph_(\d+)__/.exec(name);
+            const key = `inspections/${m ? m[1] : String(r.id)}/${name}`;
+            const putRes = await put(key, buf, { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: dl.headers.get('content-type') || 'image/jpeg', token: blobToken });
+            next.push(putRes.url); changed = true; rep.migrated++;
+            addSample(String(r.id), field, u, 'migrated');
+          } catch (e: any) {
+            rep.errors++; next.push(u); addSample(String(r.id), field, u, `error ${String(e?.message || e).slice(0, 40)}`);
+          }
+        }
+        if (opts.apply && changed) {
+          const finalUrls = Array.from(new Set(next)).filter((x) => x !== '');
+          patch[field] = finalUrls.join(PHOTO_URL_DELIMITER);
+          if (field === 'photo_urls') patch.photo_count = finalUrls.length;
+        }
+      }
+      if (recordHadStraggler) rep.stragglerRecords++;
+      if (opts.apply && Object.keys(patch).length) {
+        try { await hubspotFetch(`/crm/v3/objects/${answerType}/${r.id}`, { method: 'PATCH', body: JSON.stringify({ properties: patch }) }); }
+        catch (e: any) { rep.errors++; addSample(String(r.id), '(patch)', '', `patch ${String(e?.message || e).slice(0, 40)}`); }
+      }
+      if (rep.stragglerUrls >= max) break outer;
+    }
+    after = resp.paging?.next?.after || undefined;
+  } while (after);
+
+  // pruned = dead URLs actually dropped (only when prune requested)
+  rep.pruned = opts.prune ? rep.dead : 0;
+  return rep;
+}
+
 // COMPLETE set of HubSpot photo URLs still referenced by any inspection answer or
 // service record. FULLY paginated (never budget-cut) so the orphan check can't
 // false-positive and delete a live photo. Cached briefly for batch reuse.
