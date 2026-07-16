@@ -78,8 +78,12 @@ const styles = StyleSheet.create({
 
   // ---- Detail: section ----
   sectionHeader: {
-    backgroundColor: COLORS.black, color: COLORS.white, padding: 8,
+    // Softer than the old solid-black bar: light-grey fill with dark text and a
+    // brand-pink bottom rule so section breaks read clearly without the harsh
+    // contrast. Mirrors the service PDF header.
+    backgroundColor: COLORS.grayBg, color: COLORS.ink, padding: 8,
     marginTop: 10, fontSize: 11, fontFamily: 'Helvetica-Bold',
+    borderBottomWidth: 2, borderBottomColor: COLORS.brand,
   },
   sectionContent: {
     border: `1px solid ${COLORS.grayLight}`, borderTop: 'none', padding: 8, marginBottom: 8,
