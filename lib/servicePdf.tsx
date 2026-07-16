@@ -40,7 +40,7 @@ const s = StyleSheet.create({
   statItem: { flexDirection: 'column', alignItems: 'center', marginHorizontal: 22 },
   statLabel: { fontSize: 7, fontFamily: 'Helvetica', color: C.gray, textTransform: 'uppercase', letterSpacing: 0.5 },
   statValue: { fontSize: 11, fontFamily: 'Helvetica-Bold', color: C.ink, marginTop: 2 },
-  sectionHeader: { backgroundColor: C.grayBg, color: C.ink, padding: 6, marginTop: 8, fontSize: 10, fontFamily: 'Helvetica-Bold', borderBottomWidth: 2, borderBottomColor: C.brand },
+  sectionHeader: { backgroundColor: C.sectionHeaderBg, color: C.ink, padding: 6, marginTop: 8, fontSize: 10, fontFamily: 'Helvetica-Bold', borderBottomWidth: 2, borderBottomColor: C.brand },
   sectionContent: { border: `1px solid ${C.grayLight}`, borderTop: 'none', padding: 6, marginBottom: 2 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 2, paddingBottom: 2, borderBottom: `0.5px solid ${C.grayLight}` },
   rowLast: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 2, paddingBottom: 2 },

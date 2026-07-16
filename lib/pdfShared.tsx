@@ -41,6 +41,9 @@ export const PDF_COLORS = {
   gray: '#6b7280',
   grayLight: '#e5e7eb',
   grayBg: '#f9fafb',
+  // Slightly darker fill for MAIN section headers so they stand out from the
+  // lighter (#f9fafb) sub-header / table-header rows.
+  sectionHeaderBg: '#e6e8eb',
   white: '#ffffff',
   emerald: '#059669',
   teal: '#0d9488',
