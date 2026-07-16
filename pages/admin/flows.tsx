@@ -175,6 +175,27 @@ export default function AdminFlowsPage() {
     finally { setDelBusy(null); }
   }
 
+  // Server-side (unattended) reclaim — deletes migrated originals overnight with
+  // no browser open. Mirrors the background migration; poll status every 10s.
+  type ReclaimBg = { running: boolean; stopRequested?: boolean; totals: { appPhotos: number; orphaned: number; deleted: number; referencedKept: number; errors: number }; passes: number; startedAt: string; heartbeatAt: string; finishedAt?: string; lastError?: string } | null;
+  const [rbg, setRbg] = useState<ReclaimBg>(null);
+  const [rbgBusy, setRbgBusy] = useState(false);
+  useEffect(() => {
+    let stopped = false;
+    const load = async () => { try { const r = await fetch('/api/admin/reclaim-photos-bg'); const d = await r.json(); if (!stopped) setRbg(d.state || null); } catch { /* ignore */ } };
+    load();
+    const id = setInterval(load, 10000);
+    return () => { stopped = true; clearInterval(id); };
+  }, []);
+  async function startReclaimBg() {
+    if (rbgBusy) return;
+    if (typeof window !== 'undefined' && !window.confirm('Start the DELETE on the SERVER? It runs unattended (you can close this tab / leave it overnight) and permanently deletes the migrated HubSpot photo originals. Only files no record references are removed — still-in-use photos are protected — but this cannot be undone. Run a Preview first, and finish the migration before reclaiming.')) return;
+    setRbgBusy(true);
+    try { const r = await fetch('/api/admin/reclaim-photos-bg?action=start', { method: 'POST' }); const d = await r.json(); if (d.state) setRbg(d.state); else if (d.error) setDelErr(d.error); }
+    finally { setRbgBusy(false); }
+  }
+  async function stopReclaimBg() { if (rbgBusy) return; setRbgBusy(true); try { await fetch('/api/admin/reclaim-photos-bg?action=stop', { method: 'POST' }); } finally { setRbgBusy(false); } }
+
   if (!authChecked) return null;
   if (!isAdmin) {
     return (
@@ -325,6 +346,40 @@ export default function AdminFlowsPage() {
               )}
             </div>
           )}
+
+          {/* Run on the SERVER (unattended) — same as the background migration.
+              Chews through the ~10k-per-scroll cap across multiple passes on its
+              own; you can close the tab / leave it overnight. */}
+          <div className="mt-4 pt-3 border-t border-gray-200">
+            <div className="text-[12px] font-heading font-bold text-ink mb-1">Run in background (server-side)</div>
+            <p className="text-[11px] text-gray-500 mb-2 leading-relaxed">Deletes overnight with no browser open — resumes itself and works past HubSpot's ~10k list cap across passes. Finish the migration and Preview first.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={startReclaimBg} disabled={rbgBusy || !!rbg?.running}
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-red-600 text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300">
+                {rbg?.running ? 'Running on server…' : rbgBusy ? 'Starting…' : 'Start background delete'}
+              </button>
+              {rbg?.running && (
+                <button type="button" onClick={stopReclaimBg} disabled={rbgBusy}
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-gray-300 bg-white text-ink font-heading font-bold text-sm hover:border-brand/50 disabled:opacity-50">
+                  {rbg.stopRequested ? 'Stopping…' : 'Stop'}
+                </button>
+              )}
+            </div>
+            {rbg && (
+              <div className="mt-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2.5 text-[13px]">
+                <div className={`font-heading font-bold ${rbg.running ? 'text-ink' : (rbg.totals.errors ? 'text-amber-700' : 'text-emerald-700')}`}>
+                  {rbg.running
+                    ? (rbg.stopRequested ? 'Stopping after the current batch…' : 'Deleting on the server…')
+                    : rbg.finishedAt ? `Finished ✓ — ${rbg.totals.deleted} file(s) deleted${rbg.totals.errors ? ` · ${rbg.totals.errors} error(s)` : ''}` : 'Idle'}
+                </div>
+                <div className="text-gray-600 mt-1 tabular-nums">
+                  {rbg.totals.deleted} deleted · {rbg.totals.orphaned} orphaned found · {rbg.totals.referencedKept} still referenced (kept) · {rbg.totals.appPhotos} checked · pass {rbg.passes}
+                </div>
+                {rbg.lastError && <div className="text-amber-700 mt-0.5 text-[11px] break-all">Last hiccup (auto-retried): {rbg.lastError}</div>}
+              </div>
+            )}
+          </div>
+
           {delErr && <p className="text-red-600 text-[13px] mt-2">{delErr}</p>}
         </Section>
 

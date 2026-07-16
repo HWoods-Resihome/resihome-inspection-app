@@ -5932,6 +5932,11 @@ export function writeLoginActivityRaw(map: Record<string, { lastAt: string; coun
 export function readPhotoMigrationState<T = any>(): Promise<T | null> { return readAgentJson<T>('photo_migration_state_json'); }
 export function writePhotoMigrationState(state: any): Promise<boolean> { return writeAgentJson('photo_migration_state_json', 'Photo Migration State (JSON)', state); }
 
+/** Background photo-RECLAIM job state (deletes migrated HubSpot originals) — see
+ *  /api/admin/reclaim-photos-bg. Separate record from the migration job. */
+export function readPhotoReclaimState<T = any>(): Promise<T | null> { return readAgentJson<T>('photo_reclaim_state_json'); }
+export function writePhotoReclaimState(state: any): Promise<boolean> { return writeAgentJson('photo_reclaim_state_json', 'Photo Reclaim State (JSON)', state); }
+
 /** A learned service-check candidate produced by the review-learning loop. */
 export interface AutoServiceCheckCandidate {
   signature: string;

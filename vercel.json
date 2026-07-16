@@ -47,6 +47,9 @@
     },
     "pages/api/admin/migrate-photos-bg.ts": {
       "maxDuration": 300
+    },
+    "pages/api/admin/reclaim-photos-bg.ts": {
+      "maxDuration": 300
     }
   },
   "crons": [
@@ -88,6 +91,10 @@
     },
     {
       "path": "/api/cron/migrate-photos-worker",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/reclaim-photos-worker",
       "schedule": "* * * * *"
     }
   ]
