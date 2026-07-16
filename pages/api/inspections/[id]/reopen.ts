@@ -16,7 +16,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Missing inspection id' });
   }
 
-  // External (1099) users can't reopen a completed inspection (no editing completed).
+  // External (1099) users may reopen a completed inspection they OWN (to correct
+  // their own finished walk); the guard still blocks other users' / other types.
   const denial = await externalWriteDenial(session.email, id);
   if (denial) return res.status(403).json({ error: denial });
 

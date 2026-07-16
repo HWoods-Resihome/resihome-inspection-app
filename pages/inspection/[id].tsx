@@ -664,9 +664,10 @@ export default function ExistingInspection() {
                 center button, which also removes the button-over-text overlap. */}
 
             {/* Right: Re-Open for Edits (secondary, plain text link — underlines
-                on hover and while pressed, no box). Hidden for external (1099)
-                users — they can't edit completed inspections. */}
-            {isCompleted && !isExternal ? (
+                on hover and while pressed, no box). Shown to internal users and to
+                external (1099) users who OWN this inspection — they may correct
+                their own completed walk (mirrors the server guard). */}
+            {isCompleted && (!isExternal || ownsThis) ? (
               <button
                 onClick={handleReopen}
                 className="flex-1 min-w-0 text-right text-xs sm:text-sm text-brand font-heading font-semibold whitespace-nowrap bg-transparent border-0 p-0 cursor-pointer hover:underline active:underline underline-offset-2"

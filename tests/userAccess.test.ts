@@ -91,9 +91,13 @@ describe('externalAccessDenial — write ownership', () => {
     expect(externalAccessDenial(EXT, T1099, { write: true, status: 'in_progress' })).toBe(OWN);
   });
 
-  it('denies writing a completed 1099 even when owned', () => {
-    expect(externalAccessDenial(EXT, T1099, { write: true, status: 'completed', ownerEmail: EXT }))
-      .toBe('Completed inspections are read-only for your account.');
+  it('ALLOWS writing a completed 1099 the user OWNS (they may correct their own finished walk)', () => {
+    expect(externalAccessDenial(EXT, T1099, { write: true, status: 'completed', ownerEmail: EXT })).toBeNull();
+    expect(externalAccessDenial(EXT, T1099, { write: true, status: 'submitted', ownerEmail: EXT })).toBeNull();
+  });
+
+  it('still denies writing another user\'s completed 1099 (ownership gate stands)', () => {
+    expect(externalAccessDenial(EXT, T1099, { write: true, status: 'completed', ownerEmail: 'other@gmail.com' })).toBe(OWN);
   });
 
   it('denies writing a view-only Scope regardless of owner', () => {

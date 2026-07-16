@@ -167,8 +167,9 @@ export function ownsInspection(email: string | null | undefined, ownerEmail: str
  * restricted.
  *
  * External users:
- *   - WRITE (create/edit/re-open/cancel/submit): only the 1099 template, only
- *     ones they OWN, and never once completed. Scope/Re-Inspect are view-only.
+ *   - WRITE (create/edit/re-open/cancel/submit): only the 1099 template and only
+ *     ones they OWN — including after completion, so a 1099 can correct their own
+ *     finished walk. Scope/Re-Inspect are view-only.
  *   - READ: any 1099, plus COMPLETED Scope Rate Card / Re-Inspect (view + PDF) —
  *     but only in STATES the user has unlocked by having an inspection of their
  *     own there (see `unlockedStates`).
@@ -198,9 +199,9 @@ export function externalAccessDenial(
     if (!externalCanEditTemplate(templateType)) {
       return 'Your account has view-only access to this inspection type.';
     }
-    if (isCompletedStatus(opts.status)) {
-      return 'Completed inspections are read-only for your account.';
-    }
+    // NOTE: completed 1099s are NOT read-only for their owner — a 1099 may edit
+    // their own finished walk (owner directive). The ownership gate below is the
+    // only write restriction; other template types remain view-only above.
     // Ownership: external users may only edit/cancel their OWN inspections.
     // Fail CLOSED on a blank owner for WRITES: an unassigned 1099 (no
     // inspector_email) must not be writable by any external user who merely has
