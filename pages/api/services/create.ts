@@ -9,6 +9,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { createServiceWorkOrder } from '@/lib/hubspot';
 import { vendorEmail } from '@/lib/services/vendors';
+import { fetchApprovedVendorCompanies } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -26,6 +27,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const address = scope === 'community' ? (communityName || 'New Service') : (b.address || b.target || 'New Service');
   const locality = String(b.locality || '');
 
+  // Assigned vendor's notification email from the live approved Companies list
+  // (fall back to the interim registry).
+  const vendorNameIn = String(b.vendor || '').trim();
+  let vendorEmailResolved = '';
+  if (vendorNameIn) {
+    const companies = await fetchApprovedVendorCompanies().catch(() => []);
+    vendorEmailResolved = companies.find((v) => v.name.trim().toLowerCase() === vendorNameIn.toLowerCase())?.email
+      || vendorEmail(vendorNameIn) || '';
+  }
+
   const props: Record<string, any> = {
     service_name: address,
     worktype: b.worktype || '', subtype: b.subtype || '', status: 'assigned', is_bid_item: 'false', scope,
@@ -34,7 +45,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     region_snapshot: String(b.region || ''),
     address_snapshot: address, locality_snapshot: locality,
     community_name: communityName,
-    vendor_name: b.vendor || '', vendor_email: vendorEmail(b.vendor) || '',
+    vendor_name: b.vendor || '', vendor_email: vendorEmailResolved,
     ...(scope === 'property' && b.propertyId ? { property_id_ref: String(b.propertyId) } : {}),
     ...(b.vendorCost !== '' && b.vendorCost != null ? { vendor_cost: Number(b.vendorCost) } : {}),
     ...(b.markupPct !== '' && b.markupPct != null ? { markup_pct: Number(b.markupPct) } : {}),

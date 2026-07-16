@@ -9,8 +9,8 @@ import { useRouter } from 'next/router';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { servicesEnabled } from '@/lib/servicesAccess';
-import { resolveServiceViewer, serviceVisibleTo } from '@/lib/services/scope';
+import { serviceVisibleTo } from '@/lib/services/scope';
+import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
 import type { SampleService } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder } from '@/lib/hubspot';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
@@ -26,7 +26,7 @@ interface GalleryProps {
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
-  const ok = await servicesEnabled(session?.email).catch(() => false);
+  const ok = await servicesViewerAllowed(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   const id = String(ctx.params?.id || '');
   if (!/^\d+$/.test(id)) return { redirect: { destination: `/services/${id}`, permanent: false } };
@@ -35,7 +35,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const p = rec.props;
   // Vendor-ownership guard (mirrors the service detail page): a vendor may only
   // view photos for a service assigned to them.
-  const viewer = resolveServiceViewer(session?.email, ctx.req);
+  const viewer = await resolveServiceViewerAsync(session?.email, ctx.req);
   if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: p.vendor_name || null, vendorEmail: String(p.vendor_email || '').trim() || null } as SampleService, viewer)) {
     return { redirect: { destination: '/services', permanent: false } };
   }

@@ -36,6 +36,49 @@ export default function LoginPage() {
   const [otpStage, setOtpStage] = useState<'idle' | 'sent'>('idle');
   const [code, setCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
+  // Vendor (Services) sign-in — email + password against the approved Companies
+  // list. 'email' collects the address; then 'password' (returning) or 'setup'
+  // (first login: create + confirm a password).
+  const [mode, setMode] = useState<'staff' | 'vendor'>('staff');
+  const [vendorStage, setVendorStage] = useState<'email' | 'password' | 'setup'>('email');
+  const [confirm, setConfirm] = useState('');
+  const [vendorName, setVendorName] = useState('');
+  const [vendorBusy, setVendorBusy] = useState(false);
+
+  async function vendorContinue() {
+    if (!email.trim()) { setError('Please enter your email'); return; }
+    setVendorBusy(true); setError(null);
+    try {
+      const r = await fetch('/api/auth/vendor-check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.error || 'Could not check that email.'); return; }
+      if (!d.approved) { setError('This email isn’t set up for ResiWalk access. Contact your ResiHome admin.'); return; }
+      setVendorName(d.name || '');
+      setVendorStage(d.hasPassword ? 'password' : 'setup');
+    } catch (err: any) { setError(String(err.message || err)); }
+    finally { setVendorBusy(false); }
+  }
+
+  async function vendorSubmit() {
+    if (!password) { setError('Enter your password'); return; }
+    if (vendorStage === 'setup' && password !== confirm) { setError('Passwords do not match.'); return; }
+    setVendorBusy(true); setError(null);
+    try {
+      const r = await fetch('/api/auth/vendor-login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password, confirm }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) { setError(d.error || 'Sign-in failed'); setVendorBusy(false); return; }
+      window.location.href = d.redirect || '/services';
+    } catch (err: any) { setError(String(err.message || err)); setVendorBusy(false); }
+  }
+
+  function toVendorMode() { setMode('vendor'); setVendorStage('email'); setPassword(''); setConfirm(''); setError(null); setOtpStage('idle'); }
+  function toStaffMode() { setMode('staff'); setVendorStage('email'); setPassword(''); setConfirm(''); setError(null); }
 
   async function requestOtp() {
     if (!email.trim()) { setError('Please enter your email'); return; }
@@ -156,6 +199,11 @@ export default function LoginPage() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (mode === 'vendor') {
+      if (vendorStage === 'email') { void vendorContinue(); return; }
+      void vendorSubmit();
+      return;
+    }
     if (otpStage === 'sent') { void verifyOtp(); return; }
     if (isReviewEmail) { void reviewLogin(); return; }
     void startLogin('google');
@@ -204,9 +252,15 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-            <h2 className="text-lg font-heading font-bold mb-2">Sign in</h2>
+            <h2 className="text-lg font-heading font-bold mb-2">{mode === 'vendor' ? 'Vendor sign-in' : 'Sign in'}</h2>
             <p className="text-sm text-gray-600 mb-6">
-              Enter your HubSpot account email. You&apos;ll confirm it with Google to continue.
+              {mode === 'vendor'
+                ? (vendorStage === 'setup'
+                    ? `Welcome${vendorName ? `, ${vendorName}` : ''}. Create a password for your ResiWalk Services account.`
+                    : vendorStage === 'password'
+                      ? `Enter your ResiWalk password${vendorName ? ` for ${vendorName}` : ''}.`
+                      : 'Enter your vendor email to access ResiWalk Services.')
+                : 'Enter your HubSpot account email. You’ll confirm it with Google to continue.'}
             </p>
 
             <label htmlFor="email" className="block text-sm font-heading font-semibold text-ink mb-1.5">
@@ -220,13 +274,50 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => { setEmail(e.target.value); setError(null); }}
               placeholder="you@resihome.com"
-              disabled={submitting}
+              disabled={submitting || vendorBusy || (mode === 'vendor' && vendorStage !== 'email')}
               className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base mb-1"
             />
 
+            {/* Vendor password (returning) or create-password (first login). */}
+            {mode === 'vendor' && vendorStage !== 'email' && (
+              <div className="mt-4">
+                <label htmlFor="vendor-password" className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                  {vendorStage === 'setup' ? 'Create password' : 'Password'}
+                </label>
+                <input
+                  id="vendor-password"
+                  type="password"
+                  autoComplete={vendorStage === 'setup' ? 'new-password' : 'current-password'}
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(null); }}
+                  placeholder={vendorStage === 'setup' ? 'At least 8 characters' : 'Password'}
+                  disabled={vendorBusy}
+                  autoFocus
+                  className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base"
+                />
+                {vendorStage === 'setup' && (
+                  <>
+                    <label htmlFor="vendor-confirm" className="block text-sm font-heading font-semibold text-ink mb-1.5 mt-3">
+                      Confirm password
+                    </label>
+                    <input
+                      id="vendor-confirm"
+                      type="password"
+                      autoComplete="new-password"
+                      value={confirm}
+                      onChange={(e) => { setConfirm(e.target.value); setError(null); }}
+                      placeholder="Re-enter password"
+                      disabled={vendorBusy}
+                      className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base"
+                    />
+                  </>
+                )}
+              </div>
+            )}
+
             {/* App-review demo account: password field appears when the
                 reviewer enters the review email. Validated server-side. */}
-            {isReviewEmail && (
+            {mode === 'staff' && isReviewEmail && (
               <div className="mt-4">
                 <label htmlFor="review-password" className="block text-sm font-heading font-semibold text-ink mb-1.5">
                   Password
@@ -246,7 +337,7 @@ export default function LoginPage() {
 
             {/* Email sign-in code (OTP): the 6-digit box appears after a code is
                 sent. Works for any provider (e.g. Zoho). */}
-            {otpStage === 'sent' && !isReviewEmail && (
+            {mode === 'staff' && otpStage === 'sent' && !isReviewEmail && (
               <div className="mt-4">
                 <label htmlFor="otp-code" className="block text-sm font-heading font-semibold text-ink mb-1.5">
                   Enter the code we emailed to {email.trim()}
@@ -272,7 +363,23 @@ export default function LoginPage() {
               </div>
             )}
 
-            {otpStage === 'sent' && !isReviewEmail ? (
+            {mode === 'vendor' ? (
+              <>
+                <button
+                  type="submit"
+                  disabled={vendorBusy || !email.trim() || (vendorStage !== 'email' && !password)}
+                  className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-4 rounded-lg transition mt-5 active:scale-[0.98]"
+                >
+                  {vendorBusy
+                    ? 'Please wait…'
+                    : vendorStage === 'email' ? 'Continue' : vendorStage === 'setup' ? 'Create password & sign in' : 'Sign in'}
+                </button>
+                <button type="button" onClick={toStaffMode} disabled={vendorBusy}
+                  className="w-full text-sm text-gray-500 font-heading font-semibold hover:underline disabled:opacity-50 mt-4">
+                  ← Back to staff sign-in
+                </button>
+              </>
+            ) : otpStage === 'sent' && !isReviewEmail ? (
               <>
                 <button
                   type="submit"
@@ -328,6 +435,14 @@ export default function LoginPage() {
                 {otpBusy ? 'Sending code…' : 'Can’t use Google or Microsoft? Email me a sign-in code'}
               </button>
             )}
+            {/* Vendor (Services) sign-in — email + password against the approved
+                Companies list; a services-only account. */}
+            <div className="mt-4 pt-4 border-t border-gray-100 text-center">
+              <button type="button" onClick={toVendorMode} disabled={submitting}
+                className="text-sm text-gray-500 font-heading font-semibold hover:text-brand hover:underline disabled:opacity-50">
+                Vendor? Sign in to ResiWalk Services
+              </button>
+            </div>
             </>
             )}
 

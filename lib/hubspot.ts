@@ -12,6 +12,7 @@ import { calculateLine, roundMoney } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
 import { normalizeApprovalRouting, type ApprovalRoutingConfig } from './approvalRouting';
 import { rejectedPropNames } from './hubspotErrors';
+import { isVendorPasswordSet } from './vendorPassword';
 import { reportServerError } from './serverErrorReporter';
 import { SERVICE_OBJECTS, QUESTION_ADDITIONS, SERVICE_ASSOCIATIONS, type PropSpec, type ObjectSpec } from './services/schemaSpec';
 
@@ -7212,6 +7213,72 @@ export async function stampRrqcResultOnProperty(
   } catch (e: any) {
     console.warn('[rrqc] could not stamp property rrqc_result/rrqc_pass_date (best-effort):', `${String(e?.message || e)} ${String(e?.detail || '')}`.slice(0, 240));
   }
+}
+
+// ── ResiWalk Services vendors: the HubSpot Companies object ─────────────────
+// A vendor is an approved company: `resiwalk_access` = Yes AND
+// `eligible_for_recurring` = Yes. `name` is the vendor's display name, `email`
+// is the notification address, `resiwalk_password` holds a salted scrypt hash
+// (never plaintext) set on first login. This is the live source for the vendor
+// pickers, service scoping, notifications, and the vendor password login.
+export interface VendorCompany { id: string; name: string; email: string; passwordHash: string; hasPassword: boolean }
+
+let _vendorCompanies: { at: number; list: VendorCompany[] } | null = null;
+// Accept common encodings of a "Yes" gate: boolean ('true'), single-select/
+// checkbox ('Yes'). The IN filter is broad; a client-side re-check tightens it.
+const VENDOR_APPROVED_VALUES = ['true', 'True', 'TRUE', 'Yes', 'yes', 'YES', '1'];
+const vendorTruthy = (v: any) => ['true', 'yes', '1'].includes(String(v ?? '').trim().toLowerCase());
+
+/** Approved vendor companies (both flags = Yes), with name + notification email
+ *  + password hash. Cached ~5 min; serves stale on a fetch error. */
+export async function fetchApprovedVendorCompanies(force = false): Promise<VendorCompany[]> {
+  if (!force && _vendorCompanies && Date.now() - _vendorCompanies.at < 5 * 60 * 1000) return _vendorCompanies.list;
+  const out: VendorCompany[] = [];
+  const properties = ['name', 'email', 'resiwalk_access', 'eligible_for_recurring', 'resiwalk_password'];
+  let after: string | undefined;
+  try {
+    do {
+      const body: any = {
+        limit: 100, after, properties,
+        filterGroups: [{ filters: [
+          { propertyName: 'resiwalk_access', operator: 'IN', values: VENDOR_APPROVED_VALUES },
+          { propertyName: 'eligible_for_recurring', operator: 'IN', values: VENDOR_APPROVED_VALUES },
+        ] }],
+      };
+      const resp = await hubspotFetch(`/crm/v3/objects/companies/search`, { method: 'POST', body: JSON.stringify(body) });
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        if (!vendorTruthy(p.resiwalk_access) || !vendorTruthy(p.eligible_for_recurring)) continue; // defensive re-check
+        const email = String(p.email || '').trim();
+        const name = String(p.name || '').trim();
+        if (!email || !name) continue; // need both to assign + notify + log in
+        out.push({ id: String(r.id), name, email, passwordHash: String(p.resiwalk_password || ''), hasPassword: isVendorPasswordSet(p.resiwalk_password) });
+      }
+      after = resp.paging?.next?.after || undefined;
+    } while (after);
+  } catch (e: any) {
+    console.warn('[vendor-companies] fetch failed:', String(e?.message || e).slice(0, 200));
+    if (_vendorCompanies) return _vendorCompanies.list; // serve stale rather than empty
+    return [];
+  }
+  _vendorCompanies = { at: Date.now(), list: out };
+  return out;
+}
+
+/** The approved vendor whose notification `email` matches (case-insensitive), or null. */
+export async function findApprovedVendorByEmail(email: string | null | undefined): Promise<VendorCompany | null> {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return null;
+  const list = await fetchApprovedVendorCompanies();
+  return list.find((v) => v.email.trim().toLowerCase() === e) || null;
+}
+
+/** Store the vendor's password hash on the company object; busts the cache. */
+export async function setVendorPasswordHash(companyId: string, hash: string): Promise<void> {
+  await hubspotFetch(`/crm/v3/objects/companies/${companyId}`, {
+    method: 'PATCH', body: JSON.stringify({ properties: { resiwalk_password: hash } }),
+  });
+  _vendorCompanies = null; // reflect hasPassword immediately
 }
 
 /**

@@ -4,14 +4,13 @@ import { useRouter } from 'next/router';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { servicesEnabled } from '@/lib/servicesAccess';
+import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, easternTodayISO, type ServiceStatus, type SampleService } from '@/lib/services/sampleData';
-import { resolveServiceViewer, serviceVisibleTo } from '@/lib/services/scope';
+import { serviceVisibleTo } from '@/lib/services/scope';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
-import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
 import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
 import type { AuditEvent } from '@/lib/auditLog';
 import { CameraCapture } from '@/components/CameraCapture';
@@ -66,7 +65,7 @@ const fmtMDY = (iso: string): string => {
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
-  const ok = await servicesEnabled(session?.email).catch(() => false);
+  const ok = await servicesViewerAllowed(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   // "View as Vendor" (cookie) forces the external vendor experience app-wide, so
   // internal previewers see exactly what a vendor sees on the record too.
@@ -122,7 +121,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   // Vendor-ownership guard: a vendor (real login OR "View as Vendor" preview) may
   // only open a service assigned to them — a direct URL to someone else's service
   // bounces back to the list. Internal admins (canSeeAll) are unrestricted.
-  const viewer = resolveServiceViewer(session?.email, ctx.req);
+  const viewer = await resolveServiceViewerAsync(session?.email, ctx.req);
   if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: svc.vendor, vendorEmail: svcVendorEmail } as SampleService, viewer)) {
     return { redirect: { destination: '/services', permanent: false } };
   }
@@ -927,7 +926,21 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[] | null>(null);
   const [reassignOpen, setReassignOpen] = useState(false);
-  const [reassignVendor, setReassignVendor] = useState(svc.vendor || SERVICE_VENDOR_NAMES[0] || '');
+  const [reassignVendor, setReassignVendor] = useState(svc.vendor || '');
+  // Live assignable vendors from the approved Companies list (internal reassign).
+  const [vendorNames, setVendorNames] = useState<string[]>(svc.vendor ? [svc.vendor] : []);
+  useEffect(() => {
+    if (!isInternal) return;
+    let alive = true;
+    fetch('/api/services/vendors').then((r) => r.json()).then((d) => {
+      if (!alive || !Array.isArray(d?.vendors)) return;
+      const names = d.vendors.map((v: any) => String(v.name)).filter(Boolean);
+      // Keep the current vendor selectable even if not in the approved list.
+      setVendorNames(svc.vendor && !names.includes(svc.vendor) ? [svc.vendor, ...names] : names);
+    }).catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInternal]);
   const [reassigning, setReassigning] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState('');
   const canReassign = isInternal && svc.live && !['completed', 'canceled'].includes(svc.status);
@@ -1060,7 +1073,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
                   <div className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Admin</div>
                   <button type="button" onClick={openAudit} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50">Audit Log</button>
-                  {canReassign && <button type="button" onClick={() => { setSettingsOpen(false); setReassignVendor(svc.vendor || SERVICE_VENDOR_NAMES[0] || ''); setSettingsMsg(''); setReassignOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Reassign Vendor</button>}
+                  {canReassign && <button type="button" onClick={() => { setSettingsOpen(false); setReassignVendor(svc.vendor || vendorNames[0] || ''); setSettingsMsg(''); setReassignOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Reassign Vendor</button>}
                   {canEditDue && <button type="button" onClick={() => { setSettingsOpen(false); setNewDue(svc.dueDate || ''); setSettingsMsg(''); setDueOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Change Due Date</button>}
                 </div></>)}
             </div>
@@ -1478,7 +1491,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             <div className="font-heading font-bold text-[15px] text-ink">Reassign Vendor</div>
             <p className="text-[13px] text-gray-500 -mt-1">Currently <b className="text-ink">{svc.vendor || 'Unassigned'}</b>. Choose the vendor to take over this service.</p>
             <div className="space-y-1.5">
-              {SERVICE_VENDOR_NAMES.map((name) => (
+              {vendorNames.map((name) => (
                 <button key={name} type="button" onClick={() => setReassignVendor(name)}
                   className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-heading font-semibold ${reassignVendor === name ? 'bg-brand/5 border-brand text-brand' : 'bg-white border-gray-300 text-gray-700 hover:border-brand/50'}`}>
                   {name}{name === svc.vendor ? ' · current' : ''}

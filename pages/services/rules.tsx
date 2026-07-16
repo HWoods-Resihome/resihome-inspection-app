@@ -13,7 +13,7 @@ import { DatePicker } from '@/components/DatePicker';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
-import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
+import { DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
 import { searchServiceRuleRecords, readServiceTaxonomy } from '@/lib/hubspot';
 import { isViewingAsVendor } from '@/lib/services/viewAs';
 
@@ -284,6 +284,16 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
   const subLabelD = (wt: string, st: string) => subsOfD(wt).find((s) => s.id === st)?.label || st;
   const firstSubOf = (wt: string) => subsOfD(wt)[0]?.id || '';
   const [rules, setRules] = useState<Rule[]>(() => (ruleRecords ? ruleRecords.map(rulePropsToRule) : SEED));
+  // Live assignable vendors from the approved Companies list (resiwalk_access +
+  // eligible_for_recurring = Yes). Loaded client-side; the picker uses these.
+  const [vendorNames, setVendorNames] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/services/vendors').then((r) => r.json()).then((d) => {
+      if (alive && Array.isArray(d?.vendors)) setVendorNames(d.vendors.map((v: any) => String(v.name)).filter(Boolean));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const [savingRule, setSavingRule] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
   const [genMsg, setGenMsg] = useState('');
@@ -464,7 +474,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [{ field: 'Property Status', op: 'is', vals: [] }] }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: vendorNames[0] ? [vendorNames[0]] : [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [{ field: 'Property Status', op: 'is', vals: [] }] }]);
     openRule(id);
   };
   const duplicateRule = () => {
@@ -891,7 +901,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
             {/* Vendor Assignment — one or more companies; count = current open volume. */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label className={lbl}>Vendor Assignment</label>
-              <CoveragePicker noun="vendors" options={SERVICE_VENDOR_NAMES.map((v) => ({ key: v, count: VENDOR_OPEN[v] || 0 }))} selected={rule.vendors} onToggle={toggleVendor} onSetMany={setManyVendors} />
+              <CoveragePicker noun="vendors" options={vendorNames.map((v) => ({ key: v, count: VENDOR_OPEN[v] || 0 }))} selected={rule.vendors} onToggle={toggleVendor} onSetMany={setManyVendors} />
               {rule.vendors.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {rule.vendors.map((v) => (

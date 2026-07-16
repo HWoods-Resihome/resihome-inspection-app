@@ -21,7 +21,7 @@
  *  - No cadence date math — due date is today + First Order Due (days), else +5.
  *  - No vendor rotation — the first assigned vendor is used for every order.
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { vendorEmail } from './vendors';
@@ -184,6 +184,20 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
   const notifyPromises: Promise<void>[] = [];
   const notifyBase = appBaseUrl();
 
+  // Resolve an assigned vendor's notification email from the live approved
+  // Companies list (the `email` field), falling back to the interim registry.
+  // Built once per run and stamped onto each order (drives scoping + emails).
+  let _vendorEmailByName: Map<string, string> | null = null;
+  const resolveVendorEmail = async (name: string | null | undefined): Promise<string> => {
+    const n = String(name || '').trim();
+    if (!n) return '';
+    if (!_vendorEmailByName) {
+      const companies = await fetchApprovedVendorCompanies().catch(() => []);
+      _vendorEmailByName = new Map(companies.map((c) => [c.name.trim().toLowerCase(), c.email]));
+    }
+    return _vendorEmailByName.get(n.toLowerCase()) || vendorEmail(n) || '';
+  };
+
   const result: GenerateResult = {
     mode: apply ? 'apply' : 'dry-run', today: todayISO, configured: true,
     rulesActive: 0, rulesSkipped: 0, wouldCreate: 0, created: 0, skippedExisting: 0, errors: 0,
@@ -261,7 +275,7 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         scope: t.scope, service_description: p.service_description || '',
         due_date: dueDate, region_snapshot: t.region, address_snapshot: t.address,
         locality_snapshot: t.locality, pet_stations: p.pet_stations === 'true' ? 'true' : 'false',
-        vendor_name: vendor || '', vendor_email: vendorEmail(vendor) || '',
+        vendor_name: vendor || '', vendor_email: await resolveVendorEmail(vendor),
         generated_by_rule_id: ruleId, enrollment_key: enrollmentKey,
       };
       if (t.community) orderProps.community_name = t.community;
@@ -303,7 +317,7 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         // Email the assigned vendor (best-effort, collected + awaited at the end).
         if (recordId && vendor) {
           notifyPromises.push(notifyServiceAssigned({
-            serviceId: recordId, vendorEmail: vendorEmail(vendor), vendorName: vendor,
+            serviceId: recordId, vendorEmail: await resolveVendorEmail(vendor), vendorName: vendor,
             address: t.address, locality: t.locality, worktypeLabel: wtLabel(worktype), subtypeLabel: subLabel(worktype, subtype),
             dueDate, baseUrl: notifyBase,
           }));

@@ -23,6 +23,10 @@ export interface SessionUser {
   realEmail?: string;
   realName?: string;
   impersonating?: boolean;
+  /** True for a vendor (company) login — a services-only account, restricted to
+   *  their own assigned work orders. Carried as a `vnd` claim in the session JWT
+   *  so middleware can gate them to /services without a HubSpot lookup. */
+  vendor?: boolean;
 }
 
 // Admin "view as / login as" — a separate signed cookie holding the impersonated
@@ -86,6 +90,7 @@ export async function createSessionCookie(user: SessionUser): Promise<string> {
     userId: user.userId,
     email: user.email,
     name: user.name,
+    ...(user.vendor ? { vnd: 1 } : {}),
   } as JWTPayload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -175,6 +180,7 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
       userId: String(payload.userId),
       email: String(payload.email),
       name: String(payload.name),
+      ...((payload as { vnd?: unknown }).vnd ? { vendor: true } : {}),
     };
   } catch {
     return null;

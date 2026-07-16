@@ -34,6 +34,11 @@ const PUBLIC_PATHS = new Set<string>([
   // Native OAuth return: validates a short-TTL token and sets the session in the
   // app webview's cookie jar. Must be reachable pre-session, like the callbacks.
   '/api/auth/exchange',
+  // Vendor (company) email+password sign-in: both run before a session exists —
+  // vendor-check probes whether an email is an approved vendor + has a password;
+  // vendor-login validates/sets the password and mints the session itself.
+  '/api/auth/vendor-check',
+  '/api/auth/vendor-login',
   // Client error telemetry must accept reports even before/without a session
   // (e.g. a crash on the login page) — it stores no sensitive data.
   '/api/telemetry/error',
@@ -91,17 +96,40 @@ function isStaticAsset(pathname: string): boolean {
 }
 
 async function verifySession(token: string, secret: Uint8Array): Promise<boolean> {
+  return (await verifySessionClaims(token, secret)) !== null;
+}
+
+// Returns the minimal session claims (or null if invalid). `vendor` gates a
+// services-only vendor account to /services (see below).
+async function verifySessionClaims(token: string, secret: Uint8Array): Promise<{ vendor: boolean } | null> {
   try {
     const { payload } = await jwtVerify(token, secret);
     // Reject typed tokens (e.g. the short-lived `oauth_exchange` token) just like
     // lib/auth.verifySessionToken does — only a real session (no `typ`) gates a
     // page. Defense-in-depth: the exchange token only ever travels as a ?t= param
     // and API data-fetches already reject it, but mirror the check here too.
-    if ((payload as { typ?: unknown }).typ) return false;
-    return Boolean(payload.userId && payload.email);
+    if ((payload as { typ?: unknown }).typ) return null;
+    if (!(payload.userId && payload.email)) return null;
+    return { vendor: Boolean((payload as { vnd?: unknown }).vnd) };
   } catch {
-    return false;
+    return null;
   }
+}
+
+// A vendor session may only reach the Services area + the shared infra endpoints
+// (auth/logout, telemetry, version, image proxy). Everything else (inspections,
+// admin, the home shell) is redirected to /services.
+function vendorPathAllowed(pathname: string): boolean {
+  return (
+    pathname === '/services' || pathname.startsWith('/services/') ||
+    pathname.startsWith('/api/services') ||
+    pathname.startsWith('/api/auth/') ||
+    pathname.startsWith('/api/telemetry') ||
+    pathname === '/api/version' ||
+    pathname.startsWith('/api/photo-proxy') ||
+    // Vendors upload service before/after photos through the shared uploader.
+    pathname === '/api/upload'
+  );
 }
 
 export async function middleware(req: NextRequest) {
@@ -147,8 +175,22 @@ export async function middleware(req: NextRequest) {
       { status: 500 }
     );
   }
-  const ok = await verifySession(token, new TextEncoder().encode(secret));
-  if (!ok) return redirectToLogin(req);
+  const claims = await verifySessionClaims(token, new TextEncoder().encode(secret));
+  if (!claims) return redirectToLogin(req);
+
+  // Vendor accounts are services-only: keep them inside /services. A page nav
+  // elsewhere → /services; a disallowed API → 403.
+  if (claims.vendor && !vendorPathAllowed(pathname)) {
+    if (pathname.startsWith('/api/')) {
+      return new NextResponse(JSON.stringify({ error: 'Vendor accounts are limited to Services.' }), {
+        status: 403, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const url = req.nextUrl.clone();
+    url.pathname = '/services';
+    url.search = '';
+    return NextResponse.redirect(url);
+  }
 
   return NextResponse.next();
 }

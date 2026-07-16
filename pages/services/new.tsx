@@ -15,7 +15,6 @@ import { PriceField } from '@/components/PriceField';
 import { descriptionFor, defaultRateFor, mergeWorktypes, type CustomWorktypeDef } from '@/lib/services/worktypes';
 import { sanitizeNum, clientFrom } from '@/lib/services/pricing';
 import { fmtMDY } from '@/lib/services/sampleData';
-import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
 import { syncAllProperties, searchCachedProperties } from '@/lib/propertyCache';
 import { readServiceTaxonomy } from '@/lib/hubspot';
 
@@ -47,7 +46,19 @@ export default function NewService({ servicesTaxonomy }: { servicesTaxonomy: Cus
   const [selectedProp, setSelectedProp] = useState<PropOpt | null>(null);
   const [communities, setCommunities] = useState<{ id: string; name: string; units: number }[]>([]);
   const [dueDate, setDueDate] = useState('');
-  const [vendor, setVendor] = useState(DEFAULT_SERVICE_VENDOR.name);
+  const [vendor, setVendor] = useState('');
+  // Live assignable vendors from the approved Companies list.
+  const [vendorNames, setVendorNames] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/services/vendors').then((r) => r.json()).then((d) => {
+      if (!alive || !Array.isArray(d?.vendors)) return;
+      const names = d.vendors.map((v: any) => String(v.name)).filter(Boolean);
+      setVendorNames(names);
+      setVendor((cur) => cur || names[0] || '');
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const [created, setCreated] = useState(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -144,7 +155,7 @@ export default function NewService({ servicesTaxonomy }: { servicesTaxonomy: Cus
   const worktypeOptions = useMemo(() => defs.filter((w) => w.scopes.includes(scope)).map((w) => ({ value: w.id, label: w.label })), [defs, scope]);
   const subtypeOptions = useMemo(() => subsOf(worktype).map((s) => ({ value: s.id, label: s.label })), [defs, worktype]);
   const communityOptions = useMemo(() => communities.map((c) => ({ value: c.name, label: c.name, sublabel: c.units ? `${c.units} units` : undefined })), [communities]);
-  const vendorOptions = SERVICE_VENDOR_NAMES.map((v) => ({ value: v, label: v }));
+  const vendorOptions = vendorNames.map((v) => ({ value: v, label: v }));
 
   const lbl = FIELD_LABEL;
   const trig = FIELD_TRIGGER;
@@ -173,7 +184,7 @@ export default function NewService({ servicesTaxonomy }: { servicesTaxonomy: Cus
               {createdId && (
                 <a href={`/services/${encodeURIComponent(createdId)}`} className="bg-brand text-white rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight grid place-items-center">Open Service</a>
               )}
-              <button onClick={() => { setCreated(false); setCreatedId(null); setWorktype(''); setSubtype(''); setTarget(''); setSelectedProp(null); setDueDate(''); setVendor(DEFAULT_SERVICE_VENDOR.name); }} className="border border-gray-300 bg-white rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight">Create Another</button>
+              <button onClick={() => { setCreated(false); setCreatedId(null); setWorktype(''); setSubtype(''); setTarget(''); setSelectedProp(null); setDueDate(''); setVendor(vendorNames[0] || ''); }} className="border border-gray-300 bg-white rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight">Create Another</button>
               {/* Hard navigation so the Services list re-runs its server fetch. */}
               <a href="/services" className={`rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight grid place-items-center ${createdId ? 'border border-gray-300 bg-white text-ink' : 'bg-brand text-white'}`}>Back to Services</a>
             </div>

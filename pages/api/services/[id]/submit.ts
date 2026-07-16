@@ -9,7 +9,9 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { servicesEnabled } from '@/lib/servicesAccess';
+import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
+import { serviceVisibleTo } from '@/lib/services/scope';
+import type { SampleService } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder, readServiceForms, fetchPropertyStatus } from '@/lib/hubspot';
 import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
@@ -29,7 +31,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const email = session?.email;
   // The assigned crew/vendor completes the service; allow any authorized Services
   // user. Once the order has left the editable states it's locked (view-only).
-  const ok = await servicesEnabled(email).catch(() => false);
+  const ok = await servicesViewerAllowed(email).catch(() => false);
   if (!ok) return res.status(403).json({ error: 'Not authorized' });
 
   const id = String(req.query.id || '');
@@ -38,6 +40,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // Lock: a service that's already submitted/under review/completed/canceled can
   // no longer be edited or re-submitted.
   const existing = await fetchServiceWorkOrder(id).catch(() => null);
+  // Ownership: a vendor may only submit a work order assigned to THEM.
+  const viewer = await resolveServiceViewerAsync(email, req);
+  if (!viewer.canSeeAll && existing && !serviceVisibleTo(
+    { vendor: existing.props.vendor_name || null, vendorEmail: String(existing.props.vendor_email || '').trim() || null } as SampleService,
+    viewer,
+  )) {
+    return res.status(403).json({ error: 'Not authorized for this service.' });
+  }
   if (existing && ['submitted', 'review', 'completed', 'canceled'].includes(String(existing.props.status || ''))) {
     return res.status(409).json({ error: `This service is ${existing.props.status} and can no longer be edited.` });
   }

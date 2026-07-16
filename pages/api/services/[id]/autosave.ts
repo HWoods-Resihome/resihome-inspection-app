@@ -16,7 +16,9 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { servicesEnabled } from '@/lib/servicesAccess';
+import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
+import { serviceVisibleTo } from '@/lib/services/scope';
+import type { SampleService } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
 
 const EDITABLE = new Set(['', 'estimated', 'assigned']);
@@ -27,7 +29,7 @@ const cleanUrls = (v: unknown): string[] =>
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
   const session = await getSessionFromRequest(req).catch(() => null);
-  const ok = await servicesEnabled(session?.email).catch(() => false);
+  const ok = await servicesViewerAllowed(session?.email).catch(() => false);
   if (!ok) return res.status(403).json({ error: 'Not authorized' });
 
   const id = String(req.query.id || '');
@@ -36,6 +38,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const existing = await fetchServiceWorkOrder(id).catch(() => null);
     if (!existing) return res.status(200).json({ ok: true, preview: true }); // not configured / not found
+    // Ownership: a vendor may only draft a work order assigned to THEM.
+    const viewer = await resolveServiceViewerAsync(session?.email, req);
+    if (!viewer.canSeeAll && !serviceVisibleTo(
+      { vendor: existing.props.vendor_name || null, vendorEmail: String(existing.props.vendor_email || '').trim() || null } as SampleService,
+      viewer,
+    )) {
+      return res.status(403).json({ error: 'Not authorized for this service.' });
+    }
     const status = String(existing.props.status || '');
     const isBid = existing.props.is_bid_item === 'true';
     if (!EDITABLE.has(status) || isBid) {

@@ -5,7 +5,6 @@ import { useRouter } from 'next/router';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
@@ -19,13 +18,14 @@ import {
   SERVICE_STATUS_LABEL as STATUS_LABEL, SERVICE_STATUS_STYLE as STATUS_STYLE, serviceStatusText, fmtMDY,
   type ServiceStatus, type SampleService,
 } from '@/lib/services/sampleData';
-import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
 import { setViewAsVendor } from '@/lib/services/viewAs';
-import { resolveServiceViewer, scopeServices } from '@/lib/services/scope';
+import { scopeServices } from '@/lib/services/scope';
+import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
-  const ok = await servicesEnabled(session?.email).catch(() => false);
+  // App admins OR an approved vendor company (scoped to their own work orders).
+  const ok = await servicesViewerAllowed(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   const real = await searchServiceWorkOrders().catch(() => null);
   // Per-property billing lines split from a community grass-cut master roll UP
@@ -34,7 +34,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const operational = (real ?? SAMPLE_SERVICES).filter((s) => !s.masterServiceId);
   // Scope to the viewer: a vendor (real login OR "View as Vendor" preview) only
   // ever RECEIVES their own services — never the whole operational list.
-  const viewer = resolveServiceViewer(session?.email, ctx.req);
+  const viewer = await resolveServiceViewerAsync(session?.email, ctx.req);
   const services = scopeServices(operational, viewer);
   const asVendor = !viewer.canSeeAll || ctx.query.as === 'vendor';
   return {
@@ -180,7 +180,15 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   // Inline result banner for bulk actions (cancel / reassign).
   const [actionMsg, setActionMsg] = useState<{ status: 'done' | 'error'; msg: string } | null>(null);
   const [reassignOpen, setReassignOpen] = useState(false);
-  const [reassignVendor, setReassignVendor] = useState(SERVICE_VENDOR_NAMES[0] || '');
+  const [vendorNames, setVendorNames] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/services/vendors').then((r) => r.json()).then((d) => {
+      if (alive && Array.isArray(d?.vendors)) setVendorNames(d.vendors.map((v: any) => String(v.name)).filter(Boolean));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const [reassignVendor, setReassignVendor] = useState('');
   const canSelect = isAdmin && live;
   const isSelectable = (s: SampleService) => canSelect && !['completed', 'canceled'].includes(s.status);
   const toggleSelect = (id: string) => setSelectedIds((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -414,7 +422,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
               </div>
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Vendor" selected={vendor} onChange={setVendor} className={pickerCls(vendor.length > 0)}
-                  options={[...SERVICE_VENDOR_NAMES.map((v) => ({ value: v, label: v })), { value: '—', label: 'Unassigned' }]} />
+                  options={[...vendorNames.map((v) => ({ value: v, label: v })), { value: '—', label: 'Unassigned' }]} />
               </div>
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}
@@ -472,7 +480,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
               <button type="button" onClick={exitSelect} className="text-[12px] font-heading font-semibold text-gray-500 hover:text-brand underline">Done</button>
             </div>
             <div className="flex items-center gap-2 mt-2">
-              <button type="button" disabled={!selectedIds.size || actionBusy} onClick={() => { setReassignVendor(SERVICE_VENDOR_NAMES[0] || ''); setReassignOpen(true); }}
+              <button type="button" disabled={!selectedIds.size || actionBusy} onClick={() => { setReassignVendor(vendorNames[0] || ''); setReassignOpen(true); }}
                 className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-brand text-white disabled:opacity-50">Reassign Vendor</button>
               <button type="button" disabled={!selectedIds.size || actionBusy} onClick={handleBulkCancel}
                 className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-white text-red-600 border border-red-300 disabled:opacity-50">{actionBusy ? '…' : 'Move to Cancelled'}</button>
@@ -526,7 +534,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
             <div className="font-heading font-bold text-[15px] text-ink">Reassign Vendor</div>
             <p className="text-[13px] text-gray-500 -mt-1">Assign the <b className="text-ink">{selectedIds.size}</b> selected service{selectedIds.size > 1 ? 's' : ''} to a vendor. Only services in <b>Assigned</b> status are reassigned.</p>
             <div className="space-y-1.5">
-              {SERVICE_VENDOR_NAMES.map((name) => (
+              {vendorNames.map((name) => (
                 <button key={name} type="button" onClick={() => setReassignVendor(name)}
                   className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-heading font-semibold ${reassignVendor === name ? 'bg-brand/5 border-brand text-brand' : 'bg-white border-gray-300 text-gray-700 hover:border-brand/50'}`}>
                   {name}
