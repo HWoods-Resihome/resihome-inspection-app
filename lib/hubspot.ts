@@ -218,15 +218,32 @@ async function hubspotFetchInner(url: string, method: string, path: string, init
   const jitter = (ms: number) => Math.round(ms * (0.65 + Math.random() * 0.7));
   let lastError: Error | null = null;
 
+  // Hard per-attempt timeout. Without it a stalled HubSpot connection hangs the
+  // whole serverless invocation until the platform ceiling — and, in loops like
+  // the photo-reclaim delete sweep, the per-item catch never fires so the job
+  // wedges. A 25s abort turns a hang into a normal thrown error the caller can
+  // handle/skip. All hubspotFetch calls are small single REST ops → 25s is ample.
+  const REQUEST_TIMEOUT_MS = 25000;
   for (let attempt = 0; attempt <= BACKOFFS_MS.length; attempt++) {
-    const res = await fetch(url, {
-      ...init,
-      headers: {
-        ...(init.headers || {}),
-        Authorization: `Bearer ${token()}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        ...init,
+        headers: {
+          ...(init.headers || {}),
+          Authorization: `Bearer ${token()}`,
+          'Content-Type': 'application/json',
+        },
+        signal: ctrl.signal,
+      });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new Error(`Upstream request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     if (res.status === 429 && attempt < BACKOFFS_MS.length) {
       const retryAfterHeader = res.headers.get('retry-after');
       // Honor an explicit Retry-After (the API's instruction); only jitter our own

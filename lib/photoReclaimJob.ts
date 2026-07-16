@@ -17,6 +17,10 @@ export interface PhotoReclaimState {
   totals: { appPhotos: number; orphaned: number; deleted: number; referencedKept: number; errors: number };
   errorSamples: string[];
   passes: number;        // full list-scroll passes completed (the ~10k cap forces re-scans)
+  deletedThisPass: number; // deletions since the CURRENT scroll/pass started — MUST be
+                           // in state (not worker-local): a pass spans many workers, and
+                           // whether to run another pass depends on the whole pass's
+                           // deletions, not just the worker that happens to end it.
   startedAt: string;
   heartbeatAt: string;
   finishedAt?: string;
@@ -29,7 +33,7 @@ const zero = () => ({ appPhotos: 0, orphaned: 0, deleted: 0, referencedKept: 0, 
 const ageMs = (iso?: string) => (iso ? Date.now() - Date.parse(iso) : Infinity);
 
 export function freshReclaimState(): PhotoReclaimState {
-  return { running: true, stopRequested: false, cursor: null, totals: zero(), errorSamples: [], passes: 0, startedAt: nowIso(), heartbeatAt: staleIso() };
+  return { running: true, stopRequested: false, cursor: null, totals: zero(), errorSamples: [], passes: 0, deletedThisPass: 0, startedAt: nowIso(), heartbeatAt: staleIso() };
 }
 
 export async function kickReclaimWorker(origin: string, secret: string): Promise<void> {
@@ -60,8 +64,6 @@ export async function runReclaimWorker(origin: string, secret: string, budgetMs 
   st = { ...st, heartbeatAt: nowIso() };
   await writePhotoReclaimState(st);
 
-  let deletedThisScroll = 0;   // deletions since the current scroll started
-
   while (Date.now() - start < BUDGET_MS) {
     const live = await readPhotoReclaimState<PhotoReclaimState>().catch(() => st);
     if (!live || !live.running) return;
@@ -79,7 +81,11 @@ export async function runReclaimWorker(origin: string, secret: string, budgetMs 
     const totals = { ...st.totals };
     totals.appPhotos += rep.appPhotos || 0; totals.orphaned += rep.orphaned || 0;
     totals.deleted += rep.deleted || 0; totals.referencedKept += rep.referencedKept || 0; totals.errors += rep.errors || 0;
-    deletedThisScroll += rep.deleted || 0;
+    // Track deletions for THIS pass in state — a pass spans multiple workers, so a
+    // worker-local counter would be reset mid-pass and wrongly report "0 deleted"
+    // when the worker that ends the scroll didn't itself delete much, finalizing
+    // the whole job prematurely (the "stops at N deleted" bug).
+    let deletedThisPass = (st.deletedThisPass || 0) + (rep.deleted || 0);
     const errorSamples = [...(st.errorSamples || [])];
     for (const s of (rep.errorSamples || [])) if (errorSamples.length < 20 && !errorSamples.includes(s)) errorSamples.push(s);
 
@@ -88,14 +94,15 @@ export async function runReclaimWorker(origin: string, secret: string, budgetMs 
 
     let cursor = rep.after; let running = true; let finishedAt: string | undefined; let passes = st.passes;
     if (rep.done) {
-      // This scroll ended (naturally or at the ~10k cap). If it deleted anything,
-      // sweep again from the start; deleted files won't reappear so it converges.
+      // This scroll ended (naturally or at the ~10k cap). If the WHOLE pass deleted
+      // anything, sweep again from the start; deleted files won't reappear so it
+      // converges. Only when a full pass deletes nothing is there truly nothing left.
       passes += 1;
-      if (deletedThisScroll > 0 && passes < MAX_PASSES) { cursor = null; deletedThisScroll = 0; }
+      if (deletedThisPass > 0 && passes < MAX_PASSES) { cursor = null; deletedThisPass = 0; }
       else { running = false; finishedAt = nowIso(); }   // nothing left to delete → done
     }
     if (stopNow) { running = false; finishedAt = finishedAt || nowIso(); }
-    st = { ...st, cursor, totals, errorSamples, passes, heartbeatAt: nowIso(), running, stopRequested: false, ...(finishedAt ? { finishedAt } : {}), lastError: undefined };
+    st = { ...st, cursor, totals, errorSamples, passes, deletedThisPass, heartbeatAt: nowIso(), running, stopRequested: false, ...(finishedAt ? { finishedAt } : {}), lastError: undefined };
     await writePhotoReclaimState(st);
     if (!running) return;
   }
