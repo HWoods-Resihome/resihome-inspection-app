@@ -116,7 +116,7 @@ export default function AdminFlowsPage() {
 
   // Background (server-side, unattended) migration: start it and it runs on the
   // server with no browser open. Poll status every 10s.
-  type BgState = { running: boolean; stopRequested?: boolean; object: string; totals: { found: number; copied: number; verified: number; records: number; scanned: number; errors: number }; startedAt: string; heartbeatAt: string; finishedAt?: string; lastError?: string } | null;
+  type BgState = { running: boolean; stopRequested?: boolean; object: string; totals: { found: number; copied: number; verified: number; records: number; scanned: number; errors: number }; startedAt: string; heartbeatAt: string; finishedAt?: string; lastError?: string; errorSamples?: string[] } | null;
   const [bg, setBg] = useState<BgState>(null);
   const [bgBusy, setBgBusy] = useState(false);
   useEffect(() => {
@@ -295,6 +295,12 @@ export default function AdminFlowsPage() {
                 <div className="text-gray-600 mt-0.5 tabular-nums">Answer/service records: {bg.totals.records} updated · {bg.totals.scanned} scanned</div>
                 {bg.running && <div className="text-gray-400 mt-0.5 text-[11px]">Last activity {Math.max(0, Math.round((Date.now() - Date.parse(bg.heartbeatAt)) / 1000))}s ago · safe to close this tab.</div>}
                 {bg.lastError && <div className="text-amber-700 mt-0.5 text-[11px] break-all">Last error: {bg.lastError}</div>}
+                {bg.errorSamples && bg.errorSamples.length > 0 && (
+                  <details className="mt-1 text-[11px] text-gray-500">
+                    <summary className="cursor-pointer">Recent photo errors ({bg.errorSamples.length})</summary>
+                    <ul className="mt-1 space-y-0.5">{bg.errorSamples.slice(0, 10).map((s, i) => <li key={i} className="break-all">• {s}</li>)}</ul>
+                  </details>
+                )}
               </div>
             )}
           </div>

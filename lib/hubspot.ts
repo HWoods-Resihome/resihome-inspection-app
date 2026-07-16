@@ -5324,17 +5324,34 @@ export async function migratePhotosBatch(opts: { object: MigratePhotoObject; aft
   }
 
   const urlMap = new Map<string, string>();
+  // Hard timeouts are CRITICAL: a bare fetch() with no timeout will hang forever
+  // if a HubSpot download stalls (common once HubSpot throttles at volume). A hung
+  // download freezes the whole batch — the 40s soft budget is only checked BETWEEN
+  // photos, never during an in-flight fetch — until Vercel hard-kills the function
+  // at 300s with no progress saved. The watchdog then resumes, hits the SAME photo,
+  // and wedges the job on it forever (the "stalled at N copied" symptom).
+  const DL_TIMEOUT_MS = 25000, VERIFY_TIMEOUT_MS = 20000;
   const migrate = async (url: string, prefixId: string): Promise<string> => {
     if (urlMap.has(url)) return urlMap.get(url)!;
-    const res = await fetch(url.split('#')[0]);
-    if (!res.ok) throw new Error(`download ${res.status}`);
+    const src = url.split('#')[0];
+    // Download with a timeout + one retry, so a transient stall/throttle doesn't
+    // permanently fail (or wedge) the photo.
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(src, {}, DL_TIMEOUT_MS);
+      if (!res.ok) throw new Error(`download ${res.status}`);
+    } catch {
+      await new Promise((r) => setTimeout(r, 1500));
+      res = await fetchWithTimeout(src, {}, DL_TIMEOUT_MS);
+      if (!res.ok) throw new Error(`download ${res.status}`);
+    }
     const buf = Buffer.from(await res.arrayBuffer());
-    const name = decodeURIComponent(url.split('#')[0].split('?')[0].split('/').pop() || `photo_${Date.now()}.jpg`);
+    const name = decodeURIComponent(src.split('?')[0].split('/').pop() || `photo_${Date.now()}.jpg`);
     const m = /idbph_(\d+)__/.exec(name);
     const key = `${keyBase}/${(opts.object === 'answer' && m) ? m[1] : prefixId}/${name}`;
     const putRes = await put(key, buf, { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: res.headers.get('content-type') || 'image/jpeg', token: blobToken });
     rep.copied++;
-    const vr = await fetch(putRes.url);
+    const vr = await fetchWithTimeout(putRes.url, {}, VERIFY_TIMEOUT_MS);
     if (!vr.ok) throw new Error(`verify ${vr.status}`);
     if (Buffer.from(await vr.arrayBuffer()).length !== buf.length) throw new Error('size mismatch');
     rep.verified++;
