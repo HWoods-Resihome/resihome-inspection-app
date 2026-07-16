@@ -4962,6 +4962,24 @@ export async function answerHasProperty(name: string): Promise<boolean> {
   }
 }
 
+// The Answer photo fields to scan for migration/reclaim/remaining tallies. MUST
+// include after_photo_urls whenever it exists — a stale per-instance "property
+// missing" cache would otherwise make the migrator silently skip photos the
+// remaining-counter still reports ("N left but can't migrate"). So we probe the
+// field DIRECTLY (cache-free) with a tiny search and only drop it on a genuine
+// PROPERTY_DOESNT_EXIST; a transient error keeps it (skipping data is worse than
+// a rare wasted request). All three scanners use this so they can't diverge.
+async function answerPhotoScanFields(typeId: string): Promise<string[]> {
+  const withAfter = ['photo_urls', 'after_photo_urls'];
+  try {
+    await hubspotFetch(`/crm/v3/objects/${typeId}/search`, { method: 'POST', body: JSON.stringify({ limit: 1, properties: withAfter }) });
+    return withAfter;
+  } catch (e: any) {
+    if (isMissingPropertyError(e, 'after_photo_urls')) return ['photo_urls'];
+    return withAfter;   // transient → assume it exists rather than skip real photos
+  }
+}
+
 export async function fetchAnswersForInspection(inspectionRecordId: string): Promise<SavedAnswer[]> {
   const tids = typeIds();
   // Step 1: read the associations to find linked Answer record IDs. Use the
@@ -5327,10 +5345,8 @@ export async function migratePhotosBatch(opts: { object: MigratePhotoObject; aft
   let typeId: string; let fields: string[]; let filterGroups: any[] | undefined; let keyBase: string;
   if (opts.object === 'answer') {
     typeId = typeIds().answer;
-    const hasAfter = await answerHasProperty('after_photo_urls').catch(() => false);
-    fields = ['photo_urls', ...(hasAfter ? ['after_photo_urls'] : [])];
-    filterGroups = [{ filters: [{ propertyName: 'photo_urls', operator: 'HAS_PROPERTY' }] },
-      ...(hasAfter ? [{ filters: [{ propertyName: 'after_photo_urls', operator: 'HAS_PROPERTY' }] }] : [])];
+    fields = await answerPhotoScanFields(typeId);
+    filterGroups = fields.map((f) => ({ filters: [{ propertyName: f, operator: 'HAS_PROPERTY' }] }));
     keyBase = 'inspections';
   } else {
     typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
@@ -5461,8 +5477,7 @@ export async function migrationRemainingCounts(): Promise<MigrationRemaining> {
     } while (after);
     return { records, photos };
   };
-  const hasAfter = await answerHasProperty('after_photo_urls').catch(() => false);
-  const inspections = await tally(typeIds().answer, ['photo_urls', ...(hasAfter ? ['after_photo_urls'] : [])], true);
+  const inspections = await tally(typeIds().answer, await answerPhotoScanFields(typeIds().answer), true);
   const svcType = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   const services = svcType
     ? await tally(svcType, ['before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls', 'pet_after_photo_urls'], false)
@@ -5488,8 +5503,7 @@ async function referencedHubspotPhotoUrls(force = false): Promise<Set<string>> {
       after = resp.paging?.next?.after || undefined;
     } while (after);
   };
-  const hasAfter = await answerHasProperty('after_photo_urls').catch(() => false);
-  await scan(typeIds().answer, ['photo_urls', ...(hasAfter ? ['after_photo_urls'] : [])], true);
+  await scan(typeIds().answer, await answerPhotoScanFields(typeIds().answer), true);
   const svcType = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (svcType) await scan(svcType, ['before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls', 'pet_after_photo_urls'], false);
   _referencedHsPhotos = { at: Date.now(), urls };
