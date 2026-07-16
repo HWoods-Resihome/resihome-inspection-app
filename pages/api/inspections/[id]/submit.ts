@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields, readInspectionProps } from '@/lib/hubspot';
+import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields, readInspectionProps, stampRrqcResultOnProperty } from '@/lib/hubspot';
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { createComplianceTicketsOnSubmit } from '@/lib/complianceTickets';
 import { postListingPriceAlertOnSubmit } from '@/lib/listingPriceAlert';
@@ -295,6 +295,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         await updateInspection(id, { inspection_result: inspectionResult });
       } catch (e) {
         console.warn('[submit] could not write inspection_result (run scripts/rate_card_phase5/phase5_step2_add_inspection_result.py to create the property):', e);
+      }
+      // New Construction RRQC: also push the verdict to the associated PROPERTY
+      // record (rrqc_result), and on a PASS stamp rrqc_pass_date with today's date
+      // (blank on a FAIL). Best-effort; never blocks the completion above.
+      if ((existing?.templateType || '') === 'qc_new_construction_rrqc') {
+        try {
+          await stampRrqcResultOnProperty(id, inspectionResult, existing?.propertyRecordId || null);
+        } catch (e) {
+          console.warn('[submit] RRQC property stamp skipped (continuing):', e);
+        }
       }
     }
     // Record WHO submitted for approval and WHEN — used to lock the submitter out

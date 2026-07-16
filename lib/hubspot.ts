@@ -7149,6 +7149,71 @@ export async function stampPropertyStatusAtCompletion(inspectionRecordId: string
   }
 }
 
+// ── New Construction RRQC → Property object stamp ───────────────────────────
+// When a New Construction RRQC inspection is submitted, push its overall Pass/
+// Fail verdict to the associated Property's `rrqc_result`, and on a PASS stamp
+// `rrqc_pass_date` (date-only) with the submission date. On a FAIL the pass date
+// is cleared/left blank. Best-effort — never blocks the submit.
+
+// Today's date in America/New_York as YYYY-MM-DD (en-CA yields that order), then
+// midnight-UTC epoch ms — the canonical HubSpot write for a date property, and it
+// displays as MM/DD/YYYY of that ET calendar date without timezone drift.
+function easternDateMidnightUtcMs(): number {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  return Date.parse(`${ymd}T00:00:00Z`);
+}
+
+// Map our internal 'pass'|'fail' to the Property `rrqc_result` field's ACTUAL
+// stored value. If the field is an enumeration we match its options by value or
+// label (case-insensitive) so we write exactly what HubSpot expects regardless of
+// whether it's "Pass"/"Fail", "pass"/"fail", "Passed"/"Failed", etc. Falls back to
+// title-case for a free-text field.
+async function resolveRrqcResultValue(propertyTypeId: string, result: 'pass' | 'fail'): Promise<string> {
+  const fallback = result === 'pass' ? 'Pass' : 'Fail';
+  try {
+    const def = await hubspotFetch(`/crm/v3/properties/${propertyTypeId}/rrqc_result`);
+    const opts: Array<{ label?: string; value?: string }> = Array.isArray(def?.options) ? def.options : [];
+    if (!opts.length) return fallback;   // not an enumeration → free text
+    const eq = (s: any) => String(s || '').trim().toLowerCase();
+    const exact = opts.find((o) => eq(o.value) === result || eq(o.label) === result);
+    if (exact?.value != null) return String(exact.value);
+    const partial = opts.find((o) => eq(o.value).includes(result) || eq(o.label).includes(result));
+    if (partial?.value != null) return String(partial.value);
+    return fallback;
+  } catch {
+    return fallback;   // property missing / not readable → best-effort default
+  }
+}
+
+export async function stampRrqcResultOnProperty(
+  inspectionRecordId: string,
+  result: 'pass' | 'fail',
+  propertyRecordIdHint?: string | null,
+): Promise<void> {
+  try {
+    const { inspection: typeId, property: propertyTypeId } = typeIds();
+    let propId = (propertyRecordIdHint || '').toString().trim();
+    if (!propId) {
+      const insResp = await hubspotFetch(`/crm/v3/objects/${typeId}/${inspectionRecordId}?properties=${encodeURIComponent('property_id_ref')}`);
+      propId = (insResp.properties?.property_id_ref || '').toString().trim();
+    }
+    if (!propId) { console.warn('[rrqc] inspection has no linked property — skipping property stamp'); return; }
+
+    const rrqcValue = await resolveRrqcResultValue(propertyTypeId, result);
+    const props: Record<string, any> = { rrqc_result: rrqcValue };
+    // PASS → stamp the pass date; FAIL → leave it blank (clear any prior value).
+    props.rrqc_pass_date = result === 'pass' ? easternDateMidnightUtcMs() : '';
+
+    await hubspotFetch(`/crm/v3/objects/${propertyTypeId}/${propId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ properties: props }),
+    });
+    console.log(`[rrqc] property ${propId}: rrqc_result="${rrqcValue}"${result === 'pass' ? `, rrqc_pass_date stamped` : ', rrqc_pass_date cleared'}`);
+  } catch (e: any) {
+    console.warn('[rrqc] could not stamp property rrqc_result/rrqc_pass_date (best-effort):', `${String(e?.message || e)} ${String(e?.detail || '')}`.slice(0, 240));
+  }
+}
+
 /**
  * Freeze the listing snapshot (status / price / listed date / Move-in Ready /
  * lease-start move-in) onto the inspection at completion, mirroring
