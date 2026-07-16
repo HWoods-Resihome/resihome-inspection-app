@@ -177,7 +177,7 @@ export default function AdminFlowsPage() {
 
   // Server-side (unattended) reclaim — deletes migrated originals overnight with
   // no browser open. Mirrors the background migration; poll status every 10s.
-  type ReclaimBg = { running: boolean; stopRequested?: boolean; totals: { appPhotos: number; orphaned: number; deleted: number; referencedKept: number; errors: number }; passes: number; startedAt: string; heartbeatAt: string; finishedAt?: string; lastError?: string } | null;
+  type ReclaimBg = { running: boolean; stopRequested?: boolean; totals: { appPhotos: number; orphaned: number; deleted: number; referencedKept: number; errors: number }; passes: number; startedAt: string; heartbeatAt: string; finishedAt?: string; lastError?: string; errorSamples?: string[] } | null;
   const [rbg, setRbg] = useState<ReclaimBg>(null);
   const [rbgBusy, setRbgBusy] = useState(false);
   useEffect(() => {
@@ -389,7 +389,14 @@ export default function AdminFlowsPage() {
                 <div className="text-gray-600 mt-1 tabular-nums">
                   {rbg.totals.deleted} deleted · {rbg.totals.orphaned} orphaned found · {rbg.totals.referencedKept} still referenced (kept) · {rbg.totals.appPhotos} checked · pass {rbg.passes}
                 </div>
+                {rbg.running && <div className="text-gray-400 mt-0.5 text-[11px]">Last activity {Math.max(0, Math.round((Date.now() - Date.parse(rbg.heartbeatAt)) / 1000))}s ago · safe to close this tab.</div>}
                 {rbg.lastError && <div className="text-amber-700 mt-0.5 text-[11px] break-all">Last hiccup (auto-retried): {rbg.lastError}</div>}
+                {rbg.errorSamples && rbg.errorSamples.length > 0 && (
+                  <details className="mt-1 text-[11px] text-gray-500">
+                    <summary className="cursor-pointer">Recent delete errors ({rbg.errorSamples.length})</summary>
+                    <ul className="mt-1 space-y-0.5">{rbg.errorSamples.slice(0, 10).map((s, i) => <li key={i} className="break-all">• {s}</li>)}</ul>
+                  </details>
+                )}
               </div>
             )}
           </div>
