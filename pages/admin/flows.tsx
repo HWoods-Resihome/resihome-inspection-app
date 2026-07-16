@@ -191,8 +191,14 @@ export default function AdminFlowsPage() {
     if (rbgBusy) return;
     if (typeof window !== 'undefined' && !window.confirm('Start the DELETE on the SERVER? It runs unattended (you can close this tab / leave it overnight) and permanently deletes the migrated HubSpot photo originals. Only files no record references are removed — still-in-use photos are protected — but this cannot be undone. Run a Preview first, and finish the migration before reclaiming.')) return;
     setRbgBusy(true);
-    try { const r = await fetch('/api/admin/reclaim-photos-bg?action=start', { method: 'POST' }); const d = await r.json(); if (d.state) setRbg(d.state); else if (d.error) setDelErr(d.error); }
-    finally { setRbgBusy(false); }
+    // The start request runs the first worker inline on the server (so it's
+    // guaranteed to start), which can take a while — abort OUR wait after a few
+    // seconds; the server keeps running and the status poll shows live progress.
+    try {
+      await fetch('/api/admin/reclaim-photos-bg?action=start', { method: 'POST', signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(5000) : undefined });
+    } catch { /* aborted after ~5s (or network) — server keeps running; polling updates the UI */ }
+    setRbg((p) => (p ? { ...p, running: true } : { running: true, totals: { appPhotos: 0, orphaned: 0, deleted: 0, referencedKept: 0, errors: 0 }, passes: 0, startedAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() }));
+    setRbgBusy(false);
   }
   async function stopReclaimBg() { if (rbgBusy) return; setRbgBusy(true); try { await fetch('/api/admin/reclaim-photos-bg?action=stop', { method: 'POST' }); } finally { setRbgBusy(false); } }
 
