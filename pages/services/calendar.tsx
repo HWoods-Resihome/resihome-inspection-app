@@ -23,10 +23,10 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesViewerAllowed(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
-  const real = await searchServiceWorkOrders().catch(() => null);
-  // Scope to the viewer: internal admins see all; a vendor (real login OR an
-  // internal "View as Vendor" preview) only ever RECEIVES their own services.
+  // Resolve the viewer first so a vendor's fetch is scoped server-side to their own
+  // orders (complete + isolated); admins fetch the all view.
   const viewer = await resolveServiceViewerAsync(session, ctx.req);
+  const real = await searchServiceWorkOrders(viewer.canSeeAll ? {} : { vendorEmail: viewer.vendorEmail }).catch(() => null);
   const services = scopeServices(real ?? [], viewer);
   return { props: { canSeeAll: viewer.canSeeAll, services, live: !!real } };
 };

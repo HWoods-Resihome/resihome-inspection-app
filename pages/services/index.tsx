@@ -27,14 +27,16 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   // App admins OR an approved vendor company (scoped to their own work orders).
   const ok = await servicesViewerAllowed(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
-  const real = await searchServiceWorkOrders().catch(() => null);
+  // Resolve the viewer FIRST so a vendor's fetch is scoped server-side to their
+  // own orders — they always get their complete set (never truncated by a global
+  // window) and never receive another vendor's data. Admins fetch the all view.
+  const viewer = await resolveServiceViewerAsync(session, ctx.req);
+  const real = await searchServiceWorkOrders(viewer.canSeeAll ? {} : { vendorEmail: viewer.vendorEmail }).catch(() => null);
   // Per-property billing lines split from a community grass-cut master roll UP
   // into the master — hide the children from the operational list (the master
   // drill-down and the billing view surface them). See RECURRING_SERVICES_PLAN.md.
   const operational = (real ?? []).filter((s) => !s.masterServiceId);
-  // Scope to the viewer: a vendor (real login OR "View as Vendor" preview) only
-  // ever RECEIVES their own services — never the whole operational list.
-  const viewer = await resolveServiceViewerAsync(session, ctx.req);
+  // scopeServices stays as a safety net (covers legacy rows matched by name).
   const services = scopeServices(operational, viewer);
   const asVendor = !viewer.canSeeAll || ctx.query.as === 'vendor';
   return {

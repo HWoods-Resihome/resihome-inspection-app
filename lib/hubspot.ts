@@ -1405,19 +1405,35 @@ function mapServiceRow(r: any): ServiceRecord {
 // of re-querying HubSpot (up to 500 records) on every navigation. Any Service
 // Work Order write busts it (see createServiceWorkOrder / patchServiceWorkOrder),
 // so post-action refreshes still show fresh data.
-let _svcListData: ServiceRecord[] | null = null;
-let _svcListAt = 0;
-let _svcListInflight: Promise<ServiceRecord[] | null> | null = null;
+// List cache keyed by SCOPE — a vendor's scoped fetch must never be served to
+// another viewer (or to an admin), so the key is the vendor email (or 'all').
+interface SvcListEntry { data: ServiceRecord[] | null; at: number; inflight: Promise<ServiceRecord[] | null> | null }
+const _svcListCache = new Map<string, SvcListEntry>();
 const SVC_LIST_TTL_MS = 30_000;
-export function bustServiceListCache(): void { _svcListData = null; _svcListAt = 0; }
+export function bustServiceListCache(): void { _svcListCache.clear(); }
 
-export async function searchServiceWorkOrders(limit = 500): Promise<ServiceRecord[] | null> {
-  if (_svcListData && Date.now() - _svcListAt < SVC_LIST_TTL_MS) return _svcListData;
-  if (_svcListInflight) return _svcListInflight;   // single-flight: dedupe concurrent loads
-  _svcListInflight = searchServiceWorkOrdersLive(limit)
-    .then((items) => { if (items) { _svcListData = items; _svcListAt = Date.now(); } return items; })
-    .finally(() => { _svcListInflight = null; });
-  return _svcListInflight;
+export interface ServiceListOpts {
+  /** Restrict to one vendor's own orders (server-side vendor_email filter). Omit
+   *  for the admin/all view. */
+  vendorEmail?: string | null;
+  /** Max records to pull. A vendor's own set is small; the admin/all view is
+   *  capped and sorted newest-due-first so current/upcoming work stays in-window
+   *  and only the oldest completed history is dropped past the cap. */
+  limit?: number;
+}
+
+export async function searchServiceWorkOrders(opts: ServiceListOpts = {}): Promise<ServiceRecord[] | null> {
+  const vendorEmail = String(opts.vendorEmail || '').trim().toLowerCase();
+  const limit = opts.limit ?? (vendorEmail ? 3000 : 3000);
+  const key = vendorEmail || 'all';
+  const cur = _svcListCache.get(key);
+  if (cur && cur.data && Date.now() - cur.at < SVC_LIST_TTL_MS) return cur.data;
+  if (cur && cur.inflight) return cur.inflight;   // single-flight per scope
+  const inflight = searchServiceWorkOrdersLive(limit, vendorEmail || undefined)
+    .then((items) => { _svcListCache.set(key, { data: items, at: Date.now(), inflight: null }); return items; })
+    .catch((e) => { _svcListCache.set(key, { data: null, at: 0, inflight: null }); throw e; });
+  _svcListCache.set(key, { data: cur?.data ?? null, at: cur?.at ?? 0, inflight });
+  return inflight;
 }
 
 /** Lightweight service list for pickers (admin test-send): id + label fields
@@ -1452,20 +1468,29 @@ export async function searchServicesForPicker(limit = 300): Promise<{ id: string
   return out;
 }
 
-async function searchServiceWorkOrdersLive(limit = 500): Promise<ServiceRecord[] | null> {
+async function searchServiceWorkOrdersLive(limit = 3000, vendorEmail?: string): Promise<ServiceRecord[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
   try {
     const items: ServiceRecord[] = [];
     const refById = new Map<string, string>();   // service id → property_id_ref
     let after: string | undefined;
+    // Vendor scope: filter server-side to the vendor's own orders so a vendor
+    // ALWAYS gets their complete set (never truncated by a global window) and
+    // never receives another vendor's data. Sort DESCENDING by due date so the
+    // window holds current/upcoming work; only the oldest (completed) history is
+    // dropped past the cap, not this week's jobs.
+    const filterGroups = vendorEmail
+      ? [{ filters: [{ propertyName: 'vendor_email', operator: 'EQ', value: vendorEmail }] }]
+      : undefined;
     do {
       const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
         method: 'POST',
         body: JSON.stringify({
           limit: 100, after,
           properties: SERVICE_LIST_PROPS,
-          sorts: [{ propertyName: 'due_date', direction: 'ASCENDING' }],
+          ...(filterGroups ? { filterGroups } : {}),
+          sorts: [{ propertyName: 'due_date', direction: 'DESCENDING' }],
         }),
       });
       for (const r of resp.results || []) {
