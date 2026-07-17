@@ -247,6 +247,30 @@ export const pdfStyles = StyleSheet.create({
   },
 
   // ---- Final Checklist (master + Q&A PDFs) ----
+  // Each Final Checklist group now renders as its own room-style section so the
+  // checklist reads identically to the room sections above it: a grey header bar
+  // (group name) with a brand-pink bottom rule, then a bordered content box of
+  // bold label / right-aligned value rows. Mirrors the local room styles in
+  // pdf.tsx (sectionHeader / sectionContent / qa / qaQuestion / qaAnswer).
+  fcSectionHeader: {
+    backgroundColor: PDF_COLORS.sectionHeaderBg, color: PDF_COLORS.ink, padding: 8,
+    marginTop: 10, fontSize: 11, fontFamily: 'Helvetica-Bold',
+    borderBottomWidth: 2, borderBottomColor: PDF_COLORS.brand,
+  },
+  fcSectionContent: {
+    borderWidth: 1, borderColor: PDF_COLORS.grayLight, borderTopWidth: 0,
+    padding: 8, marginBottom: 8,
+  },
+  fcQa: {
+    paddingTop: 3, paddingBottom: 3, borderBottomWidth: 0.5, borderBottomColor: PDF_COLORS.grayLight,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+  },
+  fcQaLast: {
+    paddingTop: 3, paddingBottom: 3,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+  },
+  fcQaLabel: { fontSize: 9, fontFamily: 'Helvetica-Bold', flex: 1, paddingRight: 8 },
+  fcQaValue: { fontSize: 9, fontFamily: 'Helvetica-Bold', textAlign: 'right', maxWidth: '45%' },
   // A sub-section heading under the pink "Final Checklist" section title. Lighter
   // than a room title (no pink rule) so it reads as a group within the section.
   fcGroupTitle: {
@@ -651,36 +675,56 @@ export function PdfFinalChecklist(props: {
 
   return (
     <View style={{ marginTop: 10 }}>
-      <PdfSectionHeader title="Final Checklist" photoUrls={[]} />
+      {/* Lightweight block divider; each GROUP below renders as its own
+          room-style section (grey header bar + label/value rows) so the Final
+          Checklist reads identically to the room sections above it. */}
+      <View wrap={false} minPresenceAhead={90} style={{ marginTop: 8 }}>
+        <Text style={pdfStyles.sectionTitle}>Final Checklist</Text>
+      </View>
       {groups.map((g) => (
-        <View key={g.name} style={{ marginBottom: 6 }}>
-          {/* Group title + column header stay together so they never strand at
-              the bottom of a page (rows below wrap normally). */}
-          <View wrap={false} minPresenceAhead={40}>
-            <Text style={pdfStyles.fcGroupTitle}>{g.name}</Text>
-            <View style={pdfStyles.tableHeaderRow}>
-              <Text style={[pdfStyles.tableHeaderCell, { width: '40%' }]}>Item</Text>
-              <Text style={[pdfStyles.tableHeaderCell, { width: '60%' }]}>Detail</Text>
-            </View>
+        <View key={g.name} wrap>
+          {/* Header bar kept off the very bottom of a page (minPresenceAhead) so
+              it never strands above a break; rows below wrap normally. */}
+          <View style={pdfStyles.fcSectionHeader} minPresenceAhead={72} wrap={false}>
+            <Text>{g.name}</Text>
           </View>
-          {g.rows.map((r, i) => (
-            <View key={i} wrap={false}>
-              <View style={pdfStyles.tableRow}>
-                <Text style={[pdfStyles.fcItemCell, { width: '40%' }]}>{r.label}</Text>
-                <Text style={[pdfStyles.tableCell, { width: '60%' }]}>{r.value}</Text>
-              </View>
-              {r.photos && r.photos.length > 0 && (
-                <View style={{ paddingLeft: 3 }}>
-                  <PdfSectionPhotos photoUrls={r.photos} />
+          <View style={pdfStyles.fcSectionContent}>
+            {g.rows.map((r, i) => {
+              const tone = fcToneOf(r.value);
+              const color = tone === 'fail' ? PDF_COLORS.brand : tone === 'pass' ? PDF_COLORS.emerald : PDF_COLORS.gray;
+              const hasPhotos = !!(r.photos && r.photos.length > 0);
+              const isLast = i === g.rows.length - 1 && !hasPhotos;
+              const displayVal = r.value && r.value.trim() ? r.value : '—';
+              return (
+                <View key={i} wrap>
+                  <View style={isLast ? pdfStyles.fcQaLast : pdfStyles.fcQa} wrap={false}>
+                    <Text style={pdfStyles.fcQaLabel}>{r.label}</Text>
+                    <Text style={[pdfStyles.fcQaValue, { color }]}>{displayVal}</Text>
+                  </View>
+                  {hasPhotos && (
+                    <View style={{ paddingLeft: 3 }}>
+                      <PdfSectionPhotos photoUrls={r.photos!} />
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
-          ))}
+              );
+            })}
+          </View>
         </View>
       ))}
       {leftover.length > 0 && <PdfSectionPhotos photoUrls={leftover} />}
     </View>
   );
+}
+
+/** Pass/Fail tone for a Final Checklist value, mirroring the room-section answer
+ *  coloring (fail → brand pink, pass → emerald, otherwise neutral gray). Most
+ *  checklist values are neutral, matching the report's overall answer look. */
+function fcToneOf(v: string | undefined): 'pass' | 'fail' | null {
+  const n = (v || '').trim().toLowerCase();
+  if (/\b(fail|failed|poor|deficient)\b/.test(n)) return 'fail';
+  if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return 'pass';
+  return null;
 }
 
 /**
