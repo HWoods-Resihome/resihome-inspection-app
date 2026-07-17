@@ -11,7 +11,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
 import { serviceVisibleTo } from '@/lib/services/scope';
-import type { SampleService } from '@/lib/services/sampleData';
+import type { ServiceRecord } from '@/lib/services/model';
 import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder, readServiceForms, fetchPropertyStatus } from '@/lib/hubspot';
 import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
@@ -45,7 +45,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // Ownership: a vendor may only submit a work order assigned to THEM.
   const viewer = await resolveServiceViewerAsync(session, req);
   if (!viewer.canSeeAll && existing && !serviceVisibleTo(
-    { vendor: existing.props.vendor_name || null, vendorEmail: String(existing.props.vendor_email || '').trim() || null } as SampleService,
+    { vendor: existing.props.vendor_name || null, vendorEmail: String(existing.props.vendor_email || '').trim() || null } as ServiceRecord,
     viewer,
   )) {
     return res.status(403).json({ error: 'Not authorized for this service.' });

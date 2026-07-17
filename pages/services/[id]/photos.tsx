@@ -11,7 +11,7 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { serviceVisibleTo } from '@/lib/services/scope';
 import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
-import type { SampleService } from '@/lib/services/sampleData';
+import type { ServiceRecord } from '@/lib/services/model';
 import { fetchServiceWorkOrder } from '@/lib/hubspot';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 
@@ -36,7 +36,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   // Vendor-ownership guard (mirrors the service detail page): a vendor may only
   // view photos for a service assigned to them.
   const viewer = await resolveServiceViewerAsync(session, ctx.req);
-  if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: p.vendor_name || null, vendorEmail: String(p.vendor_email || '').trim() || null } as SampleService, viewer)) {
+  if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: p.vendor_name || null, vendorEmail: String(p.vendor_email || '').trim() || null } as ServiceRecord, viewer)) {
     return { redirect: { destination: '/services', permanent: false } };
   }
   const groups: { id: string; name: string }[] = [];

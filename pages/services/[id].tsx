@@ -9,7 +9,7 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
-import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, easternTodayISO, type ServiceStatus, type SampleService } from '@/lib/services/sampleData';
+import { SERVICE_STATUS_STYLE, serviceStatusText, easternTodayISO, type ServiceStatus, type ServiceRecord } from '@/lib/services/model';
 import { serviceVisibleTo } from '@/lib/services/scope';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
 import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
@@ -112,28 +112,14 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         forBilling: p.for_billing || '', masterServiceId: String(p.master_service_id || '').trim(), splitAt: normDate(p.split_at),
       };
     }
-  } else {
-    const s = SAMPLE_SERVICES.find((x) => x.id === id);
-    if (s) svcVendorEmail = s.vendorEmail || null;
-    if (s) svc = {
-      id: s.id, live: false, worktype: s.worktype, subtype: s.subtype, scope: s.scope,
-      address: s.address, locality: s.locality, vendor: s.vendor, dueDate: s.dueDate,
-      petStations: !!s.petStations, status: s.status, propertyRecordId: '', isBidItem: false,
-      estimatedAt: s.estimatedAt || '',
-      description: '',
-      vendorCost: null, markupPct: null, clientCost: null, vendorCostAdjustment: null, adjustmentReason: '',
-      grassTiers: DEFAULT_GRASS_TIERS,
-      aiVerdict: '', aiNotes: '', reviewDecision: '', reviewNotes: '', reviewedBy: '',
-      answers: {}, before: [], after: [], petBefore: [], petAfter: [],
-      isMaster: false, coveredCount: null, perRate: null, forBilling: '', masterServiceId: '', splitAt: '',
-    };
   }
+  // A non-numeric (or unknown) id has no real Service Work Order → back to the list.
   if (!svc) return { redirect: { destination: '/services', permanent: false } };
   // Vendor-ownership guard: a vendor (real login OR "View as Vendor" preview) may
   // only open a service assigned to them — a direct URL to someone else's service
   // bounces back to the list. Internal admins (canSeeAll) are unrestricted.
   const viewer = await resolveServiceViewerAsync(session, ctx.req);
-  if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: svc.vendor, vendorEmail: svcVendorEmail } as SampleService, viewer)) {
+  if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: svc.vendor, vendorEmail: svcVendorEmail } as ServiceRecord, viewer)) {
     return { redirect: { destination: '/services', permanent: false } };
   }
   const savedForms = await readServiceForms().catch(() => null);
@@ -647,7 +633,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   // Past-due (open statuses only) — turns the header Due date red, like the home list.
   // Past-due against the REAL today for live records (sample preview keeps its
   // fixed reference date). Strict "<" so a service due TODAY is still on-time.
-  const todayISO = svc.live ? easternTodayISO() : REFERENCE_TODAY;
+  const todayISO = easternTodayISO();
   const overdue = ['estimated', 'assigned', 'submitted', 'review'].includes(svc.status) && !!svc.dueDate && svc.dueDate < todayISO;
   // Resting display for a $ input: pad to 2 decimals on blur (e.g. "250" → "250.00").
   const fmt2 = (v: string): string => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) ? n.toFixed(2) : v; };

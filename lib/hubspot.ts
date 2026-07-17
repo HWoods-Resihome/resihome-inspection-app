@@ -3,7 +3,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { put } from '@vercel/blob';
 import type { Question, Property, HubSpotUser, InspectionSummary } from './types';
-import type { SampleService, ServiceStatus } from './services/sampleData';
+import type { ServiceRecord, ServiceStatus } from './services/model';
 import type { Worktype } from './services/worktypes';
 import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls, PHOTO_URL_DELIMITER } from './answerProps';
@@ -1355,11 +1355,11 @@ function normServiceDate(v: any): string {
   return '';
 }
 
-function mapServiceRow(r: any): SampleService {
+function mapServiceRow(r: any): ServiceRecord {
   const p = r.properties || {};
   const num = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) && n !== 0 ? n : null; };
   // Only DEFINED keys — getServerSideProps can't serialize `undefined` values.
-  const rec: SampleService = {
+  const rec: ServiceRecord = {
     id: String(r.id),
     scope: p.scope === 'community' ? 'community' : 'property',
     address: p.address_snapshot || p.service_name || '(Service)',
@@ -1405,13 +1405,13 @@ function mapServiceRow(r: any): SampleService {
 // of re-querying HubSpot (up to 500 records) on every navigation. Any Service
 // Work Order write busts it (see createServiceWorkOrder / patchServiceWorkOrder),
 // so post-action refreshes still show fresh data.
-let _svcListData: SampleService[] | null = null;
+let _svcListData: ServiceRecord[] | null = null;
 let _svcListAt = 0;
-let _svcListInflight: Promise<SampleService[] | null> | null = null;
+let _svcListInflight: Promise<ServiceRecord[] | null> | null = null;
 const SVC_LIST_TTL_MS = 30_000;
 export function bustServiceListCache(): void { _svcListData = null; _svcListAt = 0; }
 
-export async function searchServiceWorkOrders(limit = 500): Promise<SampleService[] | null> {
+export async function searchServiceWorkOrders(limit = 500): Promise<ServiceRecord[] | null> {
   if (_svcListData && Date.now() - _svcListAt < SVC_LIST_TTL_MS) return _svcListData;
   if (_svcListInflight) return _svcListInflight;   // single-flight: dedupe concurrent loads
   _svcListInflight = searchServiceWorkOrdersLive(limit)
@@ -1452,11 +1452,11 @@ export async function searchServicesForPicker(limit = 300): Promise<{ id: string
   return out;
 }
 
-async function searchServiceWorkOrdersLive(limit = 500): Promise<SampleService[] | null> {
+async function searchServiceWorkOrdersLive(limit = 500): Promise<ServiceRecord[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
   try {
-    const items: SampleService[] = [];
+    const items: ServiceRecord[] = [];
     const refById = new Map<string, string>();   // service id → property_id_ref
     let after: string | undefined;
     do {
@@ -1601,78 +1601,6 @@ export async function associateCommunityToInspection(inspectionId: string, commu
   } catch (e) {
     console.warn('[community] associate to inspection failed:', e);
   }
-}
-
-// Seed the sample services as real Service Work Order records (dev/demo only).
-// Idempotent via enrollment_key = `seed:<sampleId>`; re-runs skip existing.
-export async function seedSampleServiceWorkOrders(apply: boolean, samples: SampleService[]): Promise<any> {
-  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
-  if (!typeId) return { error: 'HUBSPOT_SERVICE_TYPE_ID not set — provision the schema and set the env var first.' };
-
-  const existingKeys = new Set<string>();
-  try {
-    let after: string | undefined;
-    do {
-      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-        method: 'POST',
-        body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key'], filterGroups: [{ filters: [{ propertyName: 'enrollment_key', operator: 'HAS_PROPERTY' }] }] }),
-      });
-      for (const r of resp.results || []) { const k = r.properties?.enrollment_key; if (k) existingKeys.add(String(k)); }
-      after = resp.paging?.next?.after;
-    } while (after);
-  } catch { /* fresh object */ }
-
-  const toProps = (s: SampleService, key: string) => ({
-    service_name: s.address,
-    worktype: s.worktype, subtype: s.subtype, status: s.status, scope: s.scope,
-    is_bid_item: s.status === 'estimated' ? 'true' : 'false',
-    due_date: s.dueDate,
-    region_snapshot: s.region, address_snapshot: s.address, locality_snapshot: s.locality,
-    community_name: s.community || '', property_status_snapshot: s.propertyStatus || '',
-    ...(Number.isFinite(s.lat) ? { latitude: s.lat } : {}), ...(Number.isFinite(s.lng) ? { longitude: s.lng } : {}),
-    vendor_name: s.vendor || '', pet_stations: s.petStations ? 'true' : 'false',
-    ontime: s.onTime ? 'true' : 'false', enrollment_key: key,
-  });
-
-  const report: any = { mode: apply ? 'apply' : 'dry-run', typeId, total: samples.length, created: [], skipped: [] };
-  for (const s of samples) {
-    const key = `seed:${s.id}`;
-    if (existingKeys.has(key)) { report.skipped.push(s.id); continue; }
-    if (!apply) { report.created.push(s.id); continue; }
-    try {
-      await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: toProps(s, key) }) });
-      report.created.push(s.id);
-    } catch (e: any) {
-      report.created.push({ id: s.id, error: String(e?.message || e), detail: e?.detail || null });
-    }
-  }
-  return report;
-}
-
-// Delete only the seed:-tagged sample records (teardown). dry-run lists them.
-export async function unseedSampleServiceWorkOrders(apply: boolean): Promise<any> {
-  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
-  if (!typeId) return { error: 'HUBSPOT_SERVICE_TYPE_ID not set.' };
-  const ids: string[] = [];
-  try {
-    let after: string | undefined;
-    do {
-      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-        method: 'POST',
-        body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key'], filterGroups: [{ filters: [{ propertyName: 'enrollment_key', operator: 'HAS_PROPERTY' }] }] }),
-      });
-      for (const r of resp.results || []) { if (String(r.properties?.enrollment_key || '').startsWith('seed:')) ids.push(String(r.id)); }
-      after = resp.paging?.next?.after;
-    } while (after);
-  } catch (e) { return { error: String((e as any)?.message || e) }; }
-  const report: any = { mode: apply ? 'apply' : 'dry-run', typeId, count: ids.length, ids, deleted: [] };
-  if (apply) {
-    for (const id of ids) {
-      try { await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'DELETE' }); report.deleted.push(id); }
-      catch (e: any) { report.deleted.push({ id, error: String(e?.message || e) }); }
-    }
-  }
-  return report;
 }
 
 // ── Service Rules Engine: read + upsert rule records ──

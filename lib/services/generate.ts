@@ -14,12 +14,12 @@
  * that pair. So a recurring rule holds a single live order per target at a time;
  * the next one is generated after the current is completed or canceled.
  *
- * Documented v1 simplifications (all Step-2 refinements, called out in the report):
- *  - Property targets come from SAMPLE_PROPERTIES (real Property object wiring is
- *    later); community targets come from the rule's own communities list.
- *  - Enrollment/stop conditions are assumed met (no CRM field evaluation yet).
- *  - No cadence date math — due date is today + First Order Due (days), else +5.
- *  - No vendor rotation — the first assigned vendor is used for every order.
+ * Targets come from live CRM data: property targets are Property records in the
+ * rule's portfolios/regions filtered by its enrollment criteria (Property Status /
+ * RRQC), combined with the rule's AND/OR; community targets are the rule's own
+ * communities. Enrollment + stop conditions are evaluated against the CRM; due dates
+ * follow the active cadence (else First Order Due, else +5); vendors are assigned by
+ * equal-volume rotation with sticky-per-address (see ./rotation).
  */
 import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';

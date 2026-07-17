@@ -14,10 +14,10 @@ import { PullToRefresh } from '@/components/PullToRefresh';
 import { AiSparkle } from '@/components/AiSparkle';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
-  SAMPLE_SERVICES, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY, easternTodayISO,
+  SERVICE_STATUS_ORDER, easternTodayISO,
   SERVICE_STATUS_LABEL as STATUS_LABEL, SERVICE_STATUS_STYLE as STATUS_STYLE, serviceStatusText, fmtMDY,
-  type ServiceStatus, type SampleService,
-} from '@/lib/services/sampleData';
+  type ServiceStatus, type ServiceRecord,
+} from '@/lib/services/model';
 import { setViewAsVendor } from '@/lib/services/viewAs';
 import { scopeServices } from '@/lib/services/scope';
 import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
@@ -31,7 +31,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   // Per-property billing lines split from a community grass-cut master roll UP
   // into the master — hide the children from the operational list (the master
   // drill-down and the billing view surface them). See RECURRING_SERVICES_PLAN.md.
-  const operational = (real ?? SAMPLE_SERVICES).filter((s) => !s.masterServiceId);
+  const operational = (real ?? []).filter((s) => !s.masterServiceId);
   // Scope to the viewer: a vendor (real login OR "View as Vendor" preview) only
   // ever RECEIVES their own services — never the whole operational list.
   const viewer = await resolveServiceViewerAsync(session, ctx.req);
@@ -65,7 +65,7 @@ const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'r
 // mirrors the inspection card's long-press. A ~500ms hold prompts to cancel; a
 // normal tap opens the service. The click after a long-press is swallowed.
 function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, onToggleSelect, onLongPress }: {
-  s: SampleService; overdue: boolean; isAdmin: boolean;
+  s: ServiceRecord; overdue: boolean; isAdmin: boolean;
   selectMode?: boolean; selectable?: boolean; selected?: boolean; onToggleSelect?: (id: string) => void; onLongPress?: (id: string, selectable: boolean) => void;
 }) {
   const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -146,7 +146,7 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
   );
 }
 
-export default function ServicesHome({ userName, canCreate, services, live, asVendor, isVendor }: { userName: string; canCreate: boolean; services: SampleService[]; live: boolean; asVendor: boolean; isVendor: boolean }) {
+export default function ServicesHome({ userName, canCreate, services, live, asVendor, isVendor }: { userName: string; canCreate: boolean; services: ServiceRecord[]; live: boolean; asVendor: boolean; isVendor: boolean }) {
   const router = useRouter();
   // "View as Vendor" preview (cookie-persisted, whole-app): shows the external
   // vendor experience — no admin create/settings, and the vendor-visibility rule
@@ -158,7 +158,9 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   // Past-due is measured against the REAL today for live data (the sample preview
   // keeps its fixed reference date). Strict "<" so a service due TODAY is still
   // on-time — it only goes red once at least a day past due.
-  const todayISO = useMemo(() => (live ? easternTodayISO() : REFERENCE_TODAY), [live]);
+  const todayISO = useMemo(() => easternTodayISO(), []);
+  // Region filter options derived from the live services (was SAMPLE_REGIONS).
+  const regionOptions = useMemo(() => Array.from(new Set(services.map((s) => s.region).filter(Boolean))).sort(), [services]);
   // 'all' = everything (incl. completed); 'all_open' = everything except completed.
   // Tapping the All chip cycles between the two.
   // Vendors land on all OPEN services sorted by status (Assigned first); everyone
@@ -195,7 +197,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   }, []);
   const [reassignVendor, setReassignVendor] = useState('');
   const canSelect = isAdmin && live;
-  const isSelectable = (s: SampleService) => canSelect && !['completed', 'canceled'].includes(s.status);
+  const isSelectable = (s: ServiceRecord) => canSelect && !['completed', 'canceled'].includes(s.status);
   const toggleSelect = (id: string) => setSelectedIds((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const exitSelect = () => { setSelectMode(false); setSelectedIds(new Set()); setReassignOpen(false); };
   const enterSelectWith = (id: string, selectable: boolean) => { if (!canSelect) return; try { navigator.vibrate?.(15); } catch { /* n/a */ } setSelectMode(true); setSelectedIds(selectable ? new Set([id]) : new Set()); };
@@ -266,7 +268,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const counts = useMemo(() => {
     const active = scoped.filter((s) => s.status !== 'canceled');
     const c: Record<string, number> = { all: active.length, all_open: active.filter((s) => OPEN_STATUSES.includes(s.status)).length };
-    for (const st of SAMPLE_STATUS_ORDER) c[st] = active.filter((s) => s.status === st).length;
+    for (const st of SERVICE_STATUS_ORDER) c[st] = active.filter((s) => s.status === st).length;
     return c;
   }, [scoped]);
 
@@ -436,7 +438,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
               </div>
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}
-                  options={SAMPLE_REGIONS.map((r) => ({ value: r, label: r }))} />
+                  options={regionOptions.map((r) => ({ value: r, label: r }))} />
               </div>
               {/* Sort — identical to inspections: tap a field to sort; tap the active field again to flip direction. */}
               <div className="relative shrink-0">

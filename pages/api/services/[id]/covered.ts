@@ -19,7 +19,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
 import { serviceVisibleTo } from '@/lib/services/scope';
-import type { SampleService } from '@/lib/services/sampleData';
+import type { ServiceRecord } from '@/lib/services/model';
 import { fetchServiceWorkOrder, patchServiceWorkOrder, fetchCommunityProperties } from '@/lib/hubspot';
 import { isCommunityCutMaster, parseIds } from '@/lib/services/split';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
@@ -46,7 +46,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!internal) {
       const viewer = await resolveServiceViewerAsync(session, req);
       if (!viewer.canSeeAll && !serviceVisibleTo(
-        { vendor: p.vendor_name || null, vendorEmail: String(p.vendor_email || '').trim() || null } as SampleService,
+        { vendor: p.vendor_name || null, vendorEmail: String(p.vendor_email || '').trim() || null } as ServiceRecord,
         viewer,
       )) {
         return res.status(403).json({ error: 'Not authorized for this service.' });

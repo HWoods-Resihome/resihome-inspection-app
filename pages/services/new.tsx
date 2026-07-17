@@ -14,7 +14,7 @@ import { DatePicker } from '@/components/DatePicker';
 import { PriceField } from '@/components/PriceField';
 import { descriptionFor, defaultRateFor, mergeWorktypes, type CustomWorktypeDef } from '@/lib/services/worktypes';
 import { sanitizeNum, clientFrom } from '@/lib/services/pricing';
-import { fmtMDY } from '@/lib/services/sampleData';
+import { fmtMDY } from '@/lib/services/model';
 import { syncAllProperties, searchCachedProperties } from '@/lib/propertyCache';
 import { readServiceTaxonomy } from '@/lib/hubspot';
 

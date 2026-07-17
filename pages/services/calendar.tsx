@@ -10,7 +10,7 @@ import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services
 import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
-import { SAMPLE_SERVICES, SAMPLE_REGIONS, REFERENCE_TODAY, serviceStatusText, type SampleService } from '@/lib/services/sampleData';
+import { easternTodayISO, serviceStatusText, type ServiceRecord } from '@/lib/services/model';
 import type { MapItem } from '@/components/ServicesMap';
 
 // Map is client-only (Leaflet touches window).
@@ -27,7 +27,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   // Scope to the viewer: internal admins see all; a vendor (real login OR an
   // internal "View as Vendor" preview) only ever RECEIVES their own services.
   const viewer = await resolveServiceViewerAsync(session, ctx.req);
-  const services = scopeServices(real ?? SAMPLE_SERVICES, viewer);
+  const services = scopeServices(real ?? [], viewer);
   return { props: { canSeeAll: viewer.canSeeAll, services, live: !!real } };
 };
 
@@ -57,10 +57,12 @@ const toISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSta
 const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const sameYMD = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
-export default function ServicesCalendar({ canSeeAll, services, live }: { canSeeAll: boolean; services: SampleService[]; live: boolean }) {
+export default function ServicesCalendar({ canSeeAll, services, live }: { canSeeAll: boolean; services: ServiceRecord[]; live: boolean }) {
   const [view, setView] = useState<View>('month');
-  const [cursorISO, setCursorISO] = useState(REFERENCE_TODAY);
+  const [cursorISO, setCursorISO] = useState(easternTodayISO());
   const [regionFilter, setRegionFilter] = useState<string[]>([]);
+  // Region filter options derived from the live services in view (was SAMPLE_REGIONS).
+  const regionOptions = useMemo(() => Array.from(new Set(services.map((s) => s.region).filter(Boolean))).sort(), [services]);
   const [vendorFilter, setVendorFilter] = useState<string[]>([]);
   const [vendorNames, setVendorNames] = useState<string[]>([]);
   useEffect(() => {
@@ -101,7 +103,7 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
   }, [view, cursorISO, regionFilter, vendorFilter, typeFilter, showCompleted, filtersOpen]);
 
   const cursor = parse(cursorISO);
-  const today = parse(REFERENCE_TODAY);
+  const today = parse(easternTodayISO());
   const COMPLETED_WINDOW_DAYS = 14;
   const cutoffISO = toISO(addDays(today, -COMPLETED_WINDOW_DAYS));
 
@@ -127,7 +129,7 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
   const inRange = (iso: string) => { const d = parse(iso); return d >= range.start && d <= addDays(range.end, 0); };
   const visible = useMemo(() => scoped.filter((s) => inRange(s.dueDate)), [scoped, range]);
   const byDay = useMemo(() => {
-    const m: Record<string, SampleService[]> = {};
+    const m: Record<string, ServiceRecord[]> = {};
     for (const s of scoped) (m[s.dueDate] ||= []).push(s);
     return m;
   }, [scoped]);
@@ -144,9 +146,9 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
     const vendors: string[] = [];
     if (view !== 'day') return { order, color, counts, vendors };
     const completed = visible.filter((s) => s.status === 'completed');
-    const groups = new Map<string, SampleService[]>();
+    const groups = new Map<string, ServiceRecord[]>();
     for (const s of completed) { const v = s.vendor || 'Unassigned'; if (!groups.has(v)) groups.set(v, []); groups.get(v)!.push(s); }
-    const ms = (s: SampleService) => (s.completedAt ? new Date(s.completedAt).getTime() : 0);
+    const ms = (s: ServiceRecord) => (s.completedAt ? new Date(s.completedAt).getTime() : 0);
     Array.from(groups.keys()).sort().forEach((v, vi) => {
       const list = groups.get(v)!.slice().sort((a, b) => (ms(a) - ms(b)) || a.address.localeCompare(b.address));
       list.forEach((s, i) => order.set(s.id, i + 1));
@@ -163,7 +165,7 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
   // the inspections calendar: small concurrency, cached per service id, and a
   // null cache entry marks a confirmed miss so we don't re-request it.
   const [coords, setCoords] = useState<Record<string, { lat: number; lng: number } | null>>({});
-  const geoAddress = (s: SampleService) => [s.address, s.locality].map((x) => (x || '').trim()).filter(Boolean).join(', ');
+  const geoAddress = (s: ServiceRecord) => [s.address, s.locality].map((x) => (x || '').trim()).filter(Boolean).join(', ');
   useEffect(() => {
     const todo = visible.filter((s) =>
       !(Number.isFinite(s.lat) && Number.isFinite(s.lng)) && coords[s.id] === undefined && geoAddress(s).length >= 5);
@@ -223,7 +225,7 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
       ? `${MON_ABBR[range.start.getMonth()]} ${range.start.getDate()} – ${MON_ABBR[range.end.getMonth()]} ${range.end.getDate()}`
       : `${DOW[cursor.getDay()]}, ${MON_ABBR[cursor.getMonth()]} ${cursor.getDate()}`;
 
-  const ChipLink = ({ s, compact }: { s: SampleService; compact?: boolean }) => (
+  const ChipLink = ({ s, compact }: { s: ServiceRecord; compact?: boolean }) => (
     <Link href={`/services/${s.id}`} onClick={(e) => e.stopPropagation()}
       className={`block truncate rounded border px-1.5 py-0.5 text-[10.5px] font-semibold ${wtOf(s.worktype).chip} ${compact ? '' : 'mb-0.5'}`}
       title={`${s.address} — ${worktypeLabel(s.worktype)} · ${subtypeLabel(s.worktype, s.subtype)}`}>
@@ -267,7 +269,7 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
             <div className="flex-1 min-w-0">
               <MultiFilter label="Region" selected={regionFilter} onChange={setRegionFilter}
                 className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-                options={SAMPLE_REGIONS.map((r) => ({ value: r, label: r }))} />
+                options={regionOptions.map((r) => ({ value: r, label: r }))} />
             </div>
             <div className="flex-1 min-w-0">
               <MultiFilter label="Type" selected={typeFilter} onChange={setTypeFilter}
@@ -301,7 +303,7 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
           <button onClick={() => step(1)} aria-label="Next" className="w-9 h-9 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
           </button>
-          <button onClick={() => setCursorISO(REFERENCE_TODAY)} className="text-[12px] font-heading font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-2 bg-white hover:border-brand/40">Today</button>
+          <button onClick={() => setCursorISO(easternTodayISO())} className="text-[12px] font-heading font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-2 bg-white hover:border-brand/40">Today</button>
         </div>
 
         {/* ---- MONTH ---- */}

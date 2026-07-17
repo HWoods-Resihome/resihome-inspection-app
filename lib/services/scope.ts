@@ -9,7 +9,7 @@
 import { isInternalEmail } from '@/lib/userAccess';
 import { isViewingAsVendor } from '@/lib/services/viewAs';
 import { SERVICE_VENDORS, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
-import type { SampleService } from '@/lib/services/sampleData';
+import type { ServiceRecord } from '@/lib/services/model';
 
 export interface ServiceViewer {
   canSeeAll: boolean;          // internal (and not previewing as a vendor)
@@ -33,7 +33,7 @@ export function resolveServiceViewer(email: string | null | undefined, req: any)
 }
 
 /** True if this service is visible to the viewer. */
-export function serviceVisibleTo(s: SampleService, viewer: ServiceViewer): boolean {
+export function serviceVisibleTo(s: ServiceRecord, viewer: ServiceViewer): boolean {
   if (viewer.canSeeAll) return true;
   const e = (viewer.vendorEmail || '').toLowerCase();
   const se = (s.vendorEmail || '').toLowerCase();
@@ -44,7 +44,7 @@ export function serviceVisibleTo(s: SampleService, viewer: ServiceViewer): boole
 }
 
 /** Restrict a service list to what the viewer may see. */
-export function scopeServices(services: SampleService[], viewer: ServiceViewer): SampleService[] {
+export function scopeServices(services: ServiceRecord[], viewer: ServiceViewer): ServiceRecord[] {
   if (viewer.canSeeAll) return services;
   return services.filter((s) => serviceVisibleTo(s, viewer));
 }

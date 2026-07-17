@@ -13,9 +13,8 @@ import { MultiFilter } from '@/components/MultiFilter';
 import { DatePicker } from '@/components/DatePicker';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
-import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
 import { DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
-import { searchServiceRuleRecords, readServiceTaxonomy } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceTaxonomy, readServiceWorkOrderKeys } from '@/lib/hubspot';
 import { isViewingAsVendor } from '@/lib/services/viewAs';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -26,7 +25,14 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const recs = await searchServiceRuleRecords().catch(() => null);
   const canGenerate = await isAppAdmin(session?.email).catch(() => false);
   const taxonomy = await readServiceTaxonomy().catch(() => null);
-  return { props: { ruleRecords: recs, live: !!recs, canGenerate, taxonomy: (taxonomy as CustomWorktypeDef[] | null) || null } };
+  // Current OPEN service volume per vendor — the basis for the equal-volume rotation
+  // count shown next to each company in the vendor picker (real Service Work Orders).
+  const keys = await readServiceWorkOrderKeys().catch(() => null);
+  const vendorOpen: Record<string, number> = {};
+  for (const k of keys || []) {
+    if (k.vendor && OPEN_SERVICE_STATUSES.includes(k.status)) vendorOpen[k.vendor] = (vendorOpen[k.vendor] || 0) + 1;
+  }
+  return { props: { ruleRecords: recs, live: !!recs, canGenerate, taxonomy: (taxonomy as CustomWorktypeDef[] | null) || null, vendorOpen } };
 };
 
 // Real coverage catalog, loaded client-side from /api/services/coverage (portfolios
@@ -43,13 +49,9 @@ const EMPTY_COVERAGE: Coverage = { portfolios: [], regionsByPortfolio: {}, regio
 // A single Property row for the 'list'-mode drill-down (loaded on demand).
 interface CoverageProp { id: string; address: string; locality: string; region: string; portfolio: string; status: string; }
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-// Current OPEN service volume per vendor — the basis for the equal-volume
-// rotation shown next to each company in the vendor picker.
+// Open service statuses — the basis for the equal-volume rotation count shown next
+// to each company in the vendor picker (computed from real orders in gSSP).
 const OPEN_SERVICE_STATUSES = ['estimated', 'assigned', 'submitted', 'review'];
-const VENDOR_OPEN: Record<string, number> = SAMPLE_SERVICES.reduce((m, s) => {
-  if (s.vendor && OPEN_SERVICE_STATUSES.includes(s.status)) m[s.vendor] = (m[s.vendor] || 0) + 1;
-  return m;
-}, {} as Record<string, number>);
 const DEFAULT_MARKUP = '20';   // default markup % on all services
 const baseRate = (wt: Worktype, sub: string): string => { const r = defaultRateFor(wt, sub); return r != null ? String(r) : ''; };
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -323,7 +325,7 @@ function ruleToProps(r: Rule): Record<string, any> {
   return props;
 }
 
-export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }: { ruleRecords: { id: string; props: Record<string, any> }[] | null; live: boolean; canGenerate: boolean; taxonomy?: CustomWorktypeDef[] | null }) {
+export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, vendorOpen }: { ruleRecords: { id: string; props: Record<string, any> }[] | null; live: boolean; canGenerate: boolean; taxonomy?: CustomWorktypeDef[] | null; vendorOpen: Record<string, number> }) {
   // Built-in taxonomy merged with the admin's custom work types / subtypes.
   const defs = useMemo(() => mergeWorktypes(taxonomy), [taxonomy]);
   const subsOfD = (wt: string) => defs.find((w) => w.id === wt)?.subtypes || [];
@@ -992,7 +994,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
             {/* Vendor Assignment — one or more companies; count = current open volume. */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label className={lbl}>Vendor Assignment</label>
-              <CoveragePicker noun="vendors" options={vendorNames.map((v) => ({ key: v, count: VENDOR_OPEN[v] || 0 }))} selected={rule.vendors} onToggle={toggleVendor} onSetMany={setManyVendors} />
+              <CoveragePicker noun="vendors" options={vendorNames.map((v) => ({ key: v, count: vendorOpen[v] || 0 }))} selected={rule.vendors} onToggle={toggleVendor} onSetMany={setManyVendors} />
               {rule.vendors.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {rule.vendors.map((v) => (
