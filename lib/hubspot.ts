@@ -7234,18 +7234,37 @@ const vendorTruthy = (v: any) => ['true', 'yes', '1'].includes(String(v ?? '').t
 export async function fetchApprovedVendorCompanies(force = false): Promise<VendorCompany[]> {
   if (!force && _vendorCompanies && Date.now() - _vendorCompanies.at < 5 * 60 * 1000) return _vendorCompanies.list;
   const out: VendorCompany[] = [];
-  const properties = ['name', 'email', 'resiwalk_access', 'eligible_for_recurring', 'resiwalk_password'];
+  // resiwalk_password is OPTIONAL — it may not exist yet if no vendor has set a
+  // password. If HubSpot 400s because that property doesn't exist, drop it and
+  // retry so the whole vendor list isn't wiped out by a missing optional field.
+  let hasPasswordProp = true;
+  let properties = ['name', 'email', 'resiwalk_access', 'eligible_for_recurring', 'resiwalk_password'];
+  const runPage = (after?: string) => hubspotFetch(`/crm/v3/objects/companies/search`, {
+    method: 'POST',
+    body: JSON.stringify({
+      limit: 100, after, properties,
+      filterGroups: [{ filters: [
+        { propertyName: 'resiwalk_access', operator: 'IN', values: VENDOR_APPROVED_VALUES },
+        { propertyName: 'eligible_for_recurring', operator: 'IN', values: VENDOR_APPROVED_VALUES },
+      ] }],
+    }),
+  });
   let after: string | undefined;
   try {
     do {
-      const body: any = {
-        limit: 100, after, properties,
-        filterGroups: [{ filters: [
-          { propertyName: 'resiwalk_access', operator: 'IN', values: VENDOR_APPROVED_VALUES },
-          { propertyName: 'eligible_for_recurring', operator: 'IN', values: VENDOR_APPROVED_VALUES },
-        ] }],
-      };
-      const resp = await hubspotFetch(`/crm/v3/objects/companies/search`, { method: 'POST', body: JSON.stringify(body) });
+      let resp;
+      try {
+        resp = await runPage(after);
+      } catch (e: any) {
+        if (hasPasswordProp && isMissingPropertyError(e, 'resiwalk_password')) {
+          // Property not provisioned yet → treat everyone as no-password-set.
+          hasPasswordProp = false;
+          properties = properties.filter((p) => p !== 'resiwalk_password');
+          resp = await runPage(after);
+        } else {
+          throw e; // a missing flag/email/name property is fatal — surface it
+        }
+      }
       for (const r of resp.results || []) {
         const p = r.properties || {};
         if (!vendorTruthy(p.resiwalk_access) || !vendorTruthy(p.eligible_for_recurring)) continue; // defensive re-check
@@ -7257,7 +7276,7 @@ export async function fetchApprovedVendorCompanies(force = false): Promise<Vendo
       after = resp.paging?.next?.after || undefined;
     } while (after);
   } catch (e: any) {
-    console.warn('[vendor-companies] fetch failed:', String(e?.message || e).slice(0, 200));
+    console.warn('[vendor-companies] fetch failed (check the resiwalk_access / eligible_for_recurring / email properties exist on Companies):', `${String(e?.message || e)} ${String(e?.detail || '')}`.slice(0, 240));
     if (_vendorCompanies) return _vendorCompanies.list; // serve stale rather than empty
     return [];
   }

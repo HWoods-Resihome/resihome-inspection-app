@@ -45,6 +45,7 @@ export default function LoginPage() {
   const [confirm, setConfirm] = useState('');
   const [vendorName, setVendorName] = useState('');
   const [vendorBusy, setVendorBusy] = useState(false);
+  const [showPw, setShowPw] = useState(false);   // reveal the vendor password field(s)
   const inVendorFlow = vendorStage !== 'none';
 
   // Main "Continue": approved-vendor detection first, else staff Google sign-in.
@@ -332,12 +333,18 @@ export default function LoginPage() {
                     />
                   </>
                 )}
-                <label htmlFor="vendor-password" className="block text-sm font-heading font-semibold text-ink mb-1.5">
-                  {vendorStage === 'password' ? 'Password' : vendorStage === 'reset' ? 'New password' : 'Create password'}
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label htmlFor="vendor-password" className="block text-sm font-heading font-semibold text-ink">
+                    {vendorStage === 'password' ? 'Password' : vendorStage === 'reset' ? 'New password' : 'Create password'}
+                  </label>
+                  <button type="button" onClick={() => setShowPw((s) => !s)} tabIndex={-1}
+                    className="text-xs text-brand font-heading font-semibold hover:underline">
+                    {showPw ? 'Hide' : 'Show'}
+                  </button>
+                </div>
                 <input
                   id="vendor-password"
-                  type="password"
+                  type={showPw ? 'text' : 'password'}
                   autoComplete={vendorStage === 'password' ? 'current-password' : 'new-password'}
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); setError(null); }}
@@ -353,7 +360,7 @@ export default function LoginPage() {
                     </label>
                     <input
                       id="vendor-confirm"
-                      type="password"
+                      type={showPw ? 'text' : 'password'}
                       autoComplete="new-password"
                       value={confirm}
                       onChange={(e) => { setConfirm(e.target.value); setError(null); }}
@@ -495,16 +502,7 @@ export default function LoginPage() {
             </>
             )}
 
-            {!inVendorFlow && (
-              <p className="text-xs text-gray-400 text-center mt-5">
-                Access is restricted to authorized accounts. Staff verify ownership through Google, Microsoft, or an emailed code; vendors sign in with a password.
-              </p>
-            )}
           </form>
-
-          <p className="text-xs text-gray-400 text-center mt-6">
-            ResiWalk{process.env.NEXT_PUBLIC_APP_VERSION ? ` · v${process.env.NEXT_PUBLIC_APP_VERSION}` : ''}
-          </p>
         </div>
       </main>
     </>
