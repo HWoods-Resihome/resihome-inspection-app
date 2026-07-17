@@ -5707,7 +5707,18 @@ async function listHubspotFilesPage(after?: string): Promise<{ results: any[]; n
  * with the returned `after` until done. A hard list failure ends the run
  * gracefully (done + capped) so gathered counts survive instead of erroring out.
  */
+// ⛔ EMERGENCY KILL-SWITCH — HubSpot photo deletion is DISABLED.
+// Broken photos were reported in the field; until the migration is proven
+// complete and the referenced-set is proven exhaustive, NO HubSpot photo original
+// may be deleted (deletion is irreversible). While true, every reclaim batch runs
+// as a DRY RUN — it counts orphans but deletes nothing — no matter who calls it
+// (admin button, background worker, or the every-minute cron watchdog). Flip to
+// false ONLY after the migration + referenced-set are verified safe.
+const RECLAIM_DELETE_DISABLED = true;
+
 export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; after?: string }): Promise<DeleteMigratedBatch> {
+  // Force dry-run while the kill-switch is on — never delete.
+  const apply = opts.apply && !RECLAIM_DELETE_DISABLED;
   const rep: DeleteMigratedBatch = { after: opts.after ?? null, done: false, referencedCount: 0, listed: 0, appPhotos: 0, skippedNonApp: 0, orphaned: 0, referencedKept: 0, deleted: 0, errors: 0, errorSamples: [] };
   const referenced = await referencedHubspotPhotoUrls();
   rep.referencedCount = referenced.size;
@@ -5746,7 +5757,7 @@ export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; a
     rep.appPhotos++;
     if (referenced.has(normFileUrl(rawUrl))) { rep.referencedKept++; continue; } // still in use → keep
     rep.orphaned++;
-    if (!opts.apply) continue;
+    if (!apply) continue;
     // Process the WHOLE page (≤100) before advancing the cursor — deleting mid-
     // page and then advancing would skip the rest. 100 deletes fit the budget.
     try { await deleteHubspotFileById(String(f.id)); rep.deleted++; }
