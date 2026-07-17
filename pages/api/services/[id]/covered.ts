@@ -17,6 +17,9 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
+import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
+import { serviceVisibleTo } from '@/lib/services/scope';
+import type { SampleService } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, patchServiceWorkOrder, fetchCommunityProperties } from '@/lib/hubspot';
 import { isCommunityCutMaster, parseIds } from '@/lib/services/split';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
@@ -25,8 +28,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!['GET', 'POST'].includes(req.method || '')) { res.setHeader('Allow', 'GET, POST'); return res.status(405).json({ error: 'Method not allowed' }); }
   const session = await getSessionFromRequest(req).catch(() => null);
   const email = session?.email;
-  const ok = (await servicesEnabled(email).catch(() => false)) && isInternalEmail(email);
-  if (!ok) return res.status(403).json({ error: 'Internal reviewers only' });
+  const internal = (await servicesEnabled(email).catch(() => false)) && isInternalEmail(email);
+  // Editing the covered list (POST) is internal-only. A scoped vendor may READ
+  // (GET) the covered-home list for a service assigned to them — they need the
+  // street addresses to service the route. Ownership is verified below.
+  if (req.method === 'POST' && !internal) return res.status(403).json({ error: 'Internal reviewers only' });
+  if (!internal && !(await servicesViewerAllowed(email).catch(() => false))) return res.status(403).json({ error: 'Not authorized' });
 
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ error: 'Missing service id' });
@@ -35,6 +42,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rec = await fetchServiceWorkOrder(id);
     if (!rec) return res.status(200).json({ preview: true, covered: [], available: [] });
     const p = rec.props;
+    // Vendor read: only for a service assigned to them.
+    if (!internal) {
+      const viewer = await resolveServiceViewerAsync(session, req);
+      if (!viewer.canSeeAll && !serviceVisibleTo(
+        { vendor: p.vendor_name || null, vendorEmail: String(p.vendor_email || '').trim() || null } as SampleService,
+        viewer,
+      )) {
+        return res.status(403).json({ error: 'Not authorized for this service.' });
+      }
+    }
     if (!isCommunityCutMaster(p)) return res.status(400).json({ error: 'Not a community grass-cut master.' });
     if (p.for_billing === 'false' || String(p.split_at || '').trim()) return res.status(409).json({ error: 'This master has already been split — its covered list is final.' });
 

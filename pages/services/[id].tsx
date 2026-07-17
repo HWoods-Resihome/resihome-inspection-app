@@ -130,7 +130,11 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   }
   const savedForms = await readServiceForms().catch(() => null);
   const formSet: Record<string, any[]> = { ...SAMPLE_FORMS, ...(savedForms || {}) };
-  const form = (formSet[formKey(svc.worktype, svc.subtype)] || []).filter((q: any) => q.enabled);
+  const form = (formSet[formKey(svc.worktype, svc.subtype)] || [])
+    .filter((q: any) => q.enabled)
+    // Community grass cuts are a per-contract visit, not a per-home cut — the
+    // "Grass Height at Arrival" tier doesn't apply, so drop it for community scope.
+    .filter((q: any) => !(svc.scope === 'community' && isGrassHeightQuestion(q)));
 
   // For property-scope live services, pull the property brief (bed/bath/sqft/
   // region) for the header's second line, and — for CLEANING at a non-"Tenant
