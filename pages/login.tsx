@@ -36,16 +36,19 @@ export default function LoginPage() {
   const [otpStage, setOtpStage] = useState<'idle' | 'sent'>('idle');
   const [code, setCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
-  // Vendor (Services) sign-in — email + password against the approved Companies
-  // list. 'email' collects the address; then 'password' (returning) or 'setup'
-  // (first login: create + confirm a password).
-  const [mode, setMode] = useState<'staff' | 'vendor'>('staff');
-  const [vendorStage, setVendorStage] = useState<'email' | 'password' | 'setup'>('email');
+  // Vendor (Services) sign-in is MERGED into the main flow: on "Continue" we
+  // detect whether the email is an approved vendor and, if so, switch to the
+  // password stage (or first-login 'setup'); otherwise we fall through to staff
+  // (Google). 'none' = normal email entry; 'reset' = forgot-password (emailed
+  // code + new password). No separate button.
+  const [vendorStage, setVendorStage] = useState<'none' | 'password' | 'setup' | 'reset'>('none');
   const [confirm, setConfirm] = useState('');
   const [vendorName, setVendorName] = useState('');
   const [vendorBusy, setVendorBusy] = useState(false);
+  const inVendorFlow = vendorStage !== 'none';
 
-  async function vendorContinue() {
+  // Main "Continue": approved-vendor detection first, else staff Google sign-in.
+  async function continueEmail() {
     if (!email.trim()) { setError('Please enter your email'); return; }
     setVendorBusy(true); setError(null);
     try {
@@ -54,12 +57,16 @@ export default function LoginPage() {
         body: JSON.stringify({ email: email.trim() }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setError(d.error || 'Could not check that email.'); return; }
-      if (!d.approved) { setError('This email isn’t set up for ResiWalk access. Contact your ResiHome admin.'); return; }
-      setVendorName(d.name || '');
-      setVendorStage(d.hasPassword ? 'password' : 'setup');
-    } catch (err: any) { setError(String(err.message || err)); }
-    finally { setVendorBusy(false); }
+      if (r.ok && d.approved) {
+        setVendorName(d.name || '');
+        setVendorStage(d.hasPassword ? 'password' : 'setup');
+        setVendorBusy(false);
+        return;
+      }
+    } catch { /* fall through to staff sign-in */ }
+    // Not an approved vendor (or the check failed) → staff sign-in with Google.
+    setVendorBusy(false);
+    await startLogin('google');
   }
 
   async function vendorSubmit() {
@@ -77,8 +84,40 @@ export default function LoginPage() {
     } catch (err: any) { setError(String(err.message || err)); setVendorBusy(false); }
   }
 
-  function toVendorMode() { setMode('vendor'); setVendorStage('email'); setPassword(''); setConfirm(''); setError(null); setOtpStage('idle'); }
-  function toStaffMode() { setMode('staff'); setVendorStage('email'); setPassword(''); setConfirm(''); setError(null); }
+  // Forgot password (approved vendors only): email a one-time code → set new one.
+  async function vendorResetRequest() {
+    if (!email.trim()) { setError('Please enter your email'); return; }
+    setVendorBusy(true); setError(null);
+    try {
+      const r = await fetch('/api/auth/vendor-reset-request', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.error || 'Could not send a code.'); setVendorBusy(false); return; }
+      setPassword(''); setConfirm(''); setCode(''); setVendorStage('reset');
+    } catch (err: any) { setError(String(err.message || err)); }
+    finally { setVendorBusy(false); }
+  }
+
+  async function vendorResetVerify() {
+    if (!code.trim()) { setError('Enter the code from your email'); return; }
+    if (!password) { setError('Enter a new password'); return; }
+    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    setVendorBusy(true); setError(null);
+    try {
+      const r = await fetch('/api/auth/vendor-reset-verify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), code: code.trim(), password, confirm }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) { setError(d.error || 'Reset failed'); setVendorBusy(false); return; }
+      window.location.href = d.redirect || '/services';
+    } catch (err: any) { setError(String(err.message || err)); setVendorBusy(false); }
+  }
+
+  // Back out of the vendor flow to a fresh email entry.
+  function backToEmail() { setVendorStage('none'); setPassword(''); setConfirm(''); setCode(''); setError(null); }
 
   async function requestOtp() {
     if (!email.trim()) { setError('Please enter your email'); return; }
@@ -199,14 +238,11 @@ export default function LoginPage() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (mode === 'vendor') {
-      if (vendorStage === 'email') { void vendorContinue(); return; }
-      void vendorSubmit();
-      return;
-    }
+    if (vendorStage === 'password' || vendorStage === 'setup') { void vendorSubmit(); return; }
+    if (vendorStage === 'reset') { void vendorResetVerify(); return; }
     if (otpStage === 'sent') { void verifyOtp(); return; }
     if (isReviewEmail) { void reviewLogin(); return; }
-    void startLogin('google');
+    void continueEmail();
   }
 
   return (
@@ -252,15 +288,15 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-            <h2 className="text-lg font-heading font-bold mb-2">{mode === 'vendor' ? 'Vendor sign-in' : 'Sign in'}</h2>
+            <h2 className="text-lg font-heading font-bold mb-2">Sign in</h2>
             <p className="text-sm text-gray-600 mb-6">
-              {mode === 'vendor'
-                ? (vendorStage === 'setup'
-                    ? `Welcome${vendorName ? `, ${vendorName}` : ''}. Create a password for your ResiWalk Services account.`
-                    : vendorStage === 'password'
-                      ? `Enter your ResiWalk password${vendorName ? ` for ${vendorName}` : ''}.`
-                      : 'Enter your vendor email to access ResiWalk Services.')
-                : 'Enter your HubSpot account email. You’ll confirm it with Google to continue.'}
+              {vendorStage === 'setup'
+                ? `Welcome${vendorName ? `, ${vendorName}` : ''}. Create a password for your ResiWalk Services account.`
+                : vendorStage === 'password'
+                  ? `Enter your ResiWalk password${vendorName ? ` for ${vendorName}` : ''}.`
+                  : vendorStage === 'reset'
+                    ? `Enter the code we emailed to ${email.trim()} and choose a new password.`
+                    : 'Enter your account email to continue.'}
             </p>
 
             <label htmlFor="email" className="block text-sm font-heading font-semibold text-ink mb-1.5">
@@ -274,28 +310,43 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => { setEmail(e.target.value); setError(null); }}
               placeholder="you@resihome.com"
-              disabled={submitting || vendorBusy || (mode === 'vendor' && vendorStage !== 'email')}
+              disabled={submitting || vendorBusy || inVendorFlow}
               className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base mb-1"
             />
 
-            {/* Vendor password (returning) or create-password (first login). */}
-            {mode === 'vendor' && vendorStage !== 'email' && (
+            {/* Vendor password: enter (returning), create (first login), or reset
+                (forgot-password: emailed code + new password). Shown once the email
+                is confirmed to be an approved vendor. */}
+            {inVendorFlow && (
               <div className="mt-4">
+                {vendorStage === 'reset' && (
+                  <>
+                    <label htmlFor="vendor-code" className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                      Code from your email
+                    </label>
+                    <input
+                      id="vendor-code" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                      value={code} onChange={(e) => { setCode(e.target.value.replace(/\D/g, '')); setError(null); }}
+                      placeholder="123456" disabled={vendorBusy} autoFocus
+                      className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base tracking-[0.4em] text-center mb-3"
+                    />
+                  </>
+                )}
                 <label htmlFor="vendor-password" className="block text-sm font-heading font-semibold text-ink mb-1.5">
-                  {vendorStage === 'setup' ? 'Create password' : 'Password'}
+                  {vendorStage === 'password' ? 'Password' : vendorStage === 'reset' ? 'New password' : 'Create password'}
                 </label>
                 <input
                   id="vendor-password"
                   type="password"
-                  autoComplete={vendorStage === 'setup' ? 'new-password' : 'current-password'}
+                  autoComplete={vendorStage === 'password' ? 'current-password' : 'new-password'}
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); setError(null); }}
-                  placeholder={vendorStage === 'setup' ? 'At least 8 characters' : 'Password'}
+                  placeholder={vendorStage === 'password' ? 'Password' : 'At least 8 characters'}
                   disabled={vendorBusy}
-                  autoFocus
+                  autoFocus={vendorStage !== 'reset'}
                   className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base"
                 />
-                {vendorStage === 'setup' && (
+                {(vendorStage === 'setup' || vendorStage === 'reset') && (
                   <>
                     <label htmlFor="vendor-confirm" className="block text-sm font-heading font-semibold text-ink mb-1.5 mt-3">
                       Confirm password
@@ -312,12 +363,18 @@ export default function LoginPage() {
                     />
                   </>
                 )}
+                {vendorStage === 'password' && (
+                  <button type="button" onClick={() => void vendorResetRequest()} disabled={vendorBusy}
+                    className="text-sm text-brand font-heading font-semibold hover:underline disabled:opacity-50 mt-3">
+                    {vendorBusy ? 'Please wait…' : 'Forgot password? Email me a reset code'}
+                  </button>
+                )}
               </div>
             )}
 
             {/* App-review demo account: password field appears when the
                 reviewer enters the review email. Validated server-side. */}
-            {mode === 'staff' && isReviewEmail && (
+            {!inVendorFlow && isReviewEmail && (
               <div className="mt-4">
                 <label htmlFor="review-password" className="block text-sm font-heading font-semibold text-ink mb-1.5">
                   Password
@@ -337,7 +394,7 @@ export default function LoginPage() {
 
             {/* Email sign-in code (OTP): the 6-digit box appears after a code is
                 sent. Works for any provider (e.g. Zoho). */}
-            {mode === 'staff' && otpStage === 'sent' && !isReviewEmail && (
+            {!inVendorFlow && otpStage === 'sent' && !isReviewEmail && (
               <div className="mt-4">
                 <label htmlFor="otp-code" className="block text-sm font-heading font-semibold text-ink mb-1.5">
                   Enter the code we emailed to {email.trim()}
@@ -363,20 +420,20 @@ export default function LoginPage() {
               </div>
             )}
 
-            {mode === 'vendor' ? (
+            {inVendorFlow ? (
               <>
                 <button
                   type="submit"
-                  disabled={vendorBusy || !email.trim() || (vendorStage !== 'email' && !password)}
+                  disabled={vendorBusy || !password || ((vendorStage === 'setup' || vendorStage === 'reset') && !confirm) || (vendorStage === 'reset' && code.trim().length < 4)}
                   className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-4 rounded-lg transition mt-5 active:scale-[0.98]"
                 >
                   {vendorBusy
                     ? 'Please wait…'
-                    : vendorStage === 'email' ? 'Continue' : vendorStage === 'setup' ? 'Create password & sign in' : 'Sign in'}
+                    : vendorStage === 'setup' ? 'Create password & sign in' : vendorStage === 'reset' ? 'Reset password & sign in' : 'Sign in'}
                 </button>
-                <button type="button" onClick={toStaffMode} disabled={vendorBusy}
+                <button type="button" onClick={backToEmail} disabled={vendorBusy}
                   className="w-full text-sm text-gray-500 font-heading font-semibold hover:underline disabled:opacity-50 mt-4">
-                  ← Back to staff sign-in
+                  ← Use a different email
                 </button>
               </>
             ) : otpStage === 'sent' && !isReviewEmail ? (
@@ -403,10 +460,10 @@ export default function LoginPage() {
             <>
             <button
               type="submit"
-              disabled={submitting || !email.trim() || (isReviewEmail && !password)}
+              disabled={submitting || vendorBusy || !email.trim() || (isReviewEmail && !password)}
               className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-4 rounded-lg transition mt-5 active:scale-[0.98]"
             >
-              {submitting ? (isReviewEmail ? 'Signing in…' : 'Redirecting…') : (isReviewEmail ? 'Sign in' : 'Continue with Google')}
+              {(submitting || vendorBusy) ? (isReviewEmail ? 'Signing in…' : 'Continuing…') : (isReviewEmail ? 'Sign in' : 'Continue')}
             </button>
 
             {/* Microsoft/Outlook is for EXTERNAL (1099) agents only — internal
@@ -435,20 +492,14 @@ export default function LoginPage() {
                 {otpBusy ? 'Sending code…' : 'Can’t use Google or Microsoft? Email me a sign-in code'}
               </button>
             )}
-            {/* Vendor (Services) sign-in — email + password against the approved
-                Companies list; a services-only account. */}
-            <div className="mt-4 pt-4 border-t border-gray-100 text-center">
-              <button type="button" onClick={toVendorMode} disabled={submitting}
-                className="text-sm text-gray-500 font-heading font-semibold hover:text-brand hover:underline disabled:opacity-50">
-                Vendor? Sign in to ResiWalk Services
-              </button>
-            </div>
             </>
             )}
 
-            <p className="text-xs text-gray-400 text-center mt-5">
-              Access is restricted to active HubSpot users. You&apos;ll verify ownership of your email through Google, Microsoft, or an emailed code.
-            </p>
+            {!inVendorFlow && (
+              <p className="text-xs text-gray-400 text-center mt-5">
+                Access is restricted to authorized accounts. Staff verify ownership through Google, Microsoft, or an emailed code; vendors sign in with a password.
+              </p>
+            )}
           </form>
 
           <p className="text-xs text-gray-400 text-center mt-6">

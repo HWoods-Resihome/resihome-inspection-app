@@ -39,6 +39,10 @@ const PUBLIC_PATHS = new Set<string>([
   // vendor-login validates/sets the password and mints the session itself.
   '/api/auth/vendor-check',
   '/api/auth/vendor-login',
+  // Vendor forgot-password: email a one-time code, then set a new password. Both
+  // run pre-session and self-enforce (approved-vendor + OTP) inside the handler.
+  '/api/auth/vendor-reset-request',
+  '/api/auth/vendor-reset-verify',
   // Client error telemetry must accept reports even before/without a session
   // (e.g. a crash on the login page) — it stores no sensitive data.
   '/api/telemetry/error',
