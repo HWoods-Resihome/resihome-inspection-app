@@ -5724,14 +5724,14 @@ async function listHubspotFilesPage(after?: string): Promise<{ results: any[]; n
  * with the returned `after` until done. A hard list failure ends the run
  * gracefully (done + capped) so gathered counts survive instead of erroring out.
  */
-// ⛔ EMERGENCY KILL-SWITCH — HubSpot photo deletion is DISABLED.
-// Broken photos were reported in the field; until the migration is proven
-// complete and the referenced-set is proven exhaustive, NO HubSpot photo original
-// may be deleted (deletion is irreversible). While true, every reclaim batch runs
-// as a DRY RUN — it counts orphans but deletes nothing — no matter who calls it
-// (admin button, background worker, or the every-minute cron watchdog). Flip to
-// false ONLY after the migration + referenced-set are verified safe.
-const RECLAIM_DELETE_DISABLED = true;
+// Reclaim kill-switch. Was disabled during the FC-photo-loss incident. RE-ENABLED
+// after: (1) FC photos restored from trash + migrated to Blob (verify shows
+// hubspot:0), and (2) referencedHubspotPhotoUrls proven exhaustive — it now scans
+// answer photo_urls/after_photo_urls, the fc__all note JSON via finalChecklistPhotos
+// (which includes pool photos), AND service photos. So a referenced HubSpot photo
+// can no longer be seen as an orphan. Deletion only removes /inspection_photos
+// files that NO record references.
+const RECLAIM_DELETE_DISABLED = false;
 
 export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; after?: string }): Promise<DeleteMigratedBatch> {
   // Force dry-run while the kill-switch is on — never delete.

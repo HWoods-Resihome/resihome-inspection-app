@@ -60,6 +60,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ ok: true });
   }
 
+  if (action === 'run') {
+    // Reliable admin-gated INLINE runner — runs a short bounded pass (returns
+    // well under the 300s cap, no 504), checkpointed per batch. Loop it (or let
+    // the detached chain + cron continue between hits) until done.
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET is not set — background jobs are disabled.' });
+    let st = await readPhotoReclaimState<PhotoReclaimState>().catch(() => null);
+    if (!st || (!st.running && !st.finishedAt)) { st = freshReclaimState(); await writePhotoReclaimState(st); }
+    else if (!st.running) { st = freshReclaimState(); await writePhotoReclaimState(st); }   // resume a finished/idle job
+    await runReclaimWorker(originOf(req), secret, 45_000);
+    const latest = await readPhotoReclaimState<PhotoReclaimState>().catch(() => st);
+    return res.status(200).json({ ok: true, state: latest });
+  }
+
   if (action === 'start') {
     if (!secret) return res.status(400).json({ error: 'CRON_SECRET is not set — background jobs are disabled.' });
     const existing = await readPhotoReclaimState<PhotoReclaimState>().catch(() => null);
