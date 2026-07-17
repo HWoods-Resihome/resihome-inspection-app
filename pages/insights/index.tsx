@@ -15,6 +15,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { PageHeader } from '@/components/PageHeader';
 import { InsightsDashboard } from '@/components/insights/Dashboard';
+import { ServicesDashboard } from '@/components/insights/ServicesDashboard';
 import { InsightsUsersManager } from '@/components/insights/InsightsUsersManager';
 
 interface Access {
@@ -28,6 +29,7 @@ interface Access {
 export default function InsightsPortal() {
   const [access, setAccess] = useState<Access | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'inspections' | 'services'>('inspections');
 
   useEffect(() => {
     let cancelled = false;
@@ -67,7 +69,16 @@ export default function InsightsPortal() {
           ) : (
             <>
               {access.isAdmin && <AdminMenu />}
-              <InsightsDashboard />
+              {/* Inspections ↔ Services segmented toggle (both gated by canView). */}
+              <div className="inline-flex items-center gap-1 bg-[#18181c] border border-white/10 rounded-xl p-1 mb-5">
+                {(['inspections', 'services'] as const).map((t) => (
+                  <button key={t} type="button" onClick={() => setTab(t)}
+                    className={`px-4 py-1.5 rounded-lg text-sm font-heading font-semibold capitalize transition-colors ${tab === t ? 'bg-[#ff0060] text-white' : 'text-[#a1a1aa] hover:text-[#f4f4f5]'}`}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+              {tab === 'inspections' ? <InsightsDashboard /> : <ServicesDashboard />}
             </>
           )}
         </main>

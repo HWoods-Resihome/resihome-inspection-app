@@ -1713,6 +1713,39 @@ export async function readServiceWorkOrderKeys(): Promise<{ key: string; status:
   } catch (e) { console.warn('[services] key read failed:', e); return null; }
 }
 
+/** All Service Work Orders normalized for vendor-performance insights. Excludes
+ *  per-property billing-line children (master_service_id set) so completed counts
+ *  and costs aren't double-counted. Returns null when the object isn't configured. */
+export async function fetchServiceInsightsRows(): Promise<import('./services/insights').SvcInsightsRow[] | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  const PROPS = ['status', 'is_bid_item', 'ontime', 'review_decision', 'vendor_name', 'vendor_cost', 'master_service_id'];
+  try {
+    const rows: import('./services/insights').SvcInsightsRow[] = [];
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST', body: JSON.stringify({ limit: 100, after, properties: PROPS }),
+      });
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        if (String(p.master_service_id || '').trim()) continue;   // split child — rolled into its master
+        const cost = Number(p.vendor_cost);
+        rows.push({
+          status: String(p.status || ''),
+          isBidItem: p.is_bid_item === 'true',
+          ontime: String(p.status || '') === 'completed' ? (p.ontime === 'true' ? true : p.ontime === 'false' ? false : null) : null,
+          reviewDecision: String(p.review_decision || ''),
+          vendor: String(p.vendor_name || ''),
+          vendorCost: Number.isFinite(cost) ? cost : null,
+        });
+      }
+      after = resp.paging?.next?.after;
+    } while (after);
+    return rows;
+  } catch (e) { console.warn('[services] insights read failed:', e); return null; }
+}
+
 /** Create one Service Work Order from a property map. Returns the new record id,
  *  or null when the object type id env var isn't set (caller falls back to preview). */
 export async function createServiceWorkOrder(props: Record<string, any>): Promise<string | null> {
