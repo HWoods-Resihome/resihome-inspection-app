@@ -924,8 +924,15 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     const add = (id: string, name: string, urls: string[]) => { if (urls.length) { groups.push({ id, name }); map[id] = urls; } };
     add('before', svc.isBidItem ? 'Bid photos' : 'Before', svc.before); add('after', 'After', svc.after);
     add('petBefore', 'Pet — Before', svc.petBefore); add('petAfter', 'Pet — After', svc.petAfter);
+    // Per-question answer photos — each becomes its own navigable lightbox group,
+    // so tapping one opens the same viewer (swipe / download / return) as the
+    // Before/After groups instead of a raw new browser tab.
+    for (const q of (form || [])) {
+      const ph = (svc.answers as any)?.[`${q.id}__photos`];
+      if (Array.isArray(ph) && ph.length) add(`q:${q.id}`, q.label, ph);
+    }
     return { groups, map };
-  }, [svc]);
+  }, [svc, form]);
   const [lightbox, setLightbox] = useState<{ groupId: string; index: number } | null>(null);
 
   // ── Settings (internal): audit log + reassign vendor ──
@@ -1390,11 +1397,12 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                               </dd>
                             </div>
                             {photos.length > 0 && (
-                              <div className="grid grid-cols-4 gap-2 mt-1.5">
+                              <div className="flex flex-wrap gap-2 mt-1.5">
                                 {photos.map((u, i) => (
-                                  <a key={`${u}-${i}`} href={u.split('#')[0]} target="_blank" rel="noopener noreferrer" className="aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-100">
+                                  <button key={`${u}-${i}`} type="button" onClick={() => setLightbox({ groupId: `q:${q.id}`, index: i })}
+                                    className="w-20 h-20 rounded-lg overflow-hidden border border-gray-300 bg-gray-100 cursor-zoom-in">
                                     <PhotoThumb url={u} alt={`${q.label} ${i + 1}`} className="w-full h-full object-cover" />
-                                  </a>
+                                  </button>
                                 ))}
                               </div>
                             )}
