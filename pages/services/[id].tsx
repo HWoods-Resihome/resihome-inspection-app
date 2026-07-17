@@ -146,7 +146,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       }
     }
   }
-  return { props: { svc, form, isInternal, unlock, propMeta, asVendor } };
+  return { props: { svc, form, isInternal, unlock, propMeta, asVendor, isVendor: !!session?.vendor } };
 };
 
 const money = (n: number | null | undefined) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -608,13 +608,20 @@ const GRASS_TIER_BORDER: Record<'emerald' | 'amber' | 'rose', string> = {
   amber: 'bg-white border-amber-400 text-amber-700',
   rose: 'bg-white border-rose-400 text-rose-700',
 };
+// Selected state keeps the tier's own color — a tinted interior fill + stronger
+// border/ring — instead of overriding with the pink brand fill.
+const GRASS_TIER_FILL: Record<'emerald' | 'amber' | 'rose', string> = {
+  emerald: 'bg-emerald-100 border-emerald-500 text-emerald-800 ring-1 ring-emerald-400',
+  amber: 'bg-amber-100 border-amber-500 text-amber-800 ring-1 ring-amber-400',
+  rose: 'bg-rose-100 border-rose-500 text-rose-800 ring-1 ring-rose-400',
+};
 
 // One-line, work-type-specific reminder for the Photos section (shown as its
 // subtitle, like the Bid Item section).
 const photoGuidance = (_worktype: string, _subtype: string): string =>
-  'Show photo evidence of the before and after and the full service performed.';
+  'Show photo evidence of the full service performed.';
 
-export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta, asVendor }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null; asVendor: boolean }) {
+export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta, asVendor, isVendor }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null; asVendor: boolean; isVendor: boolean }) {
   const router = useRouter();
   // Bid items are never crew-completed here — they go straight to internal bid review.
   const editable = EDITABLE.has(svc.status) && !svc.isBidItem;
@@ -1105,7 +1112,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       </header>
 
       <main className="max-w-2xl mx-auto w-full px-4 py-4 flex-1 space-y-4">
-        {asVendor && (
+        {asVendor && !isVendor && (
           <div className="flex items-center justify-between gap-2 bg-purple-600 text-white rounded-xl px-3 py-2 text-[12px] font-heading font-semibold">
             <span>Viewing as Vendor</span>
             <button type="button" onClick={() => { setViewAsVendor(false); window.location.href = '/services'; }} className="underline shrink-0">Exit</button>
@@ -1223,13 +1230,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                             <div className="grid grid-cols-3 gap-2">
                               {(q.options || []).map((o) => {
                                 const selected = answers[q.id] === o.label;
-                                const anySelected = !!answers[q.id];
                                 const { main, sub } = splitGrassLabel(o.label);
-                                // Tier color hints show until a choice is made; after
-                                // that the un-picked ones fall back to the default gray.
-                                const cls = selected ? 'bg-brand text-white border-brand'
-                                  : anySelected ? 'bg-white text-gray-700 border-gray-300'
-                                    : GRASS_TIER_BORDER[grassTier(o.label)];
+                                // Keep each tier's color through selection: all options
+                                // always show their tier border; the picked one just
+                                // gets a tinted interior fill (not the pink brand fill).
+                                const cls = selected ? GRASS_TIER_FILL[grassTier(o.label)] : GRASS_TIER_BORDER[grassTier(o.label)];
                                 return (
                                   <button key={o.id} type="button" onClick={() => setAns(q.id, answers[q.id] === o.label ? '' : o.label)}
                                     className={`px-2 py-2 rounded-xl border-2 text-[13px] font-heading font-bold text-center leading-tight ${cls}`}>
