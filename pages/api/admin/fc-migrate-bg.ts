@@ -69,7 +69,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let st = await readFcMigrateState<FcMigrateState>().catch(() => null);
     if (!st || (!st.running && !st.finishedAt) ) { st = freshFcMigrateState(); await writeFcMigrateState(st); }
     else if (!st.running) { st = { ...freshFcMigrateState(), totals: st.totals }; await writeFcMigrateState(st); }  // resume a finished/idle job
-    await runFcMigrateWorker(originOf(req), secret, 240_000);
+    // Short bounded pass so the browser request returns well under the 300s
+    // platform cap (no 504). Progress is checkpointed per batch; the detached
+    // chain + cron watchdog carry it the rest of the way between hits.
+    await runFcMigrateWorker(originOf(req), secret, 45_000);
     const latest = await readFcMigrateState<FcMigrateState>().catch(() => st);
     return res.status(200).json({ ok: true, state: latest });
   }
