@@ -8,7 +8,7 @@ import type { Worktype } from './services/worktypes';
 import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls, PHOTO_URL_DELIMITER } from './answerProps';
 import { extractLeasingAgent1099Fields } from './leasingAgent1099';
-import { parseFcAnswers, finalChecklistPhotos } from './finalChecklist';
+import { parseFcAnswers, finalChecklistPhotos, remapFcAnswerUrls } from './finalChecklist';
 import { calculateLine, roundMoney } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
 import { normalizeApprovalRouting, type ApprovalRoutingConfig } from './approvalRouting';
@@ -5948,6 +5948,88 @@ export async function scanFinalChecklistPhotos(opts: { after?: string; verify?: 
   rep.after = after || null;
   rep.done = !after;
   if (opts.dumpUrls) rep.hubspotUrls = Array.from(dumped);
+  return rep;
+}
+
+/**
+ * Move Final Checklist photos from HubSpot → Vercel Blob and RECONNECT them.
+ *
+ * For each fc__all blob: download every HubSpot-hosted FC photo (must be LIVE —
+ * i.e. already restored from the HubSpot trash), copy it to Blob (verified by
+ * re-download + byte match), then rewrite the fc__all `note` JSON so the record
+ * points at the Blob copy (via remapFcAnswerUrls — nothing else in the answer is
+ * touched). Photos that are still 404 (not yet restored) are counted as
+ * `skippedDead` and left untouched so a later pass can pick them up. Does NOT
+ * delete the HubSpot originals — once records point to Blob those originals are
+ * orphaned and the (now FC-aware) reclaim removes them safely. Budgeted +
+ * cursor-resumable; dry-run unless apply=true.
+ */
+export interface FcMigrateBatch {
+  after: string | null; done: boolean;
+  fcRecords: number; hubspotSeen: number; copied: number; verified: number;
+  recordsUpdated: number; skippedDead: number; errors: number; errorSamples: string[];
+}
+export async function migrateFinalChecklistPhotosBatch(opts: { after?: string; apply: boolean; budgetMs?: number }): Promise<FcMigrateBatch> {
+  const start = Date.now();
+  const budgetMs = opts.budgetMs ?? 45000;
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN || '';
+  if (opts.apply && !blobToken) throw new Error('BLOB_READ_WRITE_TOKEN is not set — cannot copy to Blob.');
+  const answerType = typeIds().answer;
+  const rep: FcMigrateBatch = { after: opts.after ?? null, done: false, fcRecords: 0, hubspotSeen: 0, copied: 0, verified: 0, recordsUpdated: 0, skippedDead: 0, errors: 0, errorSamples: [] };
+  const err = (m: string) => { rep.errors++; if (rep.errorSamples.length < 10) rep.errorSamples.push(m.slice(0, 120)); };
+  const norm = (u: string) => u.split('#')[0].split('?')[0].trim();
+  const DL_TIMEOUT_MS = 25000, VERIFY_TIMEOUT_MS = 20000;
+
+  let after = opts.after || undefined;
+  do {
+    const body: any = {
+      limit: 25, after, properties: ['note'],
+      filterGroups: [{ filters: [{ propertyName: 'question_id_external', operator: 'EQ', value: 'fc__all' }] }],
+    };
+    const resp = await hubspotFetch(`/crm/v3/objects/${answerType}/search`, { method: 'POST', body: JSON.stringify(body) });
+    for (const r of resp.results || []) {
+      rep.fcRecords++;
+      const fc = parseFcAnswers(r.properties?.note);
+      const hsUrls = Array.from(new Set(finalChecklistPhotos(fc).filter((u) => isHubspotFileUrl(u)).map(norm)));
+      if (!hsUrls.length) continue;
+      const urlMap = new Map<string, string>();
+      for (const u of hsUrls) {
+        rep.hubspotSeen++;
+        if (!opts.apply) continue;
+        try {
+          let res = await fetchWithTimeout(u, {}, DL_TIMEOUT_MS).catch(() => null as any);
+          if (!res || !res.ok) {
+            // 404 = still in the trash (not restored yet) → skip, don't fail. Any
+            // other miss also just defers this photo to a later pass.
+            rep.skippedDead++; continue;
+          }
+          const buf = Buffer.from(await res.arrayBuffer());
+          const name = decodeURIComponent(u.split('?')[0].split('/').pop() || `fc_photo.jpg`);
+          const m = /idbph_(\d+)__/.exec(name);
+          const key = `inspections/${m ? m[1] : r.id}/${name}`;
+          const putRes = await put(key, buf, { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: res.headers.get('content-type') || 'image/jpeg', token: blobToken });
+          rep.copied++;
+          const vr = await fetchWithTimeout(putRes.url, {}, VERIFY_TIMEOUT_MS);
+          if (!vr.ok || Buffer.from(await vr.arrayBuffer()).length !== buf.length) throw new Error('verify failed');
+          rep.verified++;
+          urlMap.set(u, putRes.url);
+        } catch (e: any) { err(`${u.slice(0, 50)}: ${String(e?.message || e).slice(0, 60)}`); }
+      }
+      if (opts.apply && urlMap.size) {
+        const { answers: nextFc, swapped } = remapFcAnswerUrls(fc, urlMap);
+        if (swapped) {
+          try {
+            await hubspotFetch(`/crm/v3/objects/${answerType}/${r.id}`, { method: 'PATCH', body: JSON.stringify({ properties: { note: JSON.stringify(nextFc) } }) });
+            rep.recordsUpdated++;
+          } catch (e: any) { err(`patch ${r.id}: ${String(e?.message || e).slice(0, 60)}`); }
+        }
+      }
+    }
+    after = resp.paging?.next?.after || undefined;
+    if (Date.now() - start > budgetMs) break;
+  } while (after);
+  rep.after = after || null;
+  rep.done = !after;
   return rep;
 }
 

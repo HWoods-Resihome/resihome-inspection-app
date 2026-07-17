@@ -400,6 +400,41 @@ export function finalChecklistPhotos(a: FcAnswers, opts?: { excludeSectionIds?: 
   return out;
 }
 
+/**
+ * Return a COPY of the FcAnswers with every photo URL present in `urlMap`
+ * (normalized old URL → new URL) swapped for its replacement, in BOTH
+ * per-question `photoUrls` and per-photo `stickerPhotos`. Used to reconnect FC
+ * photos after copying them to a new home (HubSpot → Vercel Blob) without
+ * touching any other answer data. Matching ignores the query string and the
+ * `#v=` video fragment (which is preserved on the swapped URL). Returns the new
+ * answers plus the count of URLs actually swapped.
+ */
+const normFcUrl = (u: string) => u.split('#')[0].split('?')[0].trim();
+export function remapFcAnswerUrls(a: FcAnswers, urlMap: Map<string, string>): { answers: FcAnswers; swapped: number } {
+  let swapped = 0;
+  const swap = (u: string): string => {
+    if (!u) return u;
+    const clean = u.split('#')[0];
+    const frag = u.slice(clean.length);           // keep any #v=<videoUrl> suffix
+    const next = urlMap.get(normFcUrl(u));
+    if (next) { swapped++; return next + frag; }
+    return u;
+  };
+  const out: FcAnswers = {};
+  for (const [qid, ans] of Object.entries(a || {})) {
+    if (!ans || typeof ans !== 'object') { out[qid] = ans; continue; }
+    const next: FcAnswerState = { ...ans };
+    if (Array.isArray(ans.photoUrls)) next.photoUrls = ans.photoUrls.map(swap);
+    if (ans.stickerPhotos && typeof ans.stickerPhotos === 'object') {
+      const sp: Record<string, string[]> = {};
+      for (const [k, arr] of Object.entries(ans.stickerPhotos)) sp[k] = Array.isArray(arr) ? arr.map(swap) : arr;
+      next.stickerPhotos = sp;
+    }
+    out[qid] = next;
+  }
+  return { answers: out, swapped };
+}
+
 /** The first unmet (visible, required) checklist item, described for the user
  *  (e.g. "HVAC & Air Filters · Label Sticker Photos: add the Air Handler photo").
  *  Returns null when the checklist is complete. Single source of truth for both
