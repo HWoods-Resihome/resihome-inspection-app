@@ -1055,12 +1055,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
           <section className={sec}>
             <SecHead n={3} title="Enrollment & Stop" />
             {openSec[3] && (<div className="mt-3">
-            <label className={lbl}>Enroll (Create Services) When</label>
-            <p className="text-[12px] text-gray-500 mb-2 -mt-1">
-              {rule.enrollCriteria.length === 0
-                ? 'No criteria — every applicable property enrolls immediately.'
-                : 'Tap the AND/OR between criteria to switch how they combine.'}
-            </p>
+            <label className={lbl}>Enroll When</label>
             {/* Rule-level start date — the rule stays dormant (creates nothing) until this date. */}
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <span className="text-[13px] text-gray-600">Starts on</span>
