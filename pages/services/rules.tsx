@@ -71,10 +71,13 @@ const PROPERTY_FIELDS: { field: string; options: string[] }[] = [
 ];
 const FIELD_NAMES = PROPERTY_FIELDS.map((f) => f.field);
 const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field)?.options ?? [];
-// Operators the generator honors. "changes to" was removed — it can't detect a
-// transition at generation time (no field history), so it silently behaved as
-// plain membership; keeping it implied event-triggering that isn't built.
-const OPS = ['is', 'is any of', 'is not', 'is known'];
+// Operators the generator honors, PER FIELD (lib/services/generate matchCriterion):
+// membership fields (Property Status, Deal Stage) → is / is any of / is not;
+// RRQC Pass Date is a date gate → only "is known". "changes to" was removed
+// (no field history at generation time). Showing only field-valid operators keeps
+// a rule from being built on an operator the generator won't actually evaluate.
+const opsFor = (field: string): string[] =>
+  field === 'RRQC Pass Date' ? ['is known'] : ['is', 'is any of', 'is not'];
 interface EnrollCriterion { field: string; op: string; vals: string[] }
 // Community + Landscaping + Grass Cut defaults its enrollment to "RRQC Pass Date
 // is known" (the per-house eligibility gate). Admin can add/change criteria after.
@@ -1090,11 +1093,11 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                     <div className="basis-[34%] shrink min-w-0">
                       <ListPicker value={c.field} ariaLabel="Enrollment field" className={`${pick} w-full`}
                         options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
-                        onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patchCrit(i, { field: v, vals: first ? [first] : [] }); }} />
+                        onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patchCrit(i, { field: v, op: opsFor(v)[0], vals: first ? [first] : [] }); }} />
                     </div>
                     <div className="basis-[26%] shrink min-w-0">
                       <ListPicker value={c.op} ariaLabel="Operator" className={`${pick} w-full`}
-                        options={OPS.map((o) => ({ value: o, label: o }))}
+                        options={opsFor(c.field).map((o) => ({ value: o, label: o }))}
                         onChange={(v) => patchCrit(i, { op: v, ...(v !== 'is any of' && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -1142,11 +1145,11 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                           <div className="basis-[34%] shrink min-w-0">
                             <ListPicker value={c.field} ariaLabel="Stop field" className={`${pick} w-full`}
                               options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
-                              onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patchStopCrit(i, { field: v, vals: first ? [first] : [] }); }} />
+                              onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patchStopCrit(i, { field: v, op: opsFor(v)[0], vals: first ? [first] : [] }); }} />
                           </div>
                           <div className="basis-[26%] shrink min-w-0">
                             <ListPicker value={c.op} ariaLabel="Operator" className={`${pick} w-full`}
-                              options={OPS.map((o) => ({ value: o, label: o }))}
+                              options={opsFor(c.field).map((o) => ({ value: o, label: o }))}
                               onChange={(v) => patchStopCrit(i, { op: v, ...(v !== 'is any of' && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
                           </div>
                           <div className="flex-1 min-w-0">
