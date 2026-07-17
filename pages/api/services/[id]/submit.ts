@@ -17,6 +17,7 @@ import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
 import { easternTodayISO } from '@/lib/services/time';
+import { grassTierAmount } from '@/lib/services/grassPricing';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
@@ -74,12 +75,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   // Hard-coded grass-cut price by height (NOT driven by the question form):
   // Standard <=6" = $45, Overgrown 6–12" = $60, Heavy 12"+ = $90.
-  const grassCutRate = (heightAnswer: string): number => {
-    const h = String(heightAnswer || '').toLowerCase();
-    if (h.includes('heavy') || h.includes('over 12') || h.includes('12"+') || h.includes('12+')) return 90;
-    if (h.includes('overgrown') || h.includes('6-12') || h.includes('6–12') || h.includes('6 - 12')) return 60;
-    return 45;
-  };
 
   // ── Completion-answer pricing + routing ──────────────────────────────────
   // Universal gate: "Service Completed? = No" → skip AI, route straight to human
@@ -139,7 +134,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } else if (isProperty && worktype === 'landscaping' && subtype === 'cut') {
     // Height-based hard rate. Whether the back yard was serviced is verified by
     // the AI review (a knowledge-base check), not priced here.
-    const finalV = grassCutRate(String(heightAns || ''));
+    const finalV = grassTierAmount(String(heightAns || ''));
     props.vendor_cost = finalV;
     props.client_cost = clientOf(finalV);
   }

@@ -7,6 +7,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
+import { grassTierAmount } from '@/lib/services/grassPricing';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, easternTodayISO, type ServiceStatus, type SampleService } from '@/lib/services/sampleData';
 import { serviceVisibleTo } from '@/lib/services/scope';
@@ -1051,9 +1052,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
         vendor = billTrip ? (defaultRateFor('trip_fee', 'base_trip_fee') ?? 0) : 0;
         reason = billTrip ? 'Not completed — trip fee' : 'Not completed — no charge';
       } else if (svc.worktype === 'landscaping' && svc.subtype === 'cut') {
-        const h = String(heightAns || '').toLowerCase();
-        vendor = (h.includes('heavy') || h.includes('over 12') || h.includes('12"+') || h.includes('12+')) ? 90
-          : (h.includes('overgrown') || h.includes('6-12') || h.includes('6–12') || h.includes('6 - 12')) ? 60 : 45;
+        vendor = grassTierAmount(String(heightAns || ''));
       }
     }
     const client = Number.isFinite(markup) ? Math.round(vendor * (1 + markup / 100) * 100) / 100 : vendor;
