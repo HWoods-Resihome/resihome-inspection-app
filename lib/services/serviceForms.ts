@@ -176,8 +176,12 @@ const ADDITIONAL: Record<string, ServiceQuestion[]> = {
   ],
 };
 
-// Baseline forms = the universal gate + each combo's additional questions.
-export const SAMPLE_FORMS: Record<string, ServiceQuestion[]> = Object.fromEntries(
+// Baseline default forms = the universal completion gate + each combo's additional
+// questions. This is the shipped default a worktype uses until an admin overrides it
+// in the Form Builder (saved forms are merged over these by combo key). NOT sample
+// data — the universal question IDs (svc_completed, bill_trip_fee, …) are what the
+// submit/pricing/routing logic keys off, so every combo must resolve to at least this.
+export const DEFAULT_SERVICE_FORMS: Record<string, ServiceQuestion[]> = Object.fromEntries(
   Object.entries(ADDITIONAL).map(([key, extra]) => [key, [...UNIVERSAL_QUESTIONS, ...extra]]),
 );
 

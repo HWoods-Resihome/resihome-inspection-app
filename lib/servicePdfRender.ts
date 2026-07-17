@@ -9,7 +9,7 @@ import React from 'react';
 import { renderToBuffer } from '@react-pdf/renderer';
 import { fetchServiceWorkOrder, readServiceForms, findServiceBidChildren } from '@/lib/hubspot';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
-import { SAMPLE_FORMS, formKey } from '@/lib/services/serviceForms';
+import { DEFAULT_SERVICE_FORMS, formKey } from '@/lib/services/serviceForms';
 import { ServicePdf, type ServicePdfData } from '@/lib/servicePdf';
 
 const money = (v: any) => { const n = Number(v); return Number.isFinite(n) ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''; };
@@ -44,7 +44,7 @@ export async function renderServicePdfBuffer(id: string, opts: { variant: 'vendo
   const subtype = p.subtype || '';
   const answersRaw = (() => { try { return JSON.parse(p.answers_json || '{}'); } catch { return {}; } })();
   const savedForms = await readServiceForms().catch(() => null);
-  const form = ({ ...SAMPLE_FORMS, ...(savedForms || {}) })[formKey(worktype, subtype)] || [];
+  const form = ({ ...DEFAULT_SERVICE_FORMS, ...(savedForms || {}) })[formKey(worktype, subtype)] || [];
   const answers = form
     .filter((q) => answersRaw[q.id] != null && answersRaw[q.id] !== '')
     .map((q) => {

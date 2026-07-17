@@ -18,7 +18,7 @@ import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
 import { easternTodayISO } from '@/lib/services/time';
 import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
-import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
+import { DEFAULT_SERVICE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
 // the review runs inline the moment the work order is submitted.
@@ -94,7 +94,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // can carry a different question id, and we must still detect completion / trip
   // fee / grass height to price + route correctly.
   const savedForms = await readServiceForms().catch(() => null);
-  const form: ServiceQuestion[] = ({ ...SAMPLE_FORMS, ...(savedForms || {}) })[formKey(worktype, subtype)] || [];
+  const form: ServiceQuestion[] = ({ ...DEFAULT_SERVICE_FORMS, ...(savedForms || {}) })[formKey(worktype, subtype)] || [];
   const answerFor = (idHint: string, labelRe: RegExp) => {
     if (answers[idHint] != null && answers[idHint] !== '') return answers[idHint];
     const q = form.find((x) => labelRe.test(x.label));

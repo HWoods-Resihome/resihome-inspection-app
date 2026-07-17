@@ -8,7 +8,7 @@ import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
-import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
+import { DEFAULT_SERVICE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SERVICE_STATUS_STYLE, serviceStatusText, easternTodayISO, type ServiceStatus, type ServiceRecord } from '@/lib/services/model';
 import { serviceVisibleTo } from '@/lib/services/scope';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
@@ -123,7 +123,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     return { redirect: { destination: '/services', permanent: false } };
   }
   const savedForms = await readServiceForms().catch(() => null);
-  const formSet: Record<string, any[]> = { ...SAMPLE_FORMS, ...(savedForms || {}) };
+  const formSet: Record<string, any[]> = { ...DEFAULT_SERVICE_FORMS, ...(savedForms || {}) };
   const form = (formSet[formKey(svc.worktype, svc.subtype)] || [])
     .filter((q: any) => q.enabled)
     // Community grass cuts are a per-contract visit, not a per-home cut — the

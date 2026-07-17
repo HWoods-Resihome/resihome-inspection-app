@@ -7,7 +7,7 @@ import { FIELD_LABEL } from '@/components/formStyles';
 import { SaveFooter } from '@/components/SaveFooter';
 import { WORKTYPES, subtypesFor, mergeWorktypes, slugifyId, type CustomWorktypeDef } from '@/lib/services/worktypes';
 import {
-  ANSWER_TYPES, SAMPLE_FORMS, formKey, newQuestion, newOption, answerTypeLabel, hasOptions,
+  ANSWER_TYPES, DEFAULT_SERVICE_FORMS, formKey, newQuestion, newOption, answerTypeLabel, hasOptions,
   type ServiceQuestion, type AnswerType, type QuestionOption,
 } from '@/lib/services/serviceForms';
 
@@ -31,7 +31,7 @@ function subline(q: ServiceQuestion): string {
 }
 
 export default function FormBuilder({ savedForms, canSave, embedded, savedTaxonomy }: { savedForms: Record<string, ServiceQuestion[]> | null; canSave: boolean; embedded?: boolean; savedTaxonomy?: CustomWorktypeDef[] | null }) {
-  const [forms, setForms] = useState<Record<string, ServiceQuestion[]>>(() => ({ ...SAMPLE_FORMS, ...(savedForms || {}) }));
+  const [forms, setForms] = useState<Record<string, ServiceQuestion[]>>(() => ({ ...DEFAULT_SERVICE_FORMS, ...(savedForms || {}) }));
   const [taxonomy, setTaxonomy] = useState<CustomWorktypeDef[]>(() => (savedTaxonomy || []).map((w) => ({ id: w.id, label: w.label, subtypes: [...(w.subtypes || [])] })));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
