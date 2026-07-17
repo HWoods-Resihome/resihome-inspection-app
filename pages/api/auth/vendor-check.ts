@@ -8,9 +8,17 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { findApprovedVendorByEmail } from '@/lib/hubspot';
+import { enforceRateLimit } from '@/lib/rateLimit';
+
+function clientIp(req: NextApiRequest): string {
+  return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
+  // Rate-limit so the approved-vendor roster can't be harvested by walking an
+  // email list (this probe necessarily reveals whether an email is a vendor).
+  if (enforceRateLimit(res, { key: clientIp(req), route: 'vendor-check', max: 30, windowMs: 15 * 60_000 })) return;
   const email = String(req.body?.email || '').trim().toLowerCase();
   if (!email) return res.status(400).json({ error: 'Email required' });
   try {

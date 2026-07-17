@@ -14,8 +14,8 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createSessionCookie, readReturnTo, clearReturnToCookie, isSafeReturnPath, type SessionUser } from '@/lib/auth';
-import { findApprovedVendorByEmail, setVendorPasswordHash } from '@/lib/hubspot';
-import { hashVendorPassword, verifyVendorPassword, vendorPasswordError } from '@/lib/vendorPassword';
+import { findApprovedVendorByEmail } from '@/lib/hubspot';
+import { verifyVendorPassword } from '@/lib/vendorPassword';
 import { enforceRateLimit } from '@/lib/rateLimit';
 
 function clientIp(req: NextApiRequest): string {
@@ -31,7 +31,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const email = String(req.body?.email || '').trim().toLowerCase();
   const password = String(req.body?.password || '');
-  const confirm = String(req.body?.confirm || '');
 
   const fail = async (msg = 'Invalid email or password.') => {
     await new Promise((r) => setTimeout(r, 500)); // blunt online guessing
@@ -45,22 +44,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   catch { return res.status(500).json({ error: 'Sign-in is temporarily unavailable. Please try again.' }); }
   // Same generic failure whether the email is unknown or not approved — don't
   // reveal which companies have access.
-  if (!vendor) return fail('This email is not set up for ResiWalk access.');
+  if (!vendor) return fail();
 
-  if (!vendor.hasPassword) {
-    // First-time setup: require the confirmation to match + meet the policy.
-    const policyErr = vendorPasswordError(password);
-    if (policyErr) return res.status(400).json({ error: policyErr, needsSetup: true });
-    if (password !== confirm) return res.status(400).json({ error: 'Passwords do not match.', needsSetup: true });
-    try {
-      await setVendorPasswordHash(vendor.id, hashVendorPassword(password));
-    } catch (e: any) {
-      return res.status(500).json({ error: 'Could not save your password. Please try again.' });
-    }
-  } else {
-    // Returning login: verify against the stored hash.
-    if (!verifyVendorPassword(password, vendor.passwordHash)) return fail();
-  }
+  // First-time password creation NEVER happens here — that would let anyone set a
+  // password for an un-onboarded vendor without proving they own the inbox. First
+  // login must go through the emailed-code flow (vendor-reset-request/verify),
+  // which proves inbox control before a password is set. Returning login only.
+  if (!vendor.hasPassword) return res.status(409).json({ error: 'Set up your password with the code we email you.', needsSetup: true });
+  if (!verifyVendorPassword(password, vendor.passwordHash)) return fail();
 
   const user: SessionUser = {
     userId: `vendor:${vendor.id}`,

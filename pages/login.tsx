@@ -60,8 +60,11 @@ export default function LoginPage() {
       const d = await r.json().catch(() => ({}));
       if (r.ok && d.approved) {
         setVendorName(d.name || '');
-        setVendorStage(d.hasPassword ? 'password' : 'setup');
-        setVendorBusy(false);
+        if (d.hasPassword) { setVendorStage('password'); setVendorBusy(false); }
+        // First login (no password yet): email a one-time code and require it
+        // before a password can be set — proves the vendor owns the inbox, so
+        // an un-onboarded account can't be claimed by someone else.
+        else { await sendVendorCode('setup'); }
         return;
       }
     } catch { /* fall through to staff sign-in */ }
@@ -70,14 +73,15 @@ export default function LoginPage() {
     await startLogin('google');
   }
 
+  // Returning-login only: verify an existing password. First-time setup goes
+  // through the emailed-code flow (sendVendorCode → vendorResetVerify).
   async function vendorSubmit() {
     if (!password) { setError('Enter your password'); return; }
-    if (vendorStage === 'setup' && password !== confirm) { setError('Passwords do not match.'); return; }
     setVendorBusy(true); setError(null);
     try {
       const r = await fetch('/api/auth/vendor-login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password, confirm }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok || !d.ok) { setError(d.error || 'Sign-in failed'); setVendorBusy(false); return; }
@@ -85,8 +89,9 @@ export default function LoginPage() {
     } catch (err: any) { setError(String(err.message || err)); setVendorBusy(false); }
   }
 
-  // Forgot password (approved vendors only): email a one-time code → set new one.
-  async function vendorResetRequest() {
+  // Email a one-time code (first-login setup OR forgot-password), then move to the
+  // stage that collects the code + a new password. Both finish via vendorResetVerify.
+  async function sendVendorCode(next: 'setup' | 'reset') {
     if (!email.trim()) { setError('Please enter your email'); return; }
     setVendorBusy(true); setError(null);
     try {
@@ -96,10 +101,11 @@ export default function LoginPage() {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.error || 'Could not send a code.'); setVendorBusy(false); return; }
-      setPassword(''); setConfirm(''); setCode(''); setVendorStage('reset');
+      setPassword(''); setConfirm(''); setCode(''); setVendorStage(next);
     } catch (err: any) { setError(String(err.message || err)); }
     finally { setVendorBusy(false); }
   }
+  const vendorResetRequest = () => sendVendorCode('reset');
 
   async function vendorResetVerify() {
     if (!code.trim()) { setError('Enter the code from your email'); return; }
@@ -239,8 +245,10 @@ export default function LoginPage() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (vendorStage === 'password' || vendorStage === 'setup') { void vendorSubmit(); return; }
-    if (vendorStage === 'reset') { void vendorResetVerify(); return; }
+    if (vendorStage === 'password') { void vendorSubmit(); return; }
+    // First-login setup + forgot-password both verify the emailed code before
+    // setting the password (vendor-reset-verify).
+    if (vendorStage === 'setup' || vendorStage === 'reset') { void vendorResetVerify(); return; }
     if (otpStage === 'sent') { void verifyOtp(); return; }
     if (isReviewEmail) { void reviewLogin(); return; }
     void continueEmail();
@@ -292,7 +300,7 @@ export default function LoginPage() {
             <h2 className="text-lg font-heading font-bold mb-2">Sign in</h2>
             <p className="text-sm text-gray-600 mb-6">
               {vendorStage === 'setup'
-                ? `Welcome${vendorName ? `, ${vendorName}` : ''}. Create a password for your ResiWalk Services account.`
+                ? `Welcome${vendorName ? `, ${vendorName}` : ''}. Enter the code we emailed to ${email.trim()} and create your ResiWalk password.`
                 : vendorStage === 'password'
                   ? `Enter your ResiWalk password${vendorName ? ` for ${vendorName}` : ''}.`
                   : vendorStage === 'reset'
@@ -320,7 +328,7 @@ export default function LoginPage() {
                 is confirmed to be an approved vendor. */}
             {inVendorFlow && (
               <div className="mt-4">
-                {vendorStage === 'reset' && (
+                {(vendorStage === 'reset' || vendorStage === 'setup') && (
                   <>
                     <label htmlFor="vendor-code" className="block text-sm font-heading font-semibold text-ink mb-1.5">
                       Code from your email
@@ -350,7 +358,7 @@ export default function LoginPage() {
                   onChange={(e) => { setPassword(e.target.value); setError(null); }}
                   placeholder={vendorStage === 'password' ? 'Password' : 'At least 8 characters'}
                   disabled={vendorBusy}
-                  autoFocus={vendorStage !== 'reset'}
+                  autoFocus={vendorStage === 'password'}
                   className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base"
                 />
                 {(vendorStage === 'setup' || vendorStage === 'reset') && (
@@ -431,7 +439,7 @@ export default function LoginPage() {
               <>
                 <button
                   type="submit"
-                  disabled={vendorBusy || !password || ((vendorStage === 'setup' || vendorStage === 'reset') && !confirm) || (vendorStage === 'reset' && code.trim().length < 4)}
+                  disabled={vendorBusy || !password || ((vendorStage === 'setup' || vendorStage === 'reset') && (!confirm || code.trim().length < 4))}
                   className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-4 rounded-lg transition mt-5 active:scale-[0.98]"
                 >
                   {vendorBusy
