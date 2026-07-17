@@ -76,6 +76,7 @@ export function PhotoThumb({
   // OOM-flood the WebView. Acquire a slot before loading a remote source; release
   // it EXACTLY once — on load, on error, or on teardown/source-change.
   const [gatedSrc, setGatedSrc] = useState('');
+  const imgRef = useRef<HTMLImageElement | null>(null);
   const heldRef = useRef(false);
   const release = () => { if (heldRef.current) { heldRef.current = false; releaseImgSlot(); } };
   useEffect(() => {
@@ -92,6 +93,19 @@ export function PhotoThumb({
     return () => { cancelled = true; release(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantSrc, isLocal, inView]);
+
+  // Cached-image guard: these thumbnails are served `immutable`, so on a review
+  // screen the <img> often mounts with a src that's ALREADY in cache — and the
+  // browser can fire `load` before React attaches onLoad (the classic cached-img
+  // gotcha). Without this, `loaded` never flips true, the img stays at opacity 0,
+  // and the tile is stuck grey forever even though the pixels are decoded. After
+  // the src is applied, synchronously treat an already-complete image as loaded.
+  useEffect(() => {
+    if (!gatedSrc || loaded) return;
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth > 0) { setLoaded(true); release(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gatedSrc, loaded]);
 
   // Self-heal a STALL: the proxied thumbnail resize (sharp) can hang on a cold
   // instance / large original, and a bare <img> that never fires load OR error
@@ -121,6 +135,7 @@ export function PhotoThumb({
       {gatedSrc && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
+          ref={imgRef}
           src={gatedSrc}
           alt={alt}
           title={title}

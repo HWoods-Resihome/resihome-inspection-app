@@ -16,6 +16,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { displayImageSrc, thumbImageSrc } from '@/lib/photoDisplay';
+import { PhotoThumb } from '@/components/PhotoThumb';
 import {
   drawEvidenceStamp, buildStampLines, getGeoFix, resolvePropertyRefCoords, type StampLine,
 } from '@/lib/evidenceStamp';
@@ -1235,8 +1236,7 @@ export function CameraAILayer(props: Props) {
             >
               {s.stillUrl && (
                 <button type="button" onClick={(e) => { e.stopPropagation(); setZoomUrl(s.stillUrl!); }} className="shrink-0" aria-label="View the photo for this call-out">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={thumbImageSrc(s.stillUrl)} alt="" loading="lazy" decoding="async" className="w-11 h-11 object-cover rounded border border-gray-200" />
+                  <PhotoThumb url={s.stillUrl} alt="" width={200} className="w-11 h-11 object-cover rounded border border-gray-200" />
                 </button>
               )}
               <div className="min-w-0 flex-1">
