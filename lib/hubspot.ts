@@ -8,6 +8,7 @@ import type { Worktype } from './services/worktypes';
 import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls, PHOTO_URL_DELIMITER } from './answerProps';
 import { extractLeasingAgent1099Fields } from './leasingAgent1099';
+import { parseFcAnswers, finalChecklistPhotos } from './finalChecklist';
 import { calculateLine, roundMoney } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
 import { normalizeApprovalRouting, type ApprovalRoutingConfig } from './approvalRouting';
@@ -5811,9 +5812,17 @@ export async function auditInspectionPhotos(opts: { inspectionId?: string; query
   const CHECK_CAP = 500;     // bound the liveness sweep to stay within maxDuration
 
   for (const a of answers) {
-    const urls = [...(a.photoUrls || []), ...(a.afterPhotoUrls || [])];
+    // Final Checklist photos are NOT in photo_urls — they live inside the FC
+    // JSON blob (a `qa` record whose `note` is a serialized FcAnswers map). Pull
+    // them out explicitly so the audit (and the reclaim referenced-set, which
+    // ALSO only reads photo_urls) doesn't miss them.
+    const isFcBlob = a.answerType === 'qa'
+      && (/^fc__/.test(a.questionIdExternal || '') || /^final.?checklist$/i.test((a.answerValue || '').trim()));
+    const urls = isFcBlob
+      ? finalChecklistPhotos(parseFcAnswers(a.note))
+      : [...(a.photoUrls || []), ...(a.afterPhotoUrls || [])];
     if (!urls.length && a.answerType !== 'section_photo') continue;
-    const row: PhotoAuditAnswer = { recordId: a.recordId, type: a.answerType || '', section: a.section || '', total: urls.length, hubspot: 0, blob: 0, draft: 0, other: 0 };
+    const row: PhotoAuditAnswer = { recordId: a.recordId, type: isFcBlob ? 'final_checklist' : (a.answerType || ''), section: isFcBlob ? 'Final Checklist' : (a.section || ''), total: urls.length, hubspot: 0, blob: 0, draft: 0, other: 0 };
     for (const u of urls) {
       if (/^(blob:|data:)/.test(u)) row.draft++;
       else if (isBlobFileUrl(u)) row.blob++;
