@@ -161,13 +161,15 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const todayISO = useMemo(() => (live ? easternTodayISO() : REFERENCE_TODAY), [live]);
   // 'all' = everything (incl. completed); 'all_open' = everything except completed.
   // Tapping the All chip cycles between the two.
-  const [status, setStatus] = useState<ServiceStatus | 'all' | 'all_open'>('all');
+  // Vendors land on all OPEN services sorted by status (Assigned first); everyone
+  // else defaults to everything sorted by due date.
+  const [status, setStatus] = useState<ServiceStatus | 'all' | 'all_open'>(isVendor ? 'all_open' : 'all');
   const [worktype, setWorktype] = useState<string[]>([]);
   const [vendor, setVendor] = useState<string[]>([]);
   const [region, setRegion] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [pastDueOnly, setPastDueOnly] = useState(false);
-  const [sortField, setSortField] = useState<SortField>('due');
+  const [sortField, setSortField] = useState<SortField>(isVendor ? 'status' : 'due');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
@@ -276,7 +278,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
     const dir = sortDir === 'asc' ? 1 : -1;
     const key = (s: typeof list[number]) => ({
       due: s.dueDate, address: s.address.toLowerCase(), worktype: worktypeLabel(s.worktype),
-      vendor: (s.vendor || '~').toLowerCase(), status: String(SAMPLE_STATUS_ORDER.indexOf(s.status)),
+      vendor: (s.vendor || '~').toLowerCase(), status: (STATUS_LABEL[s.status] || String(s.status)).toLowerCase(),
       region: s.region.toLowerCase(), community: (s.community || '~').toLowerCase(),
     }[sortField]);
     return [...list].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * dir);
