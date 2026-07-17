@@ -1234,11 +1234,16 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                             <div className="grid grid-cols-3 gap-2">
                               {(q.options || []).map((o) => {
                                 const selected = answers[q.id] === o.label;
+                                const anySelected = !!answers[q.id];
                                 const { main, sub } = splitGrassLabel(o.label);
-                                // Keep each tier's color through selection: all options
-                                // always show their tier border; the picked one just
-                                // gets a tinted interior fill (not the pink brand fill).
-                                const cls = selected ? GRASS_TIER_FILL[grassTier(o.label)] : GRASS_TIER_BORDER[grassTier(o.label)];
+                                // Before any pick: every tier shows its own color. After a
+                                // pick: the chosen tier keeps its color (tinted fill), and
+                                // the un-picked ones grey out so the selection stands out.
+                                const cls = selected
+                                  ? GRASS_TIER_FILL[grassTier(o.label)]
+                                  : anySelected
+                                    ? 'bg-white text-gray-400 border-gray-200'
+                                    : GRASS_TIER_BORDER[grassTier(o.label)];
                                 return (
                                   <button key={o.id} type="button" onClick={() => setAns(q.id, answers[q.id] === o.label ? '' : o.label)}
                                     className={`px-2 py-2 rounded-xl border-2 text-[13px] font-heading font-bold text-center leading-tight ${cls}`}>
