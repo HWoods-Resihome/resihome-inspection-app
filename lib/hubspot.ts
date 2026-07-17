@@ -5659,6 +5659,22 @@ async function referencedHubspotPhotoUrls(force = false): Promise<Set<string>> {
     } while (after);
   };
   await scan(typeIds().answer, await answerPhotoScanFields(typeIds().answer), true);
+  // Final Checklist photos are NOT in photo_urls — they're embedded in the `note`
+  // JSON of the fc__all qa record. Scan those too, or the reclaim treats them as
+  // orphans and deletes them (this is the bug that lost FC photos). Fail-closed:
+  // this scan throwing aborts the whole delete (safe), same as the others.
+  {
+    let after: string | undefined;
+    do {
+      const body: any = {
+        limit: 100, after, properties: ['note'],
+        filterGroups: [{ filters: [{ propertyName: 'question_id_external', operator: 'EQ', value: 'fc__all' }] }],
+      };
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeIds().answer}/search`, { method: 'POST', body: JSON.stringify(body) });
+      for (const r of resp.results || []) for (const u of finalChecklistPhotos(parseFcAnswers(r.properties?.note))) if (isHubspotFileUrl(u)) urls.add(normFileUrl(u));
+      after = resp.paging?.next?.after || undefined;
+    } while (after);
+  }
   const svcType = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (svcType) await scan(svcType, ['before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls', 'pet_after_photo_urls'], false);
   _referencedHsPhotos = { at: Date.now(), urls };
@@ -5857,6 +5873,78 @@ export async function auditInspectionPhotos(opts: { inspectionId?: string; query
     rows.push(row);
   }
   return { inspectionId: id, found: true, answers: rows, totals: t, ...(opts.verify ? { deadSamples } : {}) };
+}
+
+/**
+ * BLAST-RADIUS scan for the Final Checklist photo loss. Enumerates every fc__all
+ * blob across ALL inspections (paginated; the FC blob is one qa record per
+ * inspection), extracts its embedded photos, and classifies them HubSpot / Blob /
+ * draft. With verify=1 it also HEAD-checks the HubSpot ones for liveness so we can
+ * count how many FC photos are actually GONE (404) vs still recoverable. Budgeted
+ * + cursor-resumable so the admin can loop it. Read-only.
+ */
+export interface FcScanBatch {
+  after: string | null; done: boolean;
+  fcRecords: number; recordsWithHubspot: number;
+  fcPhotos: number; hubspot: number; blob: number; draft: number; other: number;
+  live?: number; dead?: number; checked?: number;
+  deadRecordIds?: string[];   // sample FC answer-record ids that have dead photos
+  deadSamples?: string[];
+}
+export async function scanFinalChecklistPhotos(opts: { after?: string; verify?: boolean; budgetMs?: number }): Promise<FcScanBatch> {
+  const start = Date.now();
+  const budgetMs = opts.budgetMs ?? 45000;
+  const answerType = typeIds().answer;
+  const rep: FcScanBatch = {
+    after: opts.after ?? null, done: false, fcRecords: 0, recordsWithHubspot: 0,
+    fcPhotos: 0, hubspot: 0, blob: 0, draft: 0, other: 0,
+    ...(opts.verify ? { live: 0, dead: 0, checked: 0, deadRecordIds: [], deadSamples: [] } : {}),
+  };
+  let after = opts.after || undefined;
+  do {
+    const body: any = {
+      limit: 100, after, properties: ['note'],
+      filterGroups: [{ filters: [{ propertyName: 'question_id_external', operator: 'EQ', value: 'fc__all' }] }],
+    };
+    const resp = await hubspotFetch(`/crm/v3/objects/${answerType}/search`, { method: 'POST', body: JSON.stringify(body) });
+    for (const r of resp.results || []) {
+      rep.fcRecords++;
+      const photos = finalChecklistPhotos(parseFcAnswers(r.properties?.note));
+      let recHubspot = 0, recDead = 0;
+      for (const u of photos) {
+        rep.fcPhotos++;
+        if (/^(blob:|data:)/.test(u)) rep.draft++;
+        else if (isBlobFileUrl(u)) rep.blob++;
+        else if (isHubspotFileUrl(u)) { rep.hubspot++; recHubspot++; }
+        else rep.other++;
+      }
+      if (recHubspot) rep.recordsWithHubspot++;
+      if (opts.verify && recHubspot) {
+        const hs = photos.filter((u) => isHubspotFileUrl(u));
+        for (let i = 0; i < hs.length; i += 8) {
+          const chunk = hs.slice(i, i + 8);
+          const results = await Promise.all(chunk.map((u) => checkUrlLive(u)));
+          results.forEach((res, j) => {
+            rep.checked!++;
+            if (res.ok) rep.live!++;
+            else {
+              rep.dead!++; recDead++;
+              if (rep.deadSamples!.length < 10) {
+                try { const p = new URL(chunk[j].split('#')[0]); rep.deadSamples!.push(`${res.status || 'ERR'} ${p.host}${p.pathname}`); }
+                catch { rep.deadSamples!.push(`${res.status || 'ERR'}`); }
+              }
+            }
+          });
+        }
+        if (recDead && rep.deadRecordIds!.length < 100) rep.deadRecordIds!.push(String(r.id));
+      }
+    }
+    after = resp.paging?.next?.after || undefined;
+    if (Date.now() - start > budgetMs) break;   // budget hit → return cursor to resume
+  } while (after);
+  rep.after = after || null;
+  rep.done = !after;
+  return rep;
 }
 
 /**
