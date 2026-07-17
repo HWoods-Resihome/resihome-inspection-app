@@ -506,7 +506,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: vendorNames[0] ? [vendorNames[0]] : [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], enrollCombinator: 'and', startDate: '', stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: vendorNames[0] ? [vendorNames[0]] : [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
     openRule(id);
   };
   const duplicateRule = () => {
@@ -599,7 +599,8 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
     if (rule.recurring && missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
     if (!rule.recurring && !rule.initialDueDays.trim()) saveErrors.push('Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
     if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
-    if (!rule.enrollCriteria.length) saveErrors.push('Add at least one enrollment criterion.');
+    // Enrollment criteria are OPTIONAL — with none, every applicable property
+    // enrolls immediately. Any criterion that IS present still needs a value.
     if (rule.enrollCriteria.some((c) => c.op !== 'is known' && !c.vals.length)) saveErrors.push('Every enrollment criterion needs a value.');
     if (rule.stopEnabled && rule.stopMode === 'condition') {
       if (!rule.stopCriteria.length) saveErrors.push('Add at least one stop criterion.');
@@ -1055,14 +1056,11 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
             <SecHead n={3} title="Enrollment & Stop" />
             {openSec[3] && (<div className="mt-3">
             <label className={lbl}>Enroll (Create Services) When</label>
-            <div className="flex items-center gap-2 mb-2 -mt-1 flex-wrap">
-              <span className="text-[12px] text-gray-500">Match</span>
-              <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
-                <button type="button" onClick={() => patch({ enrollCombinator: 'and' })} className={`px-2.5 py-1 text-[12px] font-heading font-semibold ${rule.enrollCombinator !== 'or' ? 'bg-brand text-white' : 'bg-white text-gray-600'}`}>ALL · AND</button>
-                <button type="button" onClick={() => patch({ enrollCombinator: 'or' })} className={`px-2.5 py-1 text-[12px] font-heading font-semibold border-l border-gray-300 ${rule.enrollCombinator === 'or' ? 'bg-brand text-white' : 'bg-white text-gray-600'}`}>ANY · OR</button>
-              </div>
-              <span className="text-[12px] text-gray-400">of the criteria below.</span>
-            </div>
+            <p className="text-[12px] text-gray-500 mb-2 -mt-1">
+              {rule.enrollCriteria.length === 0
+                ? 'No criteria — every applicable property enrolls immediately.'
+                : 'Tap the AND/OR between criteria to switch how they combine.'}
+            </p>
             {/* Rule-level start date — the rule stays dormant (creates nothing) until this date. */}
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <span className="text-[13px] text-gray-600">Starts on</span>
@@ -1072,7 +1070,12 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
             <div className="space-y-2 mb-4">
               {rule.enrollCriteria.map((c, i) => (
                 <div key={i}>
-                  {i > 0 && <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1">{rule.enrollCombinator === 'or' ? 'or' : 'and'}</div>}
+                  {i > 0 && (
+                    <button type="button" onClick={() => patch({ enrollCombinator: rule.enrollCombinator === 'or' ? 'and' : 'or' })}
+                      className="mb-1 text-[11px] font-bold uppercase tracking-wide text-brand border border-brand/40 rounded px-2 py-0.5 hover:bg-brand/5">
+                      {rule.enrollCombinator === 'or' ? 'OR' : 'AND'}
+                    </button>
+                  )}
                   <div className="flex flex-wrap items-center gap-2">
                     <ListPicker value={c.field} ariaLabel="Enrollment field" className={pick}
                       options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
@@ -1089,10 +1092,8 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                       <ListPicker value={c.vals[0] || ''} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
                         options={valueOptsFor(c.field)} onChange={(v) => patchCrit(i, { vals: [v] })} />
                     )}
-                    {rule.enrollCriteria.length > 1 && (
-                      <button type="button" onClick={() => removeCrit(i)} aria-label="Remove criterion"
-                        className="text-gray-400 hover:text-red-500 text-[16px] leading-none px-1.5 self-center">×</button>
-                    )}
+                    <button type="button" onClick={() => removeCrit(i)} aria-label="Remove criterion"
+                      className="text-gray-400 hover:text-red-500 text-[16px] leading-none px-1.5 self-center">×</button>
                   </div>
                 </div>
               ))}
@@ -1103,11 +1104,6 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
               <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked })} />
               <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Stop Criteria <span className="normal-case font-normal text-gray-400">(optional)</span></span>
             </label>
-            {/* All three stop modes are now enforced by the generator: condition
-                (Property Status / RRQC, AND/OR-combined), date, and count. */}
-            <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1 mb-2">
-              Enforced: <b>condition</b> (matching homes stop generating), <b>date</b> (rule stops on/after the date), and <b>“after N services”</b> (stops once N have generated per property).
-            </p>
             {rule.stopEnabled && (
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -1118,17 +1114,14 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                 </div>
                 {rule.stopMode === 'condition' && (
                   <>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[12px] text-gray-500">Stop when</span>
-                      <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
-                        <button type="button" onClick={() => patch({ stopCombinator: 'and' })} className={`px-2.5 py-1 text-[12px] font-heading font-semibold ${rule.stopCombinator !== 'or' ? 'bg-brand text-white' : 'bg-white text-gray-600'}`}>ALL · AND</button>
-                        <button type="button" onClick={() => patch({ stopCombinator: 'or' })} className={`px-2.5 py-1 text-[12px] font-heading font-semibold border-l border-gray-300 ${rule.stopCombinator === 'or' ? 'bg-brand text-white' : 'bg-white text-gray-600'}`}>ANY · OR</button>
-                      </div>
-                      <span className="text-[12px] text-gray-400">match:</span>
-                    </div>
                     {rule.stopCriteria.map((c, i) => (
                       <div key={i}>
-                        {i > 0 && <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1">{rule.stopCombinator === 'or' ? 'or' : 'and'}</div>}
+                        {i > 0 && (
+                          <button type="button" onClick={() => patch({ stopCombinator: rule.stopCombinator === 'or' ? 'and' : 'or' })}
+                            className="mb-1 text-[11px] font-bold uppercase tracking-wide text-brand border border-brand/40 rounded px-2 py-0.5 hover:bg-brand/5">
+                            {rule.stopCombinator === 'or' ? 'OR' : 'AND'}
+                          </button>
+                        )}
                         <div className="flex flex-wrap items-center gap-2">
                           <ListPicker value={c.field} ariaLabel="Stop field" className={pick}
                             options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
