@@ -1096,7 +1096,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                     {c.op === 'is known' ? (
                       <span className="text-[12px] text-gray-500 self-center">has any date on the property</span>
                     ) : c.op === 'is any of' ? (
-                      <MultiFilter label="Values" options={valueOptsFor(c.field)} selected={c.vals}
+                      <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
                         onChange={(next) => patchCrit(i, { vals: next })} className={`${pick} flex-1 min-w-[140px]`} />
                     ) : (
                       <ListPicker value={c.vals[0] || ''} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
@@ -1142,7 +1142,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                           {c.op === 'is known' ? (
                             <span className="text-[12px] text-gray-500 self-center">has any date on the property</span>
                           ) : c.op === 'is any of' ? (
-                            <MultiFilter label="Values" options={valueOptsFor(c.field)} selected={c.vals}
+                            <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
                               onChange={(next) => patchStopCrit(i, { vals: next })} className={`${pick} flex-1 min-w-[140px]`} />
                           ) : (
                             <ListPicker value={c.vals[0] || ''} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
