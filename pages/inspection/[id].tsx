@@ -19,6 +19,7 @@ import { lockRingFromProperty } from '@/components/UnlockButton';
 import { setInspectionFormActive } from '@/lib/offlinePhotoStore';
 import { isLocalInspectionId, realIdFor, getPendingInspection, buildSeedPayload } from '@/lib/pendingInspections';
 import { reportError } from '@/lib/clientErrorReporter';
+import { isNetworkError } from '@/lib/netError';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 
 
@@ -292,7 +293,20 @@ export default function ExistingInspection() {
       // network is the only way to get the inspection at all.
       const cachedInspection = loadCachedInspection(inspectionId);
       try {
-        const r = await fetchWithTimeout(`/api/inspections/${inspectionId}`, cachedInspection ? 7000 : 20000);
+        // With no cache the network is the only way in, so retry once on a
+        // transient network blip ("Failed to fetch" / "Load failed") before
+        // giving up — that alone recovers most of these first-open failures.
+        let r: Response;
+        try {
+          r = await fetchWithTimeout(`/api/inspections/${inspectionId}`, cachedInspection ? 7000 : 20000);
+        } catch (netErr) {
+          if (!cachedInspection && isNetworkError(netErr)) {
+            await new Promise((res) => setTimeout(res, 800));
+            r = await fetchWithTimeout(`/api/inspections/${inspectionId}`, 20000);
+          } else {
+            throw netErr;
+          }
+        }
         const data = await r.json();
         if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
         if (cancelled) return;
@@ -307,9 +321,11 @@ export default function ExistingInspection() {
         } else if (!cancelled) {
           // No cache and no network: this inspection was never opened on a good
           // connection, so there's nothing to show. Make the reason actionable
-          // instead of a generic abort/error string.
-          const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-          const isOfflineOrAbort = offline || /abort/i.test(String(e?.message || e));
+          // instead of a generic abort/error string. Treat ALL transient network
+          // failures ("Failed to fetch" / "Load failed" / timeouts) as offline —
+          // navigator.onLine lies on weak signal, which is how these ended up
+          // mislogged as genuine load failures in the Admin Error Log.
+          const isOfflineOrAbort = isNetworkError(e);
           setErrorMsg(isOfflineOrAbort
             ? 'Can’t load this inspection — you appear to be offline or on a weak signal, and it hasn’t been downloaded for offline use yet. Open it once on a good connection, then it’ll work offline.'
             : String(e?.message || e));
