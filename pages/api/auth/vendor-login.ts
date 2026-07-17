@@ -16,9 +16,19 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { createSessionCookie, readReturnTo, clearReturnToCookie, isSafeReturnPath, type SessionUser } from '@/lib/auth';
 import { findApprovedVendorByEmail, setVendorPasswordHash } from '@/lib/hubspot';
 import { hashVendorPassword, verifyVendorPassword, vendorPasswordError } from '@/lib/vendorPassword';
+import { enforceRateLimit } from '@/lib/rateLimit';
+
+function clientIp(req: NextApiRequest): string {
+  return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
+  // Throttle online password guessing (the 500ms delay alone doesn't cap volume):
+  // per-IP and per-email windows, mirroring the reset endpoint. Generous enough
+  // that a legitimate vendor fumbling their password won't be locked out.
+  if (enforceRateLimit(res, { key: clientIp(req), route: 'vendor-login', max: 20, windowMs: 15 * 60_000 })) return;
+
   const email = String(req.body?.email || '').trim().toLowerCase();
   const password = String(req.body?.password || '');
   const confirm = String(req.body?.confirm || '');
@@ -28,6 +38,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ error: msg });
   };
   if (!email || !password) return fail('Email and password are required.');
+  if (enforceRateLimit(res, { key: email, route: 'vendor-login-email', max: 10, windowMs: 15 * 60_000 })) return;
 
   let vendor;
   try { vendor = await findApprovedVendorByEmail(email); }
