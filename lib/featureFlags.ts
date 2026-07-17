@@ -26,11 +26,16 @@
  */
 
 /**
- * Master switch, inlined into the client bundle (NEXT_PUBLIC_). ON when:
- *   • NEXT_PUBLIC_SERVICES_ENABLED === '1'  (set this Preview-scoped in Vercel), or
- *   • local dev (`next dev`) so the feature is visible without any config.
- * On a Vercel PRODUCTION build NODE_ENV is 'production' and the var is unset →
- * OFF, so resiwalk.com never shows Services.
+ * Preview-only convenience flag. ON when NEXT_PUBLIC_SERVICES_ENABLED === '1' or in
+ * local dev. NOTE: this flag does NOT gate access to Services — it only drives the
+ * preview environment BADGE (components/ServicesEnvBadge). The REAL gates are
+ * role-based: `servicesEnabled` (= isAppAdmin, lib/servicesAccess) for internal/admin
+ * surfaces, and `servicesViewerAllowed` (admin OR approved vendor Company,
+ * lib/services/scopeServer) for the vendor surface. So Services is reachable in
+ * Production for any app-admin or approved vendor regardless of this flag. The two
+ * real launch switches are: (1) marking vendor Companies resiwalk_access +
+ * eligible_for_recurring in HubSpot, and (2) setting CRON_SECRET so the nightly
+ * generation/review/past-due crons run.
  */
 export const SERVICES_FLAG_ON =
   process.env.NEXT_PUBLIC_SERVICES_ENABLED === '1' ||

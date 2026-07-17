@@ -68,6 +68,7 @@ export async function splitMasterCommunityCut(opts: {
   const st = String(p.subtype || 'cut');
   const perChild = distributeCents(finalVendorCost, coveredIds.length);
   const childIds: string[] = [];
+  let failed = 0;
 
   for (let i = 0; i < coveredIds.length; i++) {
     const propId = coveredIds[i];
@@ -100,15 +101,26 @@ export async function splitMasterCommunityCut(opts: {
     };
     try {
       const cid = await createServiceWorkOrder(childProps);
-      if (cid) childIds.push(cid);
+      if (cid) childIds.push(cid); else failed++;
     } catch (e: any) {
+      failed++;
       console.warn(`[services/split] child create failed for ${propId}:`, e?.message || e);
     }
   }
 
-  // Master leaves billing (its children now carry it) and records the split.
-  await patchServiceWorkOrder(masterId, { for_billing: 'false', split_at: closedAt }).catch((e) =>
-    console.warn('[services/split] master flag update failed:', e?.message || e));
+  if (failed === 0) {
+    // Full success: the children now carry billing; the master leaves it.
+    await patchServiceWorkOrder(masterId, { for_billing: 'false', split_at: closedAt }).catch((e) =>
+      console.warn('[services/split] master flag update failed:', e?.message || e));
+    return { childIds, count: childIds.length };
+  }
 
-  return { childIds, count: childIds.length };
+  // PARTIAL failure: do NOT flip the master out of billing (that would lose the
+  // revenue for the un-created children), and neutralize the children we DID create
+  // (for_billing=false) so the master's full total isn't double-counted. Net: the
+  // master alone bills the full amount, nothing is lost or duplicated, and the
+  // incomplete split is visible (childIds present but skipped set) for a retry.
+  await Promise.allSettled(childIds.map((cid) => patchServiceWorkOrder(cid, { for_billing: 'false' })));
+  console.warn(`[services/split] PARTIAL split for master ${masterId}: ${failed}/${coveredIds.length} children failed — master kept in billing, created children flagged out to avoid double-count`);
+  return { childIds, count: childIds.length, skipped: `partial: ${failed} of ${coveredIds.length} children failed — master kept in billing` };
 }

@@ -42,7 +42,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const past = daysBetween(today, due);   // >0 means past due by N days
       return past >= 1 && past <= WINDOW_DAYS;
     });
-    const results = await Promise.allSettled(targets.map((s) => {
+    // Throttled sends (batches of 5) so a large past-due window can't fire a burst
+    // of simultaneous Gmail sends and trip rate limits.
+    const send = (s: typeof targets[number]) => {
       const p = s.props;
       return notifyServicePastDue({
         serviceId: s.id, vendorEmail: p.vendor_email, vendorName: p.vendor_name,
@@ -50,8 +52,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         worktypeLabel: worktypeLabel(String(p.worktype || '')), subtypeLabel: subtypeLabel(String(p.worktype || ''), String(p.subtype || '')),
         dueDate: normDate(p.due_date), baseUrl,
       });
-    }));
-    const attempted = results.length;
+    };
+    let attempted = 0;
+    for (let i = 0; i < targets.length; i += 5) {
+      await Promise.allSettled(targets.slice(i, i + 5).map(send));
+      attempted += Math.min(5, targets.length - i);
+    }
     console.log('[cron/services-due]', JSON.stringify({ scanned: open.length, attempted }));
     return res.status(200).json({ ok: true, scanned: open.length, notified: attempted });
   } catch (e: any) {
