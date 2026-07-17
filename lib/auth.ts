@@ -12,6 +12,10 @@ export const SESSION_COOKIE_NAME = 'resihome_session';
 // 30 days. Auth is gated by Google sign-in at login (proves the user controls
 // the email); after that the session is good for 30 days without re-doing Google.
 const SESSION_DURATION_HOURS = 24 * 30;
+// External vendor (Company) logins re-authenticate DAILY — one email+password
+// sign-in per day. Shorter-lived than staff sessions because these are external,
+// semi-trusted accounts; a leaked vendor token is valid for at most ~24h.
+const VENDOR_SESSION_DURATION_HOURS = 24;
 
 export interface SessionUser {
   userId: string;  // HubSpot user ID
@@ -86,6 +90,8 @@ export async function createSessionCookie(user: SessionUser): Promise<string> {
   // import to avoid pulling server-only HubSpot code into any client bundle that
   // touches the cookie helpers' types.
   void import('@/lib/loginActivity').then((m) => m.recordLogin(user.email, user.name)).catch(() => {});
+  // Vendors re-sign-in daily; staff sessions last 30 days.
+  const durationHours = user.vendor ? VENDOR_SESSION_DURATION_HOURS : SESSION_DURATION_HOURS;
   const token = await new SignJWT({
     userId: user.userId,
     email: user.email,
@@ -94,7 +100,7 @@ export async function createSessionCookie(user: SessionUser): Promise<string> {
   } as JWTPayload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime(`${SESSION_DURATION_HOURS}h`)
+    .setExpirationTime(`${durationHours}h`)
     .sign(sessionSecret());
 
   return serialize(SESSION_COOKIE_NAME, token, {
@@ -102,12 +108,12 @@ export async function createSessionCookie(user: SessionUser): Promise<string> {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: SESSION_DURATION_HOURS * 60 * 60,
+    maxAge: durationHours * 60 * 60,
     // Set BOTH Max-Age and an explicit Expires: some iOS Safari / standalone-PWA
     // versions drop a Max-Age-only cookie on app close (treating it as a session
     // cookie), which forced inspectors to re-sign-in every time they reopened the
-    // app. A concrete Expires date makes it a persistent 30-day cookie everywhere.
-    expires: new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000),
+    // app. A concrete Expires date makes it a persistent cookie everywhere.
+    expires: new Date(Date.now() + durationHours * 60 * 60 * 1000),
   });
 }
 

@@ -1719,23 +1719,28 @@ export async function deleteServiceRuleRecord(id: string): Promise<boolean> {
   return true;
 }
 
-/** Existing Service Work Order (enrollment_key, status) pairs — for generation dedup.
- *  Null when not configured. */
+// HubSpot CRM search offset paging errors past 10,000 results — clamp every full
+// scan below that so a large object can't throw mid-page.
+const HUBSPOT_SEARCH_MAX = 10_000;
+
+/** Existing Service Work Order (enrollment_key, status, vendor) pairs — for
+ *  generation dedup + rotation. Null ONLY when the object isn't configured; a real
+ *  read error THROWS (so generation fails loudly instead of silently reading the
+ *  null as "not configured" and creating nothing). */
 export async function readServiceWorkOrderKeys(): Promise<{ key: string; status: string; vendor: string }[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
-  try {
-    const out: { key: string; status: string; vendor: string }[] = [];
-    let after: string | undefined;
-    do {
-      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-        method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status', 'vendor_name'] }),
-      });
-      for (const r of resp.results || []) out.push({ key: String(r.properties?.enrollment_key || ''), status: String(r.properties?.status || ''), vendor: String(r.properties?.vendor_name || '') });
-      after = resp.paging?.next?.after;
-    } while (after);
-    return out;
-  } catch (e) { console.warn('[services] key read failed:', e); return null; }
+  const out: { key: string; status: string; vendor: string }[] = [];
+  let after: string | undefined;
+  do {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+      method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status', 'vendor_name'] }),
+    });
+    for (const r of resp.results || []) out.push({ key: String(r.properties?.enrollment_key || ''), status: String(r.properties?.status || ''), vendor: String(r.properties?.vendor_name || '') });
+    after = resp.paging?.next?.after;
+    if (out.length >= HUBSPOT_SEARCH_MAX) { if (after) console.warn('[services] key scan hit the 10k search cap — dedup set is partial'); break; }
+  } while (after);
+  return out;
 }
 
 /** All Service Work Orders normalized for vendor-performance insights. Excludes
@@ -1766,6 +1771,7 @@ export async function fetchServiceInsightsRows(): Promise<import('./services/ins
         });
       }
       after = resp.paging?.next?.after;
+      if (rows.length >= HUBSPOT_SEARCH_MAX) { if (after) console.warn('[services] insights scan hit the 10k search cap — metrics are partial'); break; }
     } while (after);
     return rows;
   } catch (e) { console.warn('[services] insights read failed:', e); return null; }
