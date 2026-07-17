@@ -1256,3 +1256,112 @@ property in HubSpot; the UI rolls those children back up to the master.
 - P2: reviewer add/drop covered addresses; split on close-out; billing flags.
 - P3: UI rollup (hide children; master drill-down).
 - P4: `for_billing = Yes` billing view/export.
+
+## 10.23 Next build round — queued decisions (owner feedback, 2026-07-17)
+
+Planning only, from the "take it to the next level" review. Where these differ
+from earlier sections, **these win**.
+
+### Confirmed to build
+1. **All pricing is rule-driven — remove every hardcoded rate.**
+   - Grass-cut tier amounts (Standard / Overgrown / Heavy) are configured in the
+     **rule's** initial setup; the completion answer selects the tier and the vendor
+     payout resolves from the rule.
+   - Any **property-coverage** rule can set a default **trip-fee** cost.
+   - Submit/close-out reads pricing from the rule (fed by the form's option
+     price-effects) — delete the hardcoded $45/$60/$90 and $35 in `submit.ts` and
+     the detail page. **One source of truth (the rule).**
+
+2. **Enrollment/Stop criteria dropdowns show ONLY supported fields.**
+   - The start/stop field pickers list only fields the generator actually evaluates
+     (today: Property Status, RRQC Pass Date "is known", Deal Stage). Unsupported
+     fields are **removed from the options** so a rule can never be built on a field
+     that silently matches everything. Adding an evaluator later re-adds its option.
+
+3. **Eastern time everywhere.** All Services date math (generate, review, due,
+   on-time, completed_at) uses Eastern consistently; reconcile the schema-doc cron
+   times to match `vercel.json`.
+
+4. **Vendor rotation.** Equal-volume rotation across a rule's vendors + sticky-per-
+   address (per §10.18): multiple vendors balance net-new enrollments by open
+   volume; a property keeps its vendor for the enrollment's life; re-enrollment
+   re-rotates. (Replaces today's `vendors_json[0]` shortcut.)
+
+5. **Dead-code/enum cleanup, data preserved.** Remove the unused `ai_processing`
+   enum and any dead logic; retire the sample-data seams (`SAMPLE_SERVICES`,
+   `REFERENCE_TODAY`, seeded forms/checks, `+test` vendor registry). **All real
+   Service records/data are preserved — additive only, no destructive migration.**
+
+6. **AI review sees real metadata.** Pass each photo's capture **timestamp + GPS +
+   geofence verdict** as structured text alongside the (downscaled) images so the
+   timing/GPS/geofence checks actually evaluate; adjust the KB for any check that
+   still can't be evidenced.
+
+7. **Vendor login = external email + password.** New external vendor auth
+   (**email + password — supersedes the OTP approach in §10.7/§10.8**), vendor
+   session bound to their Company, hard scope gate (only their assigned services +
+   `/vendor` surface). Security review required before go-live.
+
+8. **Services Insights (vendor performance).** Add a Services view to the Insights
+   page with an **Inspections ↔ Services tab toggle**, gated to admins / the
+   insights-users list. Metrics: services-completed %, on-time %, bid-item %,
+   closed-out count, plus reject/modify rate and avg vendor cost, broken out
+   per-vendor.
+
+9. **AI before/after diff verification.** Add **pairwise before↔after comparison**
+   to the AI review (did the work actually happen — grass cut, pool cleared, area
+   cleaned); insufficient diff → route to Review/Fix.
+
+### Answers to open questions
+- **Community cost logic (what's needed).** Today property-scope services price on
+  submit (tiers/trip fee) but **community-scope services leave cost untouched**
+  ("community cost rules coming later") — except the community grass-cut MASTER,
+  which already prices `count × per_property_rate`. What's missing: a way for every
+  *other* community-scope service (Common Areas, Pool, Pet Stations, …) to resolve
+  `vendor_cost` + `client_cost`. Per §10.12 community contracts (vendor + pricing +
+  cadence) live on the **Community record**, so community pricing should resolve
+  from a **per-worktype contract rate on the Community object** (vendor amount) +
+  markup (client amount), stamped `rate_source='community'`. Build = (a) per-
+  worktype community rate fields on Community, (b) resolve community-scope cost from
+  them at generation/submit, (c) decide whether the grass-cut per-property split
+  rate also moves to Community (today it's on the rule). Still needed for the
+  record's payout even though the billing tab is being removed.
+
+- **Geofence / anti-spoof (approach).** Reuse the inspection **evidence stamp**
+  (already burns live lat/long + time). Capture live GPS + timestamp with each
+  service photo. On submit/AI review, compare capture GPS to the property/community
+  coordinates — **within radius (v1: point + radius, ~250m like inspections) =
+  pass; outside = geofence flag.** Anti-spoof: require **live in-app camera
+  capture**; reject/flag camera-roll uploads lacking live metadata or with
+  mismatched GPS. Geofence failures **route to human Review** (never auto-complete),
+  reason surfaced, and the verdict is fed to the AI as structured text (ties to #6).
+  Polygon geofencing is a later upgrade; point+radius for v1.
+
+- **Completion PDF on email — CONFIRMED (no work).** `notifyServiceCompleted`
+  already renders the vendor completion PDF and **attaches it** to the completion
+  email when a service is approved/completed. Client portal skipped.
+
+- **Rules-engine explainability (how to build).** One shared evaluator (the
+  generation target-resolution logic) powers read-only reporting so "what you see ==
+  what generates":
+  - *Per-rule "properties covered"* — run target resolution → the N targets a rule
+    touches (extends the existing coverage count/drill-down).
+  - *Per-property/community "which rules touch this & who wins"* — evaluate all
+    active rules' enrollment criteria against one target → matching rules per
+    worktype, the winner (deterministic since one-rule-per-property-per-worktype is
+    enforced), and the criteria that matched (the "why").
+  - *Coverage board* — per worktype, targets with **no** rule (gaps) and any
+    overlaps.
+  Build = an admin reporting page over existing rules + HubSpot search; **no new
+  data model**. Turns "why did/didn't this property get a service?" into a one-look
+  answer.
+
+### Removed / deferred
+- **Billing tab removed** — drop `/services/billing` + its export. Payment/export
+  revisited later; vendor-performance visibility moves to **Services Insights**. The
+  `for_billing` data model + community-split flags stay (data), only the report UI
+  goes.
+- **Coverage/capacity assignment engine — not now.**
+- **Skipped:** route optimization, predictive/seasonal capacity planning,
+  photo-durability parity/storage-governance sweep for services.
+- **Slack alerts — future.**
