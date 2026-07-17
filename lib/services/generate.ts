@@ -55,24 +55,30 @@ function parseCriteria(p: Record<string, any>): Criterion[] {
   return f ? [{ field: f, op: String(p.enroll_op || 'is'), vals: parseVals(p.enroll_value) }] : [];
 }
 interface EvalProp { rrqcPassDate: string; status: string; dealStages?: string[] }
+// Negating operators — the value set is a membership test, and these invert it.
+// "is not" (single) and "is not any of" (multi) both exclude the listed values.
+function isNegatingOp(op: string): boolean {
+  return op === 'is not' || op === 'is not any of';
+}
+
 function matchCriterion(prop: EvalProp, c: Criterion): boolean {
   const field = c.field.toLowerCase();
   if (/rrqc/.test(field)) return c.op === 'is known' ? !!prop.rrqcPassDate : true;
   // Deal Stage — the property's associated leasing deal(s) current stage id(s).
-  // vals hold stage ids; membership match, negated for "is not".
+  // vals hold stage ids; membership match, negated for "is not"/"is not any of".
   if (/deal/.test(field)) {
     const stages = prop.dealStages || [];
     const vals = c.vals.map((v) => v.trim()).filter(Boolean);
     if (!vals.length) return true;
     const hit = vals.some((v) => stages.includes(v));
-    return c.op === 'is not' ? !hit : hit;
+    return isNegatingOp(c.op) ? !hit : hit;
   }
   if (/status/.test(field)) {
     const s = (prop.status || '').toLowerCase();
     const vals = c.vals.map((v) => v.trim().toLowerCase()).filter(Boolean);
     if (!vals.length) return true;
     const hit = vals.some((v) => s === v || s.startsWith(v) || s.includes(v));
-    return c.op === 'is not' ? !hit : hit;
+    return isNegatingOp(c.op) ? !hit : hit;
   }
   return true; // fields we can't evaluate here → best-effort include
 }

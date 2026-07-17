@@ -77,7 +77,9 @@ const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field
 // (no field history at generation time). Showing only field-valid operators keeps
 // a rule from being built on an operator the generator won't actually evaluate.
 const opsFor = (field: string): string[] =>
-  field === 'RRQC Pass Date' ? ['is known'] : ['is', 'is any of', 'is not'];
+  field === 'RRQC Pass Date' ? ['is known'] : ['is', 'is any of', 'is not', 'is not any of'];
+// Operators that select a SET of values (multi-select UI + JSON array value).
+const isMultiOp = (op: string): boolean => op === 'is any of' || op === 'is not any of';
 interface EnrollCriterion { field: string; op: string; vals: string[] }
 // Community + Landscaping + Grass Cut defaults its enrollment to "RRQC Pass Date
 // is known" (the per-house eligibility gate). Admin can add/change criteria after.
@@ -524,7 +526,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', stopEnabled: false, stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
     openRule(id);
   };
   const duplicateRule = () => {
@@ -1098,12 +1100,12 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                     <div className="basis-[26%] shrink min-w-0">
                       <ListPicker value={c.op} ariaLabel="Operator" className={`${pick} w-full`}
                         options={opsFor(c.field).map((o) => ({ value: o, label: o }))}
-                        onChange={(v) => patchCrit(i, { op: v, ...(v !== 'is any of' && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
+                        onChange={(v) => patchCrit(i, { op: v, ...(!isMultiOp(v) && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
                     </div>
                     <div className="flex-1 min-w-0">
                       {c.op === 'is known' ? (
                         <span className="text-[12px] text-gray-500">has any date</span>
-                      ) : c.op === 'is any of' ? (
+                      ) : isMultiOp(c.op) ? (
                         <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
                           onChange={(next) => patchCrit(i, { vals: next })} className={`${pick} w-full`} />
                       ) : (
@@ -1150,12 +1152,12 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                           <div className="basis-[26%] shrink min-w-0">
                             <ListPicker value={c.op} ariaLabel="Operator" className={`${pick} w-full`}
                               options={opsFor(c.field).map((o) => ({ value: o, label: o }))}
-                              onChange={(v) => patchStopCrit(i, { op: v, ...(v !== 'is any of' && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
+                              onChange={(v) => patchStopCrit(i, { op: v, ...(!isMultiOp(v) && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
                           </div>
                           <div className="flex-1 min-w-0">
                             {c.op === 'is known' ? (
                               <span className="text-[12px] text-gray-500">has any date</span>
-                            ) : c.op === 'is any of' ? (
+                            ) : isMultiOp(c.op) ? (
                               <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
                                 onChange={(next) => patchStopCrit(i, { vals: next })} className={`${pick} w-full`} />
                             ) : (
