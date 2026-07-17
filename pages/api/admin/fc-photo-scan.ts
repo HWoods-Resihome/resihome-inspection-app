@@ -20,9 +20,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const session = await getSessionFromRequest(req).catch(() => null);
   if (!session?.email || !(await isAppAdmin(session.email).catch(() => false))) return res.status(403).json({ error: 'Admin only' });
   const verify = req.query.verify === '1' || req.query.verify === 'true';
+  // ?urls=1 → return the FULL deduped list of HubSpot FC URLs (for a HubSpot
+  // restore request). Classification-only + runs to completion in one call.
+  const dumpUrls = req.query.urls === '1' || req.query.urls === 'true';
   const after = typeof req.query.after === 'string' ? req.query.after : undefined;
   try {
-    const batch = await scanFinalChecklistPhotos({ after, verify });
+    const batch = await scanFinalChecklistPhotos({ after, verify, dumpUrls });
     return res.status(200).json({
       ...batch,
       note: 'hubspot = FC photos still pointing at HubSpot (the ones the reclaim could delete). With verify=1, dead = confirmed 404 (lost from HubSpot). Loop with ?after=<returned after> until done:true.',

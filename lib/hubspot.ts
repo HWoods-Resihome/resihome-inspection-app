@@ -5890,15 +5890,18 @@ export interface FcScanBatch {
   live?: number; dead?: number; checked?: number;
   deadRecordIds?: string[];   // sample FC answer-record ids that have dead photos
   deadSamples?: string[];
+  hubspotUrls?: string[];     // full deduped list of HubSpot FC URLs (for a restore request)
 }
-export async function scanFinalChecklistPhotos(opts: { after?: string; verify?: boolean; budgetMs?: number }): Promise<FcScanBatch> {
+export async function scanFinalChecklistPhotos(opts: { after?: string; verify?: boolean; budgetMs?: number; dumpUrls?: boolean }): Promise<FcScanBatch> {
   const start = Date.now();
   const budgetMs = opts.budgetMs ?? 45000;
+  const verify = opts.verify && !opts.dumpUrls;   // dump is classification-only (fast) so it can cover ALL records in one call
   const answerType = typeIds().answer;
+  const dumped = new Set<string>();
   const rep: FcScanBatch = {
     after: opts.after ?? null, done: false, fcRecords: 0, recordsWithHubspot: 0,
     fcPhotos: 0, hubspot: 0, blob: 0, draft: 0, other: 0,
-    ...(opts.verify ? { live: 0, dead: 0, checked: 0, deadRecordIds: [], deadSamples: [] } : {}),
+    ...(verify ? { live: 0, dead: 0, checked: 0, deadRecordIds: [], deadSamples: [] } : {}),
   };
   let after = opts.after || undefined;
   do {
@@ -5915,11 +5918,11 @@ export async function scanFinalChecklistPhotos(opts: { after?: string; verify?: 
         rep.fcPhotos++;
         if (/^(blob:|data:)/.test(u)) rep.draft++;
         else if (isBlobFileUrl(u)) rep.blob++;
-        else if (isHubspotFileUrl(u)) { rep.hubspot++; recHubspot++; }
+        else if (isHubspotFileUrl(u)) { rep.hubspot++; recHubspot++; if (opts.dumpUrls) dumped.add(normFileUrl(u)); }
         else rep.other++;
       }
       if (recHubspot) rep.recordsWithHubspot++;
-      if (opts.verify && recHubspot) {
+      if (verify && recHubspot) {
         const hs = photos.filter((u) => isHubspotFileUrl(u));
         for (let i = 0; i < hs.length; i += 8) {
           const chunk = hs.slice(i, i + 8);
@@ -5940,10 +5943,11 @@ export async function scanFinalChecklistPhotos(opts: { after?: string; verify?: 
       }
     }
     after = resp.paging?.next?.after || undefined;
-    if (Date.now() - start > budgetMs) break;   // budget hit → return cursor to resume
+    if (!opts.dumpUrls && Date.now() - start > budgetMs) break;   // budget hit → return cursor to resume (dump runs to completion)
   } while (after);
   rep.after = after || null;
   rep.done = !after;
+  if (opts.dumpUrls) rep.hubspotUrls = Array.from(dumped);
   return rep;
 }
 
