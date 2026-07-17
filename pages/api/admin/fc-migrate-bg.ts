@@ -60,6 +60,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ ok: true });
   }
 
+  if (action === 'run') {
+    // Reliable admin-gated INLINE runner — guarantees the worker executes even if
+    // the detached self-kick / cron watchdog isn't firing. Runs a bounded pass
+    // (browser waits ~a few min), then chains. Re-hit to keep it moving; the cron
+    // watchdog continues it between hits.
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET is not set — background jobs are disabled.' });
+    let st = await readFcMigrateState<FcMigrateState>().catch(() => null);
+    if (!st || (!st.running && !st.finishedAt) ) { st = freshFcMigrateState(); await writeFcMigrateState(st); }
+    else if (!st.running) { st = { ...freshFcMigrateState(), totals: st.totals }; await writeFcMigrateState(st); }  // resume a finished/idle job
+    await runFcMigrateWorker(originOf(req), secret, 240_000);
+    const latest = await readFcMigrateState<FcMigrateState>().catch(() => st);
+    return res.status(200).json({ ok: true, state: latest });
+  }
+
   if (action === 'start') {
     if (!secret) return res.status(400).json({ error: 'CRON_SECRET is not set — background jobs are disabled.' });
     const existing = await readFcMigrateState<FcMigrateState>().catch(() => null);
