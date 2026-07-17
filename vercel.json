@@ -44,6 +44,9 @@
     },
     "pages/api/cron/services-due.ts": {
       "maxDuration": 300
+    },
+    "pages/api/admin/fc-migrate-bg.ts": {
+      "maxDuration": 300
     }
   },
   "crons": [
@@ -82,6 +85,10 @@
     {
       "path": "/api/cron/services-due",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/fc-migrate-worker",
+      "schedule": "* * * * *"
     }
   ]
 }

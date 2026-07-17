@@ -6380,6 +6380,11 @@ export function writePhotoMigrationState(state: any): Promise<boolean> { return 
 export function readPhotoReclaimState<T = any>(): Promise<T | null> { return readAgentJson<T>('photo_reclaim_state_json'); }
 export function writePhotoReclaimState(state: any): Promise<boolean> { return writeAgentJson('photo_reclaim_state_json', 'Photo Reclaim State (JSON)', state); }
 
+/** Background FC-photo-migration job state (moves restored Final Checklist photos
+ *  HubSpot → Blob + reconnects) — see /api/admin/fc-migrate-bg. Own record. */
+export function readFcMigrateState<T = any>(): Promise<T | null> { return readAgentJson<T>('fc_migrate_state_json'); }
+export function writeFcMigrateState(state: any): Promise<boolean> { return writeAgentJson('fc_migrate_state_json', 'FC Migrate State (JSON)', state); }
+
 /** A learned service-check candidate produced by the review-learning loop. */
 export interface AutoServiceCheckCandidate {
   signature: string;
