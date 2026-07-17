@@ -8,7 +8,6 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { createServiceWorkOrder } from '@/lib/hubspot';
-import { vendorEmail } from '@/lib/services/vendors';
 import { fetchApprovedVendorCompanies } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 
@@ -33,8 +32,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let vendorEmailResolved = '';
   if (vendorNameIn) {
     const companies = await fetchApprovedVendorCompanies().catch(() => []);
-    vendorEmailResolved = companies.find((v) => v.name.trim().toLowerCase() === vendorNameIn.toLowerCase())?.email
-      || vendorEmail(vendorNameIn) || '';
+    vendorEmailResolved = companies.find((v) => v.name.trim().toLowerCase() === vendorNameIn.toLowerCase())?.email || '';
   }
 
   const props: Record<string, any> = {

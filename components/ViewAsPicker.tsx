@@ -6,12 +6,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { setViewAsVendor } from '@/lib/services/viewAs';
-import { SERVICE_VENDORS, vendorEmail } from '@/lib/services/vendors';
 
 type Row = { kind: 'user' | 'vendor'; name: string; email: string };
 
 export function ViewAsPicker({ onClose }: { onClose: () => void }) {
   const [users, setUsers] = useState<Row[]>([]);
+  const [vendors, setVendors] = useState<Row[]>([]);
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -20,18 +20,20 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
   const [kbOpen, setKbOpen] = useState(false);
 
   useEffect(() => {
-    fetch('/api/admin/impersonate-users')
+    const usersP = fetch('/api/admin/impersonate-users')
       .then((r) => (r.ok ? r.json() : { users: [] }))
       .then((d) => setUsers(Array.isArray(d.users) ? d.users.map((u: any) => ({ kind: 'user' as const, name: u.name || u.email, email: u.email })) : []))
-      .catch(() => { /* ignore */ })
-      .finally(() => setLoading(false));
+      .catch(() => { /* ignore */ });
+    // Real vendor options = approved Companies (same source as every picker).
+    const vendorsP = fetch('/api/services/vendors')
+      .then((r) => (r.ok ? r.json() : { vendors: [] }))
+      .then((d) => setVendors(Array.isArray(d.vendors) ? d.vendors.map((v: any) => ({ kind: 'vendor' as const, name: v.name, email: v.email || '' })) : []))
+      .catch(() => { /* ignore */ });
+    Promise.allSettled([usersP, vendorsP]).finally(() => setLoading(false));
   }, []);
 
   // The full searchable list: impersonatable users + the service vendors.
-  const rows = useMemo<Row[]>(() => {
-    const vendors: Row[] = SERVICE_VENDORS.map((v) => ({ kind: 'vendor' as const, name: v.name, email: vendorEmail(v.name) || '' }));
-    return [...users, ...vendors];
-  }, [users]);
+  const rows = useMemo<Row[]>(() => [...users, ...vendors], [users, vendors]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();

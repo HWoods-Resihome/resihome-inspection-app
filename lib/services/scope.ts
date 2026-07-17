@@ -6,9 +6,6 @@
  * services assigned to THEM. This is enforced server-side (in getServerSideProps)
  * so a vendor's browser never even receives another vendor's work orders.
  */
-import { isInternalEmail } from '@/lib/userAccess';
-import { isViewingAsVendor } from '@/lib/services/viewAs';
-import { SERVICE_VENDORS, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
 import type { ServiceRecord } from '@/lib/services/model';
 
 export interface ServiceViewer {
@@ -17,20 +14,9 @@ export interface ServiceViewer {
   vendorName: string | null;
 }
 
-/** Resolve the viewer's service scope from their session email + the request
- *  (which carries the "View as Vendor" cookie). */
-export function resolveServiceViewer(email: string | null | undefined, req: any): ServiceViewer {
-  const internal = isInternalEmail(email);
-  const previewing = isViewingAsVendor(req);
-  if (internal && !previewing) return { canSeeAll: true, vendorEmail: null, vendorName: null };
-  // A vendor view: use the logged-in vendor when their email is in the registry;
-  // for an internal user previewing (no vendor identity), fall back to the default
-  // vendor so the preview shows a concrete, correctly-scoped vendor experience.
-  const e = String(email || '').trim().toLowerCase();
-  const match = SERVICE_VENDORS.find((v) => v.email.toLowerCase() === e);
-  const v = match || (previewing ? DEFAULT_SERVICE_VENDOR : null);
-  return { canSeeAll: false, vendorEmail: v?.email || null, vendorName: v?.name || null };
-}
+// Viewer resolution lives in scopeServer.ts (resolveServiceViewerAsync) — it
+// consults the live approved-vendor Companies list. The pure, client-safe helpers
+// below (serviceVisibleTo / scopeServices) operate on an already-resolved viewer.
 
 /** True if this service is visible to the viewer. */
 export function serviceVisibleTo(s: ServiceRecord, viewer: ServiceViewer): boolean {

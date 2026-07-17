@@ -9,10 +9,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchActiveUsers, readNotificationPrefsRaw, fetchInspections, searchServiceWorkOrders } from '@/lib/hubspot';
+import { fetchActiveUsers, readNotificationPrefsRaw, fetchInspections, searchServiceWorkOrders, fetchApprovedVendorCompanies } from '@/lib/hubspot';
 import { NOTIFICATION_KEYS, type NotificationKey } from '@/lib/notifications/catalog';
 import { setNotificationPrefs } from '@/lib/notifications/prefs';
-import { SERVICE_VENDORS, vendorEmail as vendorEmailFor } from '@/lib/services/vendors';
 import { readLoginActivity } from '@/lib/loginActivity';
 
 export const config = { maxDuration: 60 };
@@ -25,22 +24,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!(await isAppAdmin(session.realEmail || session.email))) return res.status(403).json({ error: 'Admin only.' });
 
   if (req.method === 'GET') {
-    const [staff, raw, logins, inspections, services] = await Promise.all([
+    const [staff, raw, logins, inspections, services, vendorCompanies] = await Promise.all([
       fetchActiveUsers().catch(() => []),
       readNotificationPrefsRaw().catch(() => ({} as Record<string, Record<string, boolean>>)),
       readLoginActivity().catch(() => ({} as Record<string, { lastAt: string; count?: number; name?: string }>)),
       fetchInspections().catch(() => []),
       searchServiceWorkOrders().catch(() => null),
+      fetchApprovedVendorCompanies().catch(() => []),
     ]);
     const all = raw || {};
     const staffByEmail = new Map(staff.map((u) => [norm(u.email), u]));
-    const vendorByEmail = new Map(SERVICE_VENDORS.map((v) => [norm(v.email), v]));
+    const vendorByEmail = new Map(vendorCompanies.map((v) => [norm(v.email), v]));
+    const vendorEmailByName = new Map(vendorCompanies.map((v) => [v.name.trim().toLowerCase(), v.email]));
 
     // The list is limited to people actually tied to work: anyone ever ASSIGNED
-    // as an inspection's inspector or a service's vendor, plus the vendor
-    // registry. Everyone else (staff who've never been assigned, etc.) is left
-    // off. We collect a best display name from those same records for non-staff
-    // assignees (external 1099 inspectors).
+    // as an inspection's inspector or a service's vendor, plus every approved
+    // vendor company. Everyone else (staff who've never been assigned, etc.) is
+    // left off. We collect a best display name from those same records for
+    // non-staff assignees (external 1099 inspectors).
     const nameByEmail = new Map<string, string>();
     const candidates = new Set<string>();
     for (const i of inspections) {
@@ -48,10 +49,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (e) { candidates.add(e); if (i.inspectorName && !nameByEmail.has(e)) nameByEmail.set(e, i.inspectorName); }
     }
     for (const s of (services || [])) {
-      const e = norm(s.vendorEmail || vendorEmailFor(s.vendor) || '');
+      const e = norm(s.vendorEmail || vendorEmailByName.get(norm(s.vendor)) || '');
       if (e) { candidates.add(e); if (s.vendor && !nameByEmail.has(e)) nameByEmail.set(e, s.vendor); }
     }
-    for (const v of SERVICE_VENDORS) { const e = norm(v.email); if (e) { candidates.add(e); if (!nameByEmail.has(e)) nameByEmail.set(e, v.name); } }
+    for (const v of vendorCompanies) { const e = norm(v.email); if (e) { candidates.add(e); if (!nameByEmail.has(e)) nameByEmail.set(e, v.name); } }
 
     const users = Array.from(candidates).map((e) => {
       const staffU = staffByEmail.get(e);

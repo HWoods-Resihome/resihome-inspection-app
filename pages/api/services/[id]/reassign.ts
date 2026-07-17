@@ -9,7 +9,6 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
-import { SERVICE_VENDORS } from '@/lib/services/vendors';
 import { fetchApprovedVendorCompanies } from '@/lib/hubspot';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
@@ -27,13 +26,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!id) return res.status(400).json({ error: 'Missing service id' });
 
   const vendorName = String((req.body || {}).vendorName || '').trim();
-  // Resolve against the live approved Companies list first (name → notification
-  // email), falling back to the interim registry.
+  // Resolve against the live approved Companies list (name → notification email).
   const companies = await fetchApprovedVendorCompanies().catch(() => []);
   const hit = companies.find((v) => v.name.trim().toLowerCase() === vendorName.toLowerCase());
-  const vendor: { name: string; email: string } | undefined = hit
-    ? { name: hit.name, email: hit.email }
-    : SERVICE_VENDORS.find((v) => v.name === vendorName);
+  const vendor: { name: string; email: string } | undefined = hit ? { name: hit.name, email: hit.email } : undefined;
   if (!vendor) return res.status(400).json({ error: 'Unknown vendor.' });
 
   try {

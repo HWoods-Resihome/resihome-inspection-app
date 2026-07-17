@@ -26,7 +26,6 @@ import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { DEFAULT_GRASS_TIERS } from './grassPricing';
 import { buildRotationState, pickVendor } from './rotation';
-import { vendorEmail } from './vendors';
 import { notifyServiceAssigned } from '@/lib/notifications/triggers';
 import { appBaseUrl } from '@/lib/notifications/send';
 
@@ -252,7 +251,7 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
       const companies = await fetchApprovedVendorCompanies().catch(() => []);
       _vendorEmailByName = new Map(companies.map((c) => [c.name.trim().toLowerCase(), c.email]));
     }
-    return _vendorEmailByName.get(n.toLowerCase()) || vendorEmail(n) || '';
+    return _vendorEmailByName.get(n.toLowerCase()) || '';
   };
 
   const result: GenerateResult = {

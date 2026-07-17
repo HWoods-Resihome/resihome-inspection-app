@@ -13,7 +13,6 @@ import { MultiFilter } from '@/components/MultiFilter';
 import { DatePicker } from '@/components/DatePicker';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
-import { DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
 import { searchServiceRuleRecords, readServiceTaxonomy, readServiceWorkOrderKeys } from '@/lib/hubspot';
 import { isViewingAsVendor } from '@/lib/services/viewAs';
 
@@ -192,7 +191,7 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'landscaping', subtype: 'cut', petStations: false, scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'),
+    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [
       { id: 11, unit: 'weeks', interval: '2', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9], dueDays: '4' },
@@ -205,7 +204,7 @@ const SEED: Rule[] = [
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'),
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dueDays: '4' }],
     initialDueDays: '5', skipMonths: [],
@@ -219,7 +218,7 @@ const SEED: Rule[] = [
     // Deal Stage carried no generator logic; enroll on Property Status until an
     // event trigger is actually built.)
     id: 3, name: 'ATL Move-In Cleans', active: true, worktype: 'cleaning', subtype: 'move_in_clean', petStations: false, scope: 'property',
-    portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('cleaning', 'move_in_clean'),
+    portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', vendors: [], description: descriptionFor('cleaning', 'move_in_clean'),
     recurring: false,
     cadences: [],
     initialDueDays: '2', skipMonths: [],
