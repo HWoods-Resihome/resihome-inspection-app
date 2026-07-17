@@ -327,14 +327,13 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
               </div>
             </div>
             <div className="flex items-center gap-1.5 whitespace-nowrap">
-              {/* Calendar/map + the Inspections↔Services switcher are internal-only:
-                  a vendor is services-only and never sees inspections. */}
-              {!isVendor && (
-                <Link href="/services/calendar" aria-label="Calendar" title="Calendar &amp; map"
-                  className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors">
-                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                </Link>
-              )}
+              {/* Calendar/map — available to everyone (vendors see their own
+                  services on it). The Inspections↔Services switcher stays internal
+                  only, since a vendor is services-only. */}
+              <Link href="/services/calendar" aria-label="Calendar" title="Calendar &amp; map"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+              </Link>
               {!isVendor && (
                 <div className="relative">
                   <button type="button" onClick={() => setMenuOpen((o) => !o)} aria-label="Switch app" aria-expanded={menuOpen}

@@ -5,8 +5,8 @@ import dynamic from 'next/dynamic';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { servicesEnabled } from '@/lib/servicesAccess';
-import { resolveServiceViewer, scopeServices } from '@/lib/services/scope';
+import { scopeServices } from '@/lib/services/scope';
+import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
 import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
@@ -21,12 +21,12 @@ const ServicesMap = dynamic(() => import('@/components/ServicesMap'), {
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
-  const ok = await servicesEnabled(session?.email).catch(() => false);
+  const ok = await servicesViewerAllowed(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   const real = await searchServiceWorkOrders().catch(() => null);
   // Scope to the viewer: internal admins see all; a vendor (real login OR an
   // internal "View as Vendor" preview) only ever RECEIVES their own services.
-  const viewer = resolveServiceViewer(session?.email, ctx.req);
+  const viewer = await resolveServiceViewerAsync(session, ctx.req);
   const services = scopeServices(real ?? SAMPLE_SERVICES, viewer);
   return { props: { canSeeAll: viewer.canSeeAll, services, live: !!real } };
 };
