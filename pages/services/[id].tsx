@@ -190,6 +190,13 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
   );
 }
 
+// Format an ISO date (YYYY-MM-DD) as M-D-YY (e.g. 2026-07-12 → 7-12-26); any
+// non-date string passes through unchanged. Used for date answer values.
+function mdyIfDate(v: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec((v || '').trim());
+  return m ? `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}` : v;
+}
+
 function PhotoGrid({ label, urls, onOpen }: { label: string; urls: string[]; onOpen: (index: number) => void }) {
   if (!urls.length) return null;
   return (
@@ -1386,26 +1393,15 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                       {form.map((q) => {
                         if (svc.answers[q.id] == null || svc.answers[q.id] === '') return null;
                         const note = String(svc.answers[`${q.id}__note`] || '');
-                        const photos: string[] = Array.isArray(svc.answers[`${q.id}__photos`]) ? svc.answers[`${q.id}__photos`] : [];
                         return (
                           <div key={q.id} className="text-[13px]">
                             <div className="flex gap-2">
                               <dt className="text-gray-500 flex-1">{q.label}</dt>
                               <dd className="text-ink font-semibold text-right">
-                                {Array.isArray(svc.answers[q.id]) ? svc.answers[q.id].join(', ') : String(svc.answers[q.id])}
+                                {Array.isArray(svc.answers[q.id]) ? svc.answers[q.id].map((x: any) => mdyIfDate(String(x))).join(', ') : mdyIfDate(String(svc.answers[q.id]))}
                                 {note && <span className="block font-normal text-gray-500">{note}</span>}
                               </dd>
                             </div>
-                            {photos.length > 0 && (
-                              <div className="flex flex-wrap gap-2 mt-1.5">
-                                {photos.map((u, i) => (
-                                  <button key={`${u}-${i}`} type="button" onClick={() => setLightbox({ groupId: `q:${q.id}`, index: i })}
-                                    className="w-20 h-20 rounded-lg overflow-hidden border border-gray-300 bg-gray-100 cursor-zoom-in">
-                                    <PhotoThumb url={u} alt={`${q.label} ${i + 1}`} className="w-full h-full object-cover" />
-                                  </button>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         );
                       })}
@@ -1418,7 +1414,13 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   {!svc.isBidItem && <PhotoGrid label="After photos" urls={svc.after} onOpen={(i) => setLightbox({ groupId: 'after', index: i })} />}
                   {!svc.isBidItem && <PhotoGrid label="Pet station — before" urls={svc.petBefore} onOpen={(i) => setLightbox({ groupId: 'petBefore', index: i })} />}
                   {!svc.isBidItem && <PhotoGrid label="Pet station — after" urls={svc.petAfter} onOpen={(i) => setLightbox({ groupId: 'petAfter', index: i })} />}
-                  {!svc.before.length && !svc.after.length && !svc.petBefore.length && !svc.petAfter.length && <div className="text-[13px] text-gray-400">No photos on this service.</div>}
+                  {/* Per-question answer photos as their own labeled sections in the
+                      unified gallery — same tile size + full lightbox navigation. */}
+                  {form.map((q) => {
+                    const ph: string[] = Array.isArray(svc.answers[`${q.id}__photos`]) ? svc.answers[`${q.id}__photos`] : [];
+                    return ph.length ? <PhotoGrid key={q.id} label={q.label} urls={ph} onOpen={(i) => setLightbox({ groupId: `q:${q.id}`, index: i })} /> : null;
+                  })}
+                  {gallery.groups.length === 0 && <div className="text-[13px] text-gray-400">No photos on this service.</div>}
                 </CollapsibleSection>
 
                 {costDetail}
