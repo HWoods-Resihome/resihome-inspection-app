@@ -1768,17 +1768,17 @@ export async function deleteServiceRuleRecord(id: string): Promise<boolean> {
 
 /** Existing Service Work Order (enrollment_key, status) pairs — for generation dedup.
  *  Null when not configured. */
-export async function readServiceWorkOrderKeys(): Promise<{ key: string; status: string }[] | null> {
+export async function readServiceWorkOrderKeys(): Promise<{ key: string; status: string; vendor: string }[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
   try {
-    const out: { key: string; status: string }[] = [];
+    const out: { key: string; status: string; vendor: string }[] = [];
     let after: string | undefined;
     do {
       const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-        method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status'] }),
+        method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status', 'vendor_name'] }),
       });
-      for (const r of resp.results || []) out.push({ key: String(r.properties?.enrollment_key || ''), status: String(r.properties?.status || '') });
+      for (const r of resp.results || []) out.push({ key: String(r.properties?.enrollment_key || ''), status: String(r.properties?.status || ''), vendor: String(r.properties?.vendor_name || '') });
       after = resp.paging?.next?.after;
     } while (after);
     return out;

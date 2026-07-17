@@ -25,6 +25,7 @@ import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOr
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { DEFAULT_GRASS_TIERS } from './grassPricing';
+import { buildRotationState, pickVendor } from './rotation';
 import { vendorEmail } from './vendors';
 import { notifyServiceAssigned } from '@/lib/notifications/triggers';
 import { appBaseUrl } from '@/lib/notifications/send';
@@ -221,6 +222,11 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
   const genCountByKey = new Map<string, number>();
   for (const e of existing) if (e.key) genCountByKey.set(e.key, (genCountByKey.get(e.key) || 0) + 1);
 
+  // Vendor rotation state (equal-volume balance + sticky-per-address, §10.18).
+  // Built from every existing order's key/status/vendor; pickVendor reserves each
+  // assignment so multiple net-new enrollments in one run stay balanced.
+  const rotation = buildRotationState(existing, (s) => OPEN_STATUSES.has(s));
+
   // Community NAME → HubSpot id, resolved lazily (community grass-cut masters need
   // the id to look up their properties). Cached for the run.
   let _commIdMap: Map<string, string> | null = null;
@@ -255,7 +261,7 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
     items: [], notes: [
       'Property targets: live Property records in the rule’s portfolios/regions, filtered by the enrollment criteria (Property Status / RRQC), combined with the rule’s AND/OR. Community targets: one per selected community.',
       'Stop enforced: condition (Property Status / RRQC), date (rule stops on/after the date), and count (stop after N generated per property). A rule with a future start date stays dormant. Due = created date + the active cadence’s “Due within” days (else First Order Due, else +5).',
-      'v1: first assigned vendor used for every order (no rotation).',
+      'Vendor rotation: an address keeps its vendor for the enrollment’s life (sticky); net-new enrollments balance toward the rule vendor with the lowest open volume, ties by vendor order.',
       'One open order per (rule, target) at a time — the next generates after the current completes/cancels.',
     ],
   };
@@ -281,8 +287,7 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
 
     const worktype = (p.worktype || 'landscaping') as Worktype;
     const subtype = p.subtype || '';
-    const vendors = parseArr(p.vendors_json);
-    const vendor: string | null = vendors.length ? String(vendors[0]) : null;
+    const vendors = parseArr(p.vendors_json).map(String);
     // Due window: the cadence covering the current month sets its own "Due within
     // N days"; fall back to the rule's First Order Due, then 5. Each cadence can
     // define a different completion window (e.g. cut every 10 days, due 4 later).
@@ -299,9 +304,14 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
 
     for (const t of await targetsForRule(p)) {
       const enrollmentKey = `gen:${ruleId}:${t.id}`;
-      const base = {
+      // Preview label on skips shows this address's sticky vendor (if any); the real
+      // reserved assignment is picked once we commit to creating (below).
+      const base: {
+        ruleId: string; ruleName: string; target: string; worktype: string; subtype: string;
+        dueDate: string; vendor: string | null; enrollmentKey: string;
+      } = {
         ruleId, ruleName: p.rule_name || 'Rule', target: t.address, worktype, subtype,
-        dueDate, vendor, enrollmentKey,
+        dueDate, vendor: rotation.stickyByKey.get(enrollmentKey) ?? null, enrollmentKey,
       };
       // Stop-after-N: this target has already generated its cap → stop.
       if (stopCountMode && Number.isFinite(stopCount) && stopCount >= 1 && (genCountByKey.get(enrollmentKey) || 0) >= stopCount) {
@@ -331,6 +341,13 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         if (!eligibleIds.length) { result.items.push({ ...base, action: 'skip-open' }); result.skippedExisting++; continue; }
         result.masterCoverage = eligibleIds.length;   // for the single-rule "would create" preview
       }
+
+      // Commit point — we will create (or preview) one order for this target. Pick
+      // and RESERVE the vendor now (sticky-per-address, else equal-volume balance)
+      // so the dry-run preview and the apply path agree and same-run net-new
+      // enrollments spread across the rule's vendors.
+      const vendor = pickVendor(vendors, enrollmentKey, rotation);
+      base.vendor = vendor;
 
       if (!apply) {
         result.wouldCreate++;
