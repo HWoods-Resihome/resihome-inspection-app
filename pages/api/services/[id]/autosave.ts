@@ -20,11 +20,13 @@ import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services
 import { serviceVisibleTo } from '@/lib/services/scope';
 import type { ServiceRecord } from '@/lib/services/model';
 import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
+import { isAllowedPhotoHost } from '@/lib/safeProxyFetch';
 
 const EDITABLE = new Set(['', 'estimated', 'assigned']);
-// Only ever store hosted URLs (a blob: draft is dead after a reload).
+// Only ever store https URLs on an allowed photo host (a blob: draft is dead after
+// a reload; a non-allowlisted host would be an SSRF vector for the PDF/AI fetchers).
 const cleanUrls = (v: unknown): string[] =>
-  Array.isArray(v) ? v.map((u) => String(u || '').trim()).filter((u) => /^https?:\/\//i.test(u.split('#')[0])) : [];
+  Array.isArray(v) ? v.map((u) => String(u || '').trim()).filter((u) => isAllowedPhotoHost(u)) : [];
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }

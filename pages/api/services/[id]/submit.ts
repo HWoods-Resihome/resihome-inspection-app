@@ -19,13 +19,17 @@ import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
 import { easternTodayISO } from '@/lib/services/time';
 import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
 import { DEFAULT_SERVICE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
+import { isAllowedPhotoHost } from '@/lib/safeProxyFetch';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
 // the review runs inline the moment the work order is submitted.
 export const config = { maxDuration: 120 };
 
+// Only accept https URLs on an allowed photo host. This is the write-time SSRF
+// guard: the completion PDF + AI review fetch these URLs server-side, so a crafted
+// URL (e.g. http://169.254.169.254/…) must never be stored on the record.
 const cleanUrls = (v: unknown): string[] =>
-  Array.isArray(v) ? v.map((u) => String(u || '').trim()).filter(Boolean) : [];
+  Array.isArray(v) ? v.map((u) => String(u || '').trim()).filter((u) => isAllowedPhotoHost(u)) : [];
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -39,18 +43,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ error: 'Missing service id' });
 
-  // Lock: a service that's already submitted/under review/completed/canceled can
-  // no longer be edited or re-submitted.
   const existing = await fetchServiceWorkOrder(id).catch(() => null);
+  // If we couldn't load the record (object not configured, not found, or a
+  // transient read failure) NEVER fall through to a blind write — the ownership
+  // and lock checks below both depend on reading it, so a null here could mean
+  // writing this vendor's answers onto another vendor's order. Return the preview
+  // contract instead (same shape as the not-configured path). Ownership + lock
+  // are therefore unconditional.
+  if (!existing) return res.status(200).json({ ok: true, preview: true });
   // Ownership: a vendor may only submit a work order assigned to THEM.
   const viewer = await resolveServiceViewerAsync(session, req);
-  if (!viewer.canSeeAll && existing && !serviceVisibleTo(
+  if (!viewer.canSeeAll && !serviceVisibleTo(
     { vendor: existing.props.vendor_name || null, vendorEmail: String(existing.props.vendor_email || '').trim() || null } as ServiceRecord,
     viewer,
   )) {
     return res.status(403).json({ error: 'Not authorized for this service.' });
   }
-  if (existing && ['submitted', 'review', 'completed', 'canceled'].includes(String(existing.props.status || ''))) {
+  // Lock: a service that's already submitted/under review/completed/canceled can
+  // no longer be edited or re-submitted.
+  if (['submitted', 'review', 'completed', 'canceled'].includes(String(existing.props.status || ''))) {
     return res.status(409).json({ error: `This service is ${existing.props.status} and can no longer be edited.` });
   }
 

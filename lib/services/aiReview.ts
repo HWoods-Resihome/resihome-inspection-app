@@ -11,6 +11,7 @@
  * (no unattended cron until validated). Analog of the inspection AI review.
  */
 import sharp from 'sharp';
+import { safeProxyFetch, readBodyCapped, isAllowedPhotoHost } from '@/lib/safeProxyFetch';
 import { searchServiceWorkOrdersByStatus, fetchServiceWorkOrder, patchServiceWorkOrder, readServiceAiChecks } from '@/lib/hubspot';
 import { recordServiceAudit } from './serviceAudit';
 import { recordAiUsage } from '@/lib/aiUsage';
@@ -40,9 +41,12 @@ function anthropicKey(): string {
 async function fetchPhotoBlock(url: string): Promise<any | null> {
   try {
     const clean = url.split('#')[0];
-    const r = await fetch(clean);
+    // SSRF guard (same as the PDF path): allowed photo hosts only, fetched via
+    // safeProxyFetch so a stored URL can't pull an internal address into the model.
+    if (!isAllowedPhotoHost(clean)) return null;
+    const r = await safeProxyFetch(clean);
     if (!r.ok) return null;
-    const buf = Buffer.from(await r.arrayBuffer());
+    const buf = await readBodyCapped(r, 40 * 1024 * 1024);
     const jpeg = await sharp(buf).rotate().resize(PHOTO_EDGE, PHOTO_EDGE, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
     return { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } };
   } catch { return null; }

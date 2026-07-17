@@ -7,7 +7,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
-import { safeProxyFetch, readBodyCapped, ProxyFetchError } from '@/lib/safeProxyFetch';
+import { safeProxyFetch, readBodyCapped, ProxyFetchError, ALLOWED_PHOTO_HOST_RE } from '@/lib/safeProxyFetch';
 
 // Hard ceiling on a proxied image so a huge upstream can't OOM the function.
 const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
@@ -27,7 +27,9 @@ const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
 // NOT loosen to `hubspot[a-z0-9-]*`, which also matches attacker-registerable
 // domains like hubspotx.com / hubspot-evil.com and would turn this UNAUTHENTICATED
 // proxy into an open proxy serving attacker content from our own origin.
-const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent([0-9]+|-[a-z0-9-]+)?\.(net|com)|hubspot\.(com|net)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
+// The pinned pattern now lives in lib/safeProxyFetch (shared with write-time photo
+// URL validation and the server-side photo fetchers) so it can't drift.
+const ALLOWED_HOST_RE = ALLOWED_PHOTO_HOST_RE;
 
 export const config = { api: { responseLimit: false } };
 

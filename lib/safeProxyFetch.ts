@@ -135,3 +135,19 @@ export async function readBodyCapped(resp: Response, maxBytes: number): Promise<
   }
   return Buffer.concat(chunks);
 }
+
+// Host allowlist for USER-SUPPLIED photo URLs (Vercel Blob + the HubSpot file
+// host family + our own domains). Shared by /api/photo-proxy, write-time
+// validation (service submit/autosave), and the server-side photo fetchers (PDF
+// render, AI review). SECURITY: keep this pinned — do NOT loosen the hubspot
+// pattern to `hubspot[a-z0-9-]*`, which also matches attacker-registerable
+// domains (hubspotx.com / hubspot-evil.com).
+export const ALLOWED_PHOTO_HOST_RE = /(^|\.)(hubspotusercontent([0-9]+|-[a-z0-9-]+)?\.(net|com)|hubspot\.(com|net)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
+
+/** True if `urlString` is an https URL on an allowed photo host (fragment ignored). */
+export function isAllowedPhotoHost(urlString: string): boolean {
+  try {
+    const u = new URL(String(urlString || '').split('#')[0]);
+    return u.protocol === 'https:' && ALLOWED_PHOTO_HOST_RE.test(u.hostname);
+  } catch { return false; }
+}

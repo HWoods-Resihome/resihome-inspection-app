@@ -11,6 +11,7 @@ import { fetchServiceWorkOrder, readServiceForms, findServiceBidChildren } from 
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { DEFAULT_SERVICE_FORMS, formKey } from '@/lib/services/serviceForms';
 import { ServicePdf, type ServicePdfData } from '@/lib/servicePdf';
+import { safeProxyFetch, readBodyCapped, isAllowedPhotoHost } from '@/lib/safeProxyFetch';
 
 const money = (v: any) => { const n = Number(v); return Number.isFinite(n) ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''; };
 const splitUrls = (v: any): string[] => String(v || '').split(/[\n,]+/).map((x) => x.trim()).filter((x) => /^https?:\/\//i.test(x.split('#')[0]));
@@ -18,9 +19,14 @@ const normDate = (v: any): string => { const t = String(v ?? '').trim(); if (!t)
 
 async function toDataUri(url: string): Promise<string | null> {
   try {
-    const r = await fetch(url.split('#')[0]);
+    const clean = url.split('#')[0];
+    // SSRF guard: only allowed photo hosts, fetched via safeProxyFetch (validates
+    // every redirect hop resolves to a public IP) so a stored URL can't pull an
+    // internal/metadata address into the admin-viewed PDF.
+    if (!isAllowedPhotoHost(clean)) return null;
+    const r = await safeProxyFetch(clean);
     if (!r.ok) return null;
-    const buf = Buffer.from(await r.arrayBuffer());
+    const buf = await readBodyCapped(r, 40 * 1024 * 1024);
     const jpeg = await sharp(buf).rotate().resize(360, 360, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 62 }).toBuffer();
     return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
   } catch { return null; }
