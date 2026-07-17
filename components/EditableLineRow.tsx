@@ -27,7 +27,7 @@ import { WheelPicker } from '@/components/WheelPicker';
 import { ListPicker } from '@/components/ListPicker';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { formatMoney, formatQty } from '@/lib/photoUpload';
-import { thumbImageSrc } from '@/lib/photoDisplay';
+import { PhotoThumb } from '@/components/PhotoThumb';
 import { isVideoEntry } from '@/lib/media';
 import { VENDORS, vendorPillStyle, vendorPillLabel, isInternalResolution, defaultVendorForItem, isEvictionVendor, evictionTimingOf, evictionVendorFor, baseVendorLabel } from '@/lib/vendors';
 import { setNativeKeyboardAccessoryBarVisible } from '@/lib/nativeBridge';
@@ -249,14 +249,14 @@ function PhotoChipRow({
       </div>
       <div className="flex gap-1.5 flex-wrap items-center">
         {urls.map((u, i) => (
-          <span key={`${u}-${i}`} className="relative inline-block">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={thumbImageSrc(u)}
+          <span
+            key={`${u}-${i}`}
+            className="relative inline-block"
+            onClick={onOpen ? (e) => { e.stopPropagation(); onOpen(i); } : undefined}
+          >
+            <PhotoThumb
+              url={u}
               alt=""
-              loading="lazy"
-              decoding="async"
-              onClick={onOpen ? (e) => { e.stopPropagation(); onOpen(i); } : undefined}
               className={`w-12 h-12 object-cover rounded border border-gray-200 ${onOpen ? 'cursor-pointer' : ''}`}
               title={onOpen ? (isVideoEntry(u) ? 'Tap to play' : 'Tap to view') : undefined}
             />
@@ -1549,14 +1549,14 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
               {(line.photoUrls?.length ?? 0) > 0 && (
                 <div className="mt-1.5 flex gap-1 flex-wrap">
                   {line.photoUrls.map((u, i) => (
-                    <span key={`${u}-${i}`} className="relative inline-block">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={thumbImageSrc(u)}
+                    <span
+                      key={`${u}-${i}`}
+                      className="relative inline-block"
+                      onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
+                    >
+                      <PhotoThumb
+                        url={u}
                         alt=""
-                        loading="lazy"
-                        decoding="async"
-                        onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
                         className="w-10 h-10 object-cover rounded border border-gray-200 cursor-pointer"
                         title={isVideoEntry(u) ? 'Tap to play' : 'Tap to view / mark up'}
                       />
@@ -1692,14 +1692,14 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
         {(line.photoUrls?.length ?? 0) > 0 && (
           <div className="mt-1.5 flex gap-1 flex-wrap">
             {line.photoUrls.map((u, i) => (
-              <span key={`${u}-${i}`} className="relative inline-block">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={thumbImageSrc(u)}
+              <span
+                key={`${u}-${i}`}
+                className="relative inline-block"
+                onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
+              >
+                <PhotoThumb
+                  url={u}
                   alt=""
-                  loading="lazy"
-                  decoding="async"
-                  onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
                   className="w-10 h-10 object-cover rounded border border-gray-200 cursor-pointer"
                   title={isVideoEntry(u) ? 'Click to play' : 'Click to view / mark up'}
                 />

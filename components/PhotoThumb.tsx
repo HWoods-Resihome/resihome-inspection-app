@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { thumbImageSrc, displayImageSrc } from '@/lib/photoDisplay';
+import { acquireImgSlot, releaseImgSlot } from '@/lib/imgLoadGate';
 
 /**
  * A small photo tile that SELF-HEALS a failed thumbnail instead of leaving the
@@ -48,18 +49,62 @@ export function PhotoThumb({
   const [seenUrl, setSeenUrl] = useState(url);
   if (url !== seenUrl) { setSeenUrl(url); setStage(0); setLoaded(false); }
 
-  const src = stage >= 2 ? '' : (stage === 0 ? thumbImageSrc(url, width) : displayImageSrc(url));
+  const wantSrc = stage >= 2 ? '' : (stage === 0 ? thumbImageSrc(url, width) : displayImageSrc(url));
+  // Local drafts (blob:/data:) load instantly and can't be proxied — never gate
+  // them; only remote sources (the /api/photo-proxy burst) need throttling.
+  const isLocal = wantSrc.startsWith('blob:') || wantSrc.startsWith('data:');
+
+  // Start loading only once the tile is at/near the viewport. A Scope Rate Card
+  // mounts 100+ tiles at once; without this every one would queue for a load slot
+  // up front and off-screen tiles would compete with visible ones. Intersection
+  // Observer keeps the concurrency gate fed with what the user can actually see.
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    if (isLocal) { setInView(true); return; }
+    const el = wrapRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') { setInView(true); return; }
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) { setInView(true); io.disconnect(); }
+    }, { rootMargin: '300px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [isLocal]);
+
+  // Gate the actual <img src> through the global concurrency limiter so a
+  // scrolled-in burst can't overwhelm the proxy (rate limit / bot challenge) or
+  // OOM-flood the WebView. Acquire a slot before loading a remote source; release
+  // it EXACTLY once — on load, on error, or on teardown/source-change.
+  const [gatedSrc, setGatedSrc] = useState('');
+  const heldRef = useRef(false);
+  const release = () => { if (heldRef.current) { heldRef.current = false; releaseImgSlot(); } };
+  useEffect(() => {
+    if (!wantSrc) { setGatedSrc(''); return; }
+    if (isLocal) { setGatedSrc(wantSrc); return; }   // local: no slot needed
+    if (!inView) { setGatedSrc(''); return; }         // wait until near viewport
+    let cancelled = false;
+    setGatedSrc('');
+    acquireImgSlot().then(() => {
+      if (cancelled) { releaseImgSlot(); return; }     // unmounted while queued
+      heldRef.current = true;
+      setGatedSrc(wantSrc);
+    });
+    return () => { cancelled = true; release(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantSrc, isLocal, inView]);
 
   // Self-heal a STALL: the proxied thumbnail resize (sharp) can hang on a cold
   // instance / large original, and a bare <img> that never fires load OR error
-  // leaves a permanent grey box. If the current source hasn't loaded within a few
-  // seconds, advance the fallback chain (proxy → direct url) so a real pixel
-  // arrives instead of staying stuck.
+  // leaves a permanent grey box. Once we're actually loading (a slot is held and
+  // gatedSrc is set), if the source hasn't loaded within a few seconds advance
+  // the fallback chain (proxy → direct url) so a real pixel arrives. The timer
+  // starts only after we hold a slot, so time spent queued never counts as a
+  // stall (which would wrongly cascade every tile to full-res).
   useEffect(() => {
-    if (loaded || stage >= 2 || !src) return;
-    const t = setTimeout(() => setStage((s) => s + 1), stage === 0 ? 4000 : 8000);
+    if (loaded || stage >= 2 || !gatedSrc) return;
+    const t = setTimeout(() => setStage((s) => s + 1), stage === 0 ? 6000 : 10000);
     return () => clearTimeout(t);
-  }, [src, stage, loaded]);
+  }, [gatedSrc, stage, loaded]);
   // The wrapper IS the tile (carries the caller's size/border/rounded classes)
   // and shows a neutral fill. The <img> sits on top but stays INVISIBLE until it
   // actually loads — so a still-loading OR failed source never paints the
@@ -67,21 +112,22 @@ export function PhotoThumb({
   // pixel arrives. On error we advance to the next source (and reset visibility).
   return (
     <span
+      ref={wrapRef}
       aria-hidden
       className={className}
       onClick={onClick}
       style={{ ...style, backgroundColor: '#f3f4f6', display: 'inline-block', overflow: 'hidden', position: 'relative' }}
     >
-      {src && (
+      {gatedSrc && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={src}
+          src={gatedSrc}
           alt={alt}
           title={title}
           loading={loading}
           decoding={decoding}
-          onLoad={() => setLoaded(true)}
-          onError={() => { setLoaded(false); setStage((s) => s + 1); }}
+          onLoad={() => { setLoaded(true); release(); }}
+          onError={() => { setLoaded(false); release(); setStage((s) => s + 1); }}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: loaded ? 1 : 0, transition: 'opacity 120ms' }}
         />
       )}
