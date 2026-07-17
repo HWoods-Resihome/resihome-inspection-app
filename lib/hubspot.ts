@@ -1734,6 +1734,9 @@ const SERVICE_DETAIL_PROPS = [
   'review_decision', 'review_notes', 'reviewed_by', 'reviewed_at',
   'before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls',
   'pet_after_photo_urls', 'answers_json', 'property_id_ref', 'community_id_ref', 'enrollment_key',
+  // Reference coordinates (property/community) — the geofence anchor the AI review
+  // compares each photo's burned-in capture GPS against.
+  'latitude', 'longitude',
   // Community grass-cut billing split (RECURRING_SERVICES_PLAN.md).
   'for_billing', 'master_service_id', 'covered_property_ids', 'covered_property_count', 'per_property_rate', 'split_at',
   'hs_createdate',

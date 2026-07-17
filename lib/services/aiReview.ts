@@ -20,7 +20,13 @@ import { worktypeLabel, subtypeLabel, type Worktype } from './worktypes';
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-6';
 const MAX_PHOTOS = 8;
-const PHOTO_EDGE = 512;
+// 768 (was 512) so the burned-in evidence stamp — small bottom-left text carrying
+// the capture GPS/time the geofence check reads — stays legible after downscale.
+const PHOTO_EDGE = 768;
+// Geofence radius (m) — kept in sync with the camera's evidence-stamp proximity
+// threshold (lib/evidenceStamp PROXIMITY_THRESHOLD_M). Defined locally so this
+// server module never imports the browser/canvas stamp code.
+const PROXIMITY_THRESHOLD_M = Number(process.env.NEXT_PUBLIC_PROXIMITY_THRESHOLD_M) || 250;
 
 const splitUrls = (v: any): string[] =>
   String(v || '').split(/[\n,]+/).map((s) => s.trim()).filter((s) => /^https?:\/\//i.test(s.split('#')[0]));
@@ -37,7 +43,7 @@ async function fetchPhotoBlock(url: string): Promise<any | null> {
     const r = await fetch(clean);
     if (!r.ok) return null;
     const buf = Buffer.from(await r.arrayBuffer());
-    const jpeg = await sharp(buf).rotate().resize(PHOTO_EDGE, PHOTO_EDGE, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 62 }).toBuffer();
+    const jpeg = await sharp(buf).rotate().resize(PHOTO_EDGE, PHOTO_EDGE, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
     return { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } };
   } catch { return null; }
 }
@@ -52,7 +58,7 @@ function checksFor(all: AiCheck[], worktype: string, subtype: string): string[] 
     .map((c) => c.check);
 }
 
-export interface ServiceVerdict { verdict: 'clean' | 'needs_review'; notes: string; issues: string[]; }
+export interface ServiceVerdict { verdict: 'clean' | 'needs_review'; geofenceOk: boolean; notes: string; issues: string[]; }
 
 /** Run the AI review for one submitted order's evidence, against the given check set. */
 export async function reviewOne(order: { id: string; props: Record<string, any> }, allChecks: AiCheck[] = SAMPLE_AI_CHECKS): Promise<ServiceVerdict> {
@@ -80,20 +86,42 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
     photoContent.push(blocks[i]);
   }
 
+  // Structured location/time metadata the model can reason over. Per-photo GPS is
+  // BURNED INTO each image (bottom-left evidence stamp: address, local capture time,
+  // GPS lat/long, and a ✓/✗ proximity mark where ✓ = the capture was within
+  // ~${PROXIMITY_THRESHOLD_M}m of the property). The service's reference coordinates
+  // and submit time are given here as text so the geofence/timing checks can evaluate.
+  const refLat = Number(p.latitude); const refLng = Number(p.longitude);
+  const hasRef = Number.isFinite(refLat) && Number.isFinite(refLng);
+  const submittedAt = String(p.submitted_at || p.hs_lastmodifieddate || '').trim();
+  const metaLines = [
+    hasRef ? `Property reference location (geofence anchor): ${refLat.toFixed(6)}, ${refLng.toFixed(6)}` : 'Property reference location: not on file (rely on the burned-in stamp + visible surroundings).',
+    `Geofence radius: ${PROXIMITY_THRESHOLD_M} m (a capture GPS within this of the reference = on-site).`,
+    submittedAt ? `Submitted at: ${submittedAt}` : null,
+    `Address on file: ${String(p.address_snapshot || p.service_name || '').trim() || '(none)'}`,
+  ].filter(Boolean).join('\n');
+
   const system =
     `You are the ResiHome field-services QC reviewer. A vendor submitted a completed service; ` +
-    `decide if the evidence is CLEAN (auto-approve) or NEEDS REVIEW (route to a human). Evaluate ONLY against the checks below — ` +
-    `every check matters equally. Judge from the visible evidence and the vendor's answers. If a check depends on metadata you cannot ` +
-    `see (exact photo timestamps, GPS), do not fail solely for that — note it, and only flag it when the visible evidence looks suspicious ` +
-    `(e.g. before/after clearly identical, wrong property, work not actually done). Be fair but protect quality.\n\n` +
+    `decide if the evidence is CLEAN (auto-approve) or NEEDS REVIEW (route to a human). Evaluate against the checks below — ` +
+    `every check matters equally — plus location/timing integrity. Judge from the visible evidence, the vendor's answers, and the ` +
+    `structured metadata.\n\n` +
+    `LOCATION & TIMING: every photo has a burned-in evidence stamp (bottom-left) showing the address, local capture time, GPS ` +
+    `coordinates, and a ✓ or ✗ proximity mark. ✓ = the capture GPS was within ~${PROXIMITY_THRESHOLD_M}m of the property (on-site); ` +
+    `✗ = it was outside that radius. READ these stamps. Treat as a GEOFENCE CONCERN (set geofence_ok=false) any of: an AFTER photo ` +
+    `stamped ✗, an AFTER photo with no stamp/GPS at all, capture GPS that plainly doesn't match the address on file, or capture times ` +
+    `that are implausible for the work (e.g. all photos seconds apart, or before/after identical). A geofence concern must route to ` +
+    `NEEDS REVIEW. Do NOT fault the vendor merely for a low-accuracy fix or a single borderline reading — this is a review signal, not ` +
+    `an automatic rejection, and photo capture itself is always allowed. Be fair but protect quality.\n\n` +
     `Service: ${worktypeLabel(worktype)} · ${subtypeLabel(worktype, subtype)}\n` +
     `CHECKS:\n${checks.length ? checks.map((c, i) => `${i + 1}. ${c}`).join('\n') : '(no specific checks — assess general completeness and that before/after evidence supports the work)'}`;
 
   const summary =
+    `SERVICE METADATA:\n${metaLines}\n\n` +
     `Answers submitted by the vendor:\n${Object.keys(answers).length ? JSON.stringify(answers, null, 2) : '(none)'}\n\n` +
     `Photo counts — before: ${beforeUrls.length}, after: ${afterUrls.length}` +
     (petBefore.length || petAfter.length ? `, pet before: ${petBefore.length}, pet after: ${petAfter.length}` : '') +
-    `.\n${photoContent.length ? 'Photos follow.' : 'No usable photos were available — that itself is a concern for most services.'}\n\n` +
+    `.\n${photoContent.length ? 'Photos follow (read each one’s burned-in evidence stamp for GPS/time).' : 'No usable photos were available — that itself is a concern for most services.'}\n\n` +
     `Return your decision via the report_verdict tool.`;
 
   const tool = {
@@ -103,10 +131,11 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
       type: 'object',
       properties: {
         verdict: { type: 'string', enum: ['clean', 'needs_review'], description: 'clean = auto-approve to Completed; needs_review = route to a human.' },
+        geofence_ok: { type: 'boolean', description: 'false when the photo evidence stamps show an off-site (✗) or missing capture GPS, a location that does not match the address, or implausible capture timing. A false value must route to needs_review.' },
         notes: { type: 'string', description: 'One or two plain sentences explaining the decision for the coordinator.' },
-        issues: { type: 'array', items: { type: 'string' }, description: 'Short bullet list of specific concerns (empty when clean).' },
+        issues: { type: 'array', items: { type: 'string' }, description: 'Short bullet list of specific concerns (empty when clean). Prefix any location/timing concern with "Geofence:".' },
       },
-      required: ['verdict', 'notes'],
+      required: ['verdict', 'geofence_ok', 'notes'],
     },
   };
 
@@ -128,8 +157,12 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
   } catch { /* noop */ }
   const block = (data?.content || []).find((c: any) => c.type === 'tool_use' && c.name === 'report_verdict');
   const input = block?.input || {};
+  // A geofence concern is a hard router to review — never auto-complete an order
+  // whose location/timing evidence is suspect, even if the work looks done.
+  const geofenceOk = input.geofence_ok !== false;
   const verdict: ServiceVerdict = {
-    verdict: input.verdict === 'clean' ? 'clean' : 'needs_review',
+    verdict: (input.verdict === 'clean' && geofenceOk) ? 'clean' : 'needs_review',
+    geofenceOk,
     notes: String(input.notes || '').slice(0, 900),
     issues: Array.isArray(input.issues) ? input.issues.map((s: any) => String(s)).slice(0, 12) : [],
   };
@@ -188,10 +221,11 @@ export async function runServiceAiReview(apply: boolean, todayISO: string, onlyI
       if (clean) result.completed++; else result.routedToReview++;
 
       if (apply) {
+        const geoPrefix = v.geofenceOk ? '' : '⚠ Geofence: photo location/timing evidence is off-site or missing — verify before completing.\n\n';
         const notes = [v.notes, ...(v.issues.length ? ['Issues:', ...v.issues.map((i) => `• ${i}`)] : [])].join('\n');
         const props: Record<string, any> = {
           ai_verdict: v.verdict === 'clean' ? 'clean' : 'needs_review',
-          ai_notes: (isMasterCut && v.verdict === 'clean' ? 'Community grass-cut master — routed to review to confirm covered homes and split into per-property billing.\n\n' : '').concat(notes).slice(0, 2000),
+          ai_notes: geoPrefix.concat(isMasterCut && v.verdict === 'clean' ? 'Community grass-cut master — routed to review to confirm covered homes and split into per-property billing.\n\n' : '').concat(notes).slice(0, 2000),
           status: clean ? 'completed' : 'review',
         };
         if (clean) {
@@ -202,8 +236,8 @@ export async function runServiceAiReview(apply: boolean, todayISO: string, onlyI
         await patchServiceWorkOrder(order.id, props);
         void recordServiceAudit({
           serviceId: order.id, action: 'ai_review', actorName: 'AI Review',
-          detail: clean ? 'AI review clean → Completed' : 'AI review flagged → Review',
-          meta: { verdict: v.verdict },
+          detail: clean ? 'AI review clean → Completed' : `AI review flagged → Review${v.geofenceOk ? '' : ' (geofence)'}`,
+          meta: { verdict: v.verdict, geofenceOk: v.geofenceOk },
         });
       }
       result.items.push({ id: order.id, service, verdict: v.verdict, notes: v.notes, issues: v.issues, action: apply ? (clean ? 'completed' : 'review') : (clean ? 'would-complete' : 'would-review') });
