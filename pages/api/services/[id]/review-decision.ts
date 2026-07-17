@@ -49,6 +49,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rec = await fetchServiceWorkOrder(id);
     if (!rec) return res.status(200).json({ ok: true, preview: true }); // not configured / not found
     const p = rec.props;
+    // Idempotency + double-completion guard: a decision may only be applied to an
+    // order awaiting review ('review', or 'submitted' for a stuck-AI manual rescue).
+    // Without this a double-POST re-completes, re-emails, and can re-split a
+    // community master into duplicate billing lines.
+    const curStatus = String(p.status || '');
+    if (curStatus !== 'review' && curStatus !== 'submitted') {
+      return res.status(409).json({ error: `This service is ${curStatus || 'not awaiting review'} and can no longer be decided.` });
+    }
     const originalVendorCost = Number(p.vendor_cost);
     const now = new Date().toISOString();
 

@@ -237,7 +237,10 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
   // Assigned-vendor emails, collected across all creates and awaited at the end
   // (only on apply — a dry-run creates nothing). appBaseUrl() with no request
   // uses APP_PUBLIC_URL (this runs in the nightly cron).
-  const notifyPromises: Promise<void>[] = [];
+  // Deferred as THUNKS (not started promises) so the sends run through a
+  // concurrency cap at the end — a big run creating N orders must not fire N
+  // simultaneous Gmail sends (rate limits) all at once.
+  const notifyThunks: (() => Promise<void>)[] = [];
   const notifyBase = appBaseUrl();
 
   // Resolve an assigned vendor's notification email from the live approved
@@ -409,11 +412,13 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         openKeys.add(enrollmentKey); // guard against duplicate targets within a single run
         result.created++;
         result.items.push({ ...base, action: 'created', recordId: recordId || undefined });
-        // Email the assigned vendor (best-effort, collected + awaited at the end).
+        // Email the assigned vendor (best-effort, throttled + awaited at the end).
         if (recordId && vendor) {
-          notifyPromises.push(notifyServiceAssigned({
-            serviceId: recordId, vendorEmail: await resolveVendorEmail(vendor), vendorName: vendor,
-            address: t.address, locality: t.locality, worktypeLabel: wtLabel(worktype), subtypeLabel: subLabel(worktype, subtype),
+          const vEmail = await resolveVendorEmail(vendor);
+          const rid = recordId; const vName = vendor; const addr = t.address; const loc = t.locality;
+          notifyThunks.push(() => notifyServiceAssigned({
+            serviceId: rid, vendorEmail: vEmail, vendorName: vName,
+            address: addr, locality: loc, worktypeLabel: wtLabel(worktype), subtypeLabel: subLabel(worktype, subtype),
             dueDate, baseUrl: notifyBase,
           }));
         }
@@ -424,6 +429,10 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
     }
   }
 
-  if (notifyPromises.length) await Promise.allSettled(notifyPromises);
+  // Throttled send: at most N in flight so a large run can't hit Gmail rate limits.
+  const EMAIL_CONCURRENCY = 5;
+  for (let i = 0; i < notifyThunks.length; i += EMAIL_CONCURRENCY) {
+    await Promise.allSettled(notifyThunks.slice(i, i + EMAIL_CONCURRENCY).map((fn) => fn()));
+  }
   return result;
 }
