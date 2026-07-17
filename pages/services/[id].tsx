@@ -69,7 +69,10 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   // "View as Vendor" (cookie) forces the external vendor experience app-wide, so
   // internal previewers see exactly what a vendor sees on the record too.
-  const asVendor = isViewingAsVendor(ctx.req);
+  // A real vendor login OR an internal "View as Vendor" preview both count as
+  // the vendor experience — a vendor is NEVER internal (no settings gear, no
+  // client pricing), even on an internal-domain email.
+  const asVendor = isViewingAsVendor(ctx.req) || !!session?.vendor;
   const isInternal = isInternalEmail(session?.email) && !asVendor;
   const id = String(ctx.params?.id || '');
 
@@ -121,7 +124,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   // Vendor-ownership guard: a vendor (real login OR "View as Vendor" preview) may
   // only open a service assigned to them — a direct URL to someone else's service
   // bounces back to the list. Internal admins (canSeeAll) are unrestricted.
-  const viewer = await resolveServiceViewerAsync(session?.email, ctx.req);
+  const viewer = await resolveServiceViewerAsync(session, ctx.req);
   if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: svc.vendor, vendorEmail: svcVendorEmail } as SampleService, viewer)) {
     return { redirect: { destination: '/services', permanent: false } };
   }
@@ -608,15 +611,8 @@ const GRASS_TIER_BORDER: Record<'emerald' | 'amber' | 'rose', string> = {
 
 // One-line, work-type-specific reminder for the Photos section (shown as its
 // subtitle, like the Bid Item section).
-const photoGuidance = (worktype: string, subtype: string): string => {
-  if (worktype === 'landscaping' && subtype === 'cut') return 'Capture all 4 sides and the cut back yard.';
-  if (worktype === 'landscaping') return 'Show the completed work and that all clippings and debris were hauled off.';
-  if (worktype === 'cleaning') return 'Show your cleaning supplies on site, plus a clear before and after of each area.';
-  if (worktype === 'pools') return 'Show clear water, the equipment/skimmer baskets, and chemical test evidence.';
-  if (worktype === 'trash_removal') return 'Show the area before and after — everything removed and left clean.';
-  if (worktype === 'trip_fee') return 'Show you were on-site at the property (a timestamped exterior shot).';
-  return 'Take clear before and after photos of the work area.';
-};
+const photoGuidance = (_worktype: string, _subtype: string): string =>
+  'Show photo evidence of the before and after and the full service performed.';
 
 export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta, asVendor }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null; asVendor: boolean }) {
   const router = useRouter();

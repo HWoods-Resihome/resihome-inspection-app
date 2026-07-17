@@ -39,7 +39,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const existing = await fetchServiceWorkOrder(id).catch(() => null);
     if (!existing) return res.status(200).json({ ok: true, preview: true }); // not configured / not found
     // Ownership: a vendor may only draft a work order assigned to THEM.
-    const viewer = await resolveServiceViewerAsync(session?.email, req);
+    const viewer = await resolveServiceViewerAsync(session, req);
     if (!viewer.canSeeAll && !serviceVisibleTo(
       { vendor: existing.props.vendor_name || null, vendorEmail: String(existing.props.vendor_email || '').trim() || null } as SampleService,
       viewer,

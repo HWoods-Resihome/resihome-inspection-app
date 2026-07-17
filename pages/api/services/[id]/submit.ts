@@ -41,7 +41,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // no longer be edited or re-submitted.
   const existing = await fetchServiceWorkOrder(id).catch(() => null);
   // Ownership: a vendor may only submit a work order assigned to THEM.
-  const viewer = await resolveServiceViewerAsync(email, req);
+  const viewer = await resolveServiceViewerAsync(session, req);
   if (!viewer.canSeeAll && existing && !serviceVisibleTo(
     { vendor: existing.props.vendor_name || null, vendorEmail: String(existing.props.vendor_email || '').trim() || null } as SampleService,
     viewer,

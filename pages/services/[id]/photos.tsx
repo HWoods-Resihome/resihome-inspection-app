@@ -35,7 +35,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const p = rec.props;
   // Vendor-ownership guard (mirrors the service detail page): a vendor may only
   // view photos for a service assigned to them.
-  const viewer = await resolveServiceViewerAsync(session?.email, ctx.req);
+  const viewer = await resolveServiceViewerAsync(session, ctx.req);
   if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: p.vendor_name || null, vendorEmail: String(p.vendor_email || '').trim() || null } as SampleService, viewer)) {
     return { redirect: { destination: '/services', permanent: false } };
   }

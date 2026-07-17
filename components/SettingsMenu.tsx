@@ -17,7 +17,7 @@ import { clearCachedMe } from '@/lib/offlineCache';
 const rowCls =
   'w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100';
 
-export function SettingsMenu({ isAdmin, onOpen }: { isAdmin: boolean; onOpen?: () => void }) {
+export function SettingsMenu({ isAdmin, isVendor, onOpen }: { isAdmin: boolean; isVendor?: boolean; onOpen?: () => void }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [viewAsOpen, setViewAsOpen] = useState(false);
@@ -46,11 +46,14 @@ export function SettingsMenu({ isAdmin, onOpen }: { isAdmin: boolean; onOpen?: (
         <>
           <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
           <div className="absolute right-0 mt-1.5 z-50 w-56 rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 overflow-hidden py-1">
-            {/* Training guide — available to ALL users. Opens in-app. */}
-            <Link href="/guide" onClick={() => setOpen(false)} className={rowCls}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
-              Training Guide
-            </Link>
+            {/* Training guide — available to ALL non-vendor users. Opens in-app.
+                Vendors get a minimal menu: Notification Settings + Sign Out only. */}
+            {!isVendor && (
+              <Link href="/guide" onClick={() => setOpen(false)} className={rowCls}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
+                Training Guide
+              </Link>
+            )}
             {/* Notification Settings — every user manages their own email alerts. */}
             <Link href="/notifications" onClick={() => setOpen(false)} className={rowCls}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>

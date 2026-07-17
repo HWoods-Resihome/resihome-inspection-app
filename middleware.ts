@@ -132,7 +132,9 @@ function vendorPathAllowed(pathname: string): boolean {
     pathname === '/api/version' ||
     pathname.startsWith('/api/photo-proxy') ||
     // Vendors upload service before/after photos through the shared uploader.
-    pathname === '/api/upload'
+    pathname === '/api/upload' ||
+    // Vendors manage their own (services-only) notification settings.
+    pathname === '/notifications' || pathname.startsWith('/api/notifications')
   );
 }
 

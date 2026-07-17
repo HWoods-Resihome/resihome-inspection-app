@@ -34,13 +34,16 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const operational = (real ?? SAMPLE_SERVICES).filter((s) => !s.masterServiceId);
   // Scope to the viewer: a vendor (real login OR "View as Vendor" preview) only
   // ever RECEIVES their own services — never the whole operational list.
-  const viewer = await resolveServiceViewerAsync(session?.email, ctx.req);
+  const viewer = await resolveServiceViewerAsync(session, ctx.req);
   const services = scopeServices(operational, viewer);
   const asVendor = !viewer.canSeeAll || ctx.query.as === 'vendor';
   return {
     props: {
       userName: session?.name || session?.email || '',
-      canCreate: isInternalEmail(session?.email),
+      // A vendor login is NEVER an internal creator, even on an internal-domain
+      // email — the session's vendor flag is authoritative.
+      canCreate: isInternalEmail(session?.email) && !session?.vendor,
+      isVendor: !!session?.vendor,
       services,
       live: !!real,
       asVendor,
@@ -143,7 +146,7 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
   );
 }
 
-export default function ServicesHome({ userName, canCreate, services, live, asVendor }: { userName: string; canCreate: boolean; services: SampleService[]; live: boolean; asVendor: boolean }) {
+export default function ServicesHome({ userName, canCreate, services, live, asVendor, isVendor }: { userName: string; canCreate: boolean; services: SampleService[]; live: boolean; asVendor: boolean; isVendor: boolean }) {
   const router = useRouter();
   // "View as Vendor" preview (cookie-persisted, whole-app): shows the external
   // vendor experience — no admin create/settings, and the vendor-visibility rule
@@ -324,24 +327,30 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
               </div>
             </div>
             <div className="flex items-center gap-1.5 whitespace-nowrap">
-              <Link href="/services/calendar" aria-label="Calendar" title="Calendar &amp; map"
-                className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors">
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-              </Link>
-              <div className="relative">
-                <button type="button" onClick={() => setMenuOpen((o) => !o)} aria-label="Switch app" aria-expanded={menuOpen}
+              {/* Calendar/map + the Inspections↔Services switcher are internal-only:
+                  a vendor is services-only and never sees inspections. */}
+              {!isVendor && (
+                <Link href="/services/calendar" aria-label="Calendar" title="Calendar &amp; map"
                   className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="16" x2="20" y2="16" /></svg>
-                </button>
-                {menuOpen && (<><div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
-                  <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
-                    <Link href="/" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Inspections</Link>
-                    <div className="px-4 py-2.5 text-sm font-semibold text-brand bg-brand/5">Services ✓</div>
-                  </div></>)}
-              </div>
-              {/* Settings — the single shared gear (see components/SettingsMenu).
-                  Identical options across Inspections & Services. */}
-              <SettingsMenu isAdmin={isAdmin} onOpen={() => setMenuOpen(false)} />
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                </Link>
+              )}
+              {!isVendor && (
+                <div className="relative">
+                  <button type="button" onClick={() => setMenuOpen((o) => !o)} aria-label="Switch app" aria-expanded={menuOpen}
+                    className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="16" x2="20" y2="16" /></svg>
+                  </button>
+                  {menuOpen && (<><div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
+                    <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
+                      <Link href="/" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Inspections</Link>
+                      <div className="px-4 py-2.5 text-sm font-semibold text-brand bg-brand/5">Services ✓</div>
+                    </div></>)}
+                </div>
+              )}
+              {/* Settings gear. Vendors get a limited menu (Notification Settings +
+                  Sign Out); internal users get the full shared menu. */}
+              <SettingsMenu isAdmin={isAdmin} isVendor={isVendor} onOpen={() => setMenuOpen(false)} />
             </div>
           </div>
           {/* New Service lives INSIDE the pink header (like "+ New Inspection"),
@@ -358,7 +367,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
       </header>
 
       <main className="max-w-3xl mx-auto w-full px-4 py-3 flex-1">
-        {asVendor && (
+        {asVendor && !isVendor && (
           <div className="mb-3 flex items-center justify-between gap-2 bg-purple-600 text-white rounded-xl px-3 py-2 text-[12px] font-heading font-semibold">
             <span>Viewing as Vendor — admin controls &amp; client pricing hidden.</span>
             <button type="button" onClick={exitVendorView} className="underline shrink-0">Exit</button>

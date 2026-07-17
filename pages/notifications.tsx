@@ -15,12 +15,18 @@ interface TestRecord { id: string; label: string; status: string }
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   if (!session?.email) return { redirect: { destination: '/login', permanent: false } };
-  const [prefs, services, admin] = await Promise.all([
+  // A vendor login is services-only — never an admin, and it sees ONLY the
+  // Services notifications (not Inspections), regardless of email domain.
+  const isVendor = !!session.vendor;
+  const [prefs, servicesAdmin, admin] = await Promise.all([
     getNotificationPrefs(session.email),
     servicesEnabled(session.email).catch(() => false),
     isAppAdmin(session.email).catch(() => false),
   ]);
-  return { props: { initialPrefs: prefs, access: { inspections: true, services }, isAdmin: admin, email: session.email } };
+  const access = isVendor
+    ? { inspections: false, services: true }
+    : { inspections: true, services: servicesAdmin };
+  return { props: { initialPrefs: prefs, access, isAdmin: isVendor ? false : admin, email: session.email } };
 };
 
 function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }) {
