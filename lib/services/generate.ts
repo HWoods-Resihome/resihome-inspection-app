@@ -96,43 +96,62 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
   const regions = parseArr(p.regions_json);
   const props = await searchPropertiesForCoverage({ portfolios, regions, limit: 2000 });
 
-  // Enrollment filter (best-effort). enroll_field like "Property Status", one or
-  // more values (is / is any of / is not / changes to). "changes to" can't detect
-  // the transition edge at generation time, so it's treated as membership (v1);
-  // the enrollment_key dedup still guarantees one order per property.
-  const enrollField = String(p.enroll_field || '').toLowerCase();
-  const enrollOp = String(p.enroll_op || '');
-  const enrollVals = parseVals(p.enroll_value).map((v) => v.trim().toLowerCase()).filter(Boolean);
-  const statusMatch = (status: string): boolean => {
-    if (!enrollVals.length || !/status/.test(enrollField)) return true; // no usable condition → include
-    const s = status.trim().toLowerCase();
-    const hit = enrollVals.some((v) => s === v || s.startsWith(v) || s.includes(v));
-    return enrollOp === 'is not' ? !hit : hit; // is / is any of / changes to → membership
+  // ── Enrollment: evaluate ALL criteria with the section combinator (AND/OR). ──
+  // Only criteria we can evaluate here (Property Status, RRQC Pass Date) count;
+  // if none are evaluable the property is included (best-effort). A criterion with
+  // no value is skipped so an empty row can't block/allow everything.
+  const enrollCombinator = p.enroll_combinator === 'or' ? 'or' : 'and';
+  const enrollCriteria = parseCriteria(p).filter(isEvaluableCriterion);
+  const enrollOk = (prop: { status: string; rrqcPassDate: string }): boolean => {
+    if (!enrollCriteria.length) return true;
+    const results = enrollCriteria.map((c) => matchCriterion(prop, c));
+    return enrollCombinator === 'or' ? results.some(Boolean) : results.every(Boolean);
   };
 
-  // STOP criteria (Property Status only, for now). When a rule's stop condition is
-  // on and its field is Property Status, a property whose CURRENT status meets the
-  // stop condition is dropped from generation — e.g. "stop when Property Status is
-  // Occupied" halts new grass cuts the moment the home is occupied. Date/count stop
-  // modes are still not enforced (flagged in the rule UI).
-  const stopOn = p.stop_enabled === 'true' && (p.stop_mode || 'condition') === 'condition';
-  const stopField = String(p.stop_field || '').toLowerCase();
-  const stopOp = String(p.stop_op || 'is');
-  const stopVal = String(p.stop_value || '').trim().toLowerCase();
-  const stopMatch = (status: string): boolean => {
-    if (!stopOn || !stopVal || !/status/.test(stopField)) return false; // no usable stop → never stop
-    const s = (status || '').trim().toLowerCase();
-    const hit = s === stopVal || s.startsWith(stopVal) || s.includes(stopVal);
-    return stopOp === 'is not' ? !hit : hit; // is / is any of → membership; is not → negated
+  // ── Stop (condition mode): multi-criteria + combinator. A property whose CURRENT
+  // state meets the stop condition is dropped from generation — e.g. "stop when
+  // Property Status is Occupied" halts new cuts the moment the home is occupied.
+  // Date + count stop modes are enforced at the rule/loop level (not here).
+  const stopEnabled = p.stop_enabled === 'true';
+  const stopIsCondition = (p.stop_mode || 'condition') === 'condition';
+  const stopCombinator = p.stop_combinator === 'or' ? 'or' : 'and';
+  const stopCriteria = parseStopCriteria(p).filter(isEvaluableCriterion);
+  const stopHit = (prop: { status: string; rrqcPassDate: string }): boolean => {
+    if (!stopEnabled || !stopIsCondition || !stopCriteria.length) return false;
+    const results = stopCriteria.map((c) => matchCriterion(prop, c));
+    return stopCombinator === 'or' ? results.some(Boolean) : results.every(Boolean);
   };
 
   const included = new Set(parseArr(p.included_props_json).map(String));
   const listMode = p.props_mode === 'list';
   return props
     .filter((prop) => !listMode || included.has(prop.id))
-    .filter((prop) => statusMatch(prop.status))
-    .filter((prop) => !stopMatch(prop.status))   // stop condition met → exclude
+    .filter((prop) => enrollOk(prop))
+    .filter((prop) => !stopHit(prop))   // stop condition met → exclude
     .map((prop) => ({ id: prop.id, scope: 'property' as const, address: prop.address, locality: prop.locality, region: prop.region }));
+}
+
+// A criterion is evaluable at generation time only for the fields we can read on
+// a property (Property Status, RRQC Pass Date). Others (and empty-value rows) are
+// skipped so they neither block (AND) nor satisfy (OR) the combined result.
+function isEvaluableCriterion(c: Criterion): boolean {
+  const f = (c.field || '').toLowerCase();
+  if (/rrqc/.test(f)) return c.op === 'is known'; // only "is known" is evaluable for the date field
+  if (/status/.test(f)) return c.vals.some((v) => v.trim() !== '');
+  return false;
+}
+
+// Stop criteria: prefer the JSON array (multi + combinator), fall back to the
+// legacy single stop_field/op/value triple.
+function parseStopCriteria(p: Record<string, any>): Criterion[] {
+  try {
+    const arr = JSON.parse(p.stop_criteria_json || '[]');
+    if (Array.isArray(arr) && arr.length) {
+      return arr.map((c: any) => ({ field: String(c.field || ''), op: String(c.op || 'is'), vals: Array.isArray(c.vals) ? c.vals.map(String) : (c.val != null ? [String(c.val)] : []) }));
+    }
+  } catch { /* fall through */ }
+  const f = String(p.stop_field || '');
+  return f ? [{ field: f, op: String(p.stop_op || 'is'), vals: parseVals(p.stop_value) }] : [];
 }
 
 export interface GenerateResult {
@@ -169,6 +188,10 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
 
   // Enrollment keys with a currently-open (non-terminal) order — dedup set.
   const openKeys = new Set(existing.filter((e) => OPEN_STATUSES.has(e.status)).map((e) => e.key).filter(Boolean));
+  // Total orders EVER generated per enrollment key (all statuses) — powers the
+  // "stop after N services" cap ("all generated" counting basis).
+  const genCountByKey = new Map<string, number>();
+  for (const e of existing) if (e.key) genCountByKey.set(e.key, (genCountByKey.get(e.key) || 0) + 1);
 
   // Community NAME → HubSpot id, resolved lazily (community grass-cut masters need
   // the id to look up their properties). Cached for the run.
@@ -202,8 +225,8 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
     mode: apply ? 'apply' : 'dry-run', today: todayISO, configured: true,
     rulesActive: 0, rulesSkipped: 0, wouldCreate: 0, created: 0, skippedExisting: 0, errors: 0,
     items: [], notes: [
-      'Property targets: live Property records in the rule’s portfolios/regions, filtered by the enrollment condition (best-effort status match). Community targets: one per selected community.',
-      'v1: stop conditions not yet evaluated. Due = created date + the active cadence’s “Due within” days (else the rule’s First Order Due, else +5).',
+      'Property targets: live Property records in the rule’s portfolios/regions, filtered by the enrollment criteria (Property Status / RRQC), combined with the rule’s AND/OR. Community targets: one per selected community.',
+      'Stop enforced: condition (Property Status / RRQC), date (rule stops on/after the date), and count (stop after N generated per property). A rule with a future start date stays dormant. Due = created date + the active cadence’s “Due within” days (else First Order Due, else +5).',
       'v1: first assigned vendor used for every order (no rotation).',
       'One open order per (rule, target) at a time — the next generates after the current completes/cancels.',
     ],
@@ -211,6 +234,21 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
 
   for (const { id: ruleId, props: p } of rules) {
     if (p.active !== 'true') { result.rulesSkipped++; continue; }
+    // Rule-level START DATE: the rule stays dormant (creates nothing) until this
+    // calendar date. YYYY-MM-DD strings compare lexicographically.
+    const startDate = String(p.start_date || '').trim();
+    if (startDate && todayISO < startDate) { result.rulesSkipped++; continue; }
+    // Stop DATE mode: once the date is reached the rule stops generating entirely.
+    const stopEnabled = p.stop_enabled === 'true';
+    const stopMode = String(p.stop_mode || 'condition');
+    if (stopEnabled && stopMode === 'date') {
+      const sd = String(p.stop_date || '').trim();
+      if (sd && todayISO >= sd) { result.rulesSkipped++; continue; }
+    }
+    // Stop COUNT mode: per target, once N orders have been generated (all statuses),
+    // stop making more.
+    const stopCountMode = stopEnabled && stopMode === 'count';
+    const stopCount = Number(p.stop_count);
     result.rulesActive++;
 
     const worktype = (p.worktype || 'landscaping') as Worktype;
@@ -237,6 +275,10 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         ruleId, ruleName: p.rule_name || 'Rule', target: t.address, worktype, subtype,
         dueDate, vendor, enrollmentKey,
       };
+      // Stop-after-N: this target has already generated its cap → stop.
+      if (stopCountMode && Number.isFinite(stopCount) && stopCount >= 1 && (genCountByKey.get(enrollmentKey) || 0) >= stopCount) {
+        continue; // silently not created (won't count toward wouldCreate)
+      }
       if (openKeys.has(enrollmentKey)) {
         result.skippedExisting++;
         result.items.push({ ...base, action: 'skip-open' });

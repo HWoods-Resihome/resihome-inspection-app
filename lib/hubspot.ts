@@ -878,7 +878,7 @@ export async function fetchPropertyStatusOptions(): Promise<{ label: string; val
  */
 export async function searchPropertiesForCoverage(
   opts: { portfolios?: string[]; regions?: string[]; statuses?: string[]; limit?: number } = {},
-): Promise<{ id: string; address: string; locality: string; region: string; portfolio: string; status: string }[]> {
+): Promise<{ id: string; address: string; locality: string; region: string; portfolio: string; status: string; rrqcPassDate: string }[]> {
   const { property: typeId } = typeIds();
   const limit = Math.min(Math.max(opts.limit || 1000, 1), 2000);
   const filters: any[] = [];
@@ -886,8 +886,10 @@ export async function searchPropertiesForCoverage(
   if (opts.regions?.length) filters.push({ propertyName: 'region', operator: 'IN', values: opts.regions });
   if (opts.statuses?.length) filters.push({ propertyName: PROPERTY_STATUS_PROPERTY, operator: 'IN', values: opts.statuses });
   if (PROPERTY_EXCLUDE_STATUSES.length) filters.push({ propertyName: PROPERTY_STATUS_PROPERTY, operator: 'NOT_IN', values: PROPERTY_EXCLUDE_STATUSES });
-  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'portfolio', PROPERTY_STATUS_PROPERTY];
-  const out: { id: string; address: string; locality: string; region: string; portfolio: string; status: string }[] = [];
+  // rrqc_pass_date is projected so enrollment criteria like "RRQC Pass Date is
+  // known" can be evaluated per property (Rules Engine). Optional field — absent → ''.
+  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'portfolio', PROPERTY_STATUS_PROPERTY, 'rrqc_pass_date'];
+  const out: { id: string; address: string; locality: string; region: string; portfolio: string; status: string; rrqcPassDate: string }[] = [];
   try {
     let after: string | undefined;
     do {
@@ -905,6 +907,7 @@ export async function searchPropertiesForCoverage(
           locality: [city, st, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
           region: String(p.region || '').trim(), portfolio: String(p.portfolio || '').trim(),
           status: String(p[PROPERTY_STATUS_PROPERTY] || '').trim(),
+          rrqcPassDate: String(p.rrqc_pass_date || '').trim(),
         });
         if (out.length >= limit) return out;
       }
@@ -1653,8 +1656,9 @@ const RULE_PROPS = [
   'vendor_cost', 'markup_pct', 'vendors_json', 'service_description', 'recurring',
   'cadences_json', 'initial_due_days', 'skip_months_json', 'included_props_json',
   'portfolios_json', 'communities_json', 'regions_json', 'enroll_field', 'enroll_op',
-  'enroll_value', 'stop_enabled', 'stop_mode', 'stop_field', 'stop_op', 'stop_value',
-  'stop_date', 'stop_count',
+  'enroll_value', 'enroll_criteria_json', 'enroll_combinator', 'start_date',
+  'stop_enabled', 'stop_mode', 'stop_field', 'stop_op', 'stop_value',
+  'stop_criteria_json', 'stop_combinator', 'stop_date', 'stop_count',
 ];
 
 /** All Service Rule records (raw props + id), or null when not configured. */

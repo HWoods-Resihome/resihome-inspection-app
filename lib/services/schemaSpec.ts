@@ -131,13 +131,17 @@ export const SERVICE_RULE_OBJECT: ObjectSpec = {
     T('enroll_field', 'Enroll Field'),
     SEL('enroll_op', 'Enroll Operator', OPERATOR_OPTS),
     T('enroll_value', 'Enroll Value'),
-    TA('enroll_criteria_json', 'Enrollment Criteria (JSON)'),   // multiple AND-combined criteria
+    TA('enroll_criteria_json', 'Enrollment Criteria (JSON)'),   // multiple criteria (source of truth)
+    SEL('enroll_combinator', 'Enroll Combinator', opt([['All (AND)', 'and'], ['Any (OR)', 'or']])),
+    DATE('start_date', 'Rule Start Date'),                      // dormant until this date
 
     BOOL('stop_enabled', 'Stop Enabled'),
     SEL('stop_mode', 'Stop Mode', opt([['Condition', 'condition'], ['Date', 'date'], ['Count', 'count']])),
     T('stop_field', 'Stop Field'),
     SEL('stop_op', 'Stop Operator', OPERATOR_OPTS),
     T('stop_value', 'Stop Value'),
+    TA('stop_criteria_json', 'Stop Criteria (JSON)'),           // multiple criteria (source of truth)
+    SEL('stop_combinator', 'Stop Combinator', opt([['All (AND)', 'and'], ['Any (OR)', 'or']])),
     DATE('stop_date', 'Stop Date'),
     NUM('stop_count', 'Stop After N Services'),
   ],
