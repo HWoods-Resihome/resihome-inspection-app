@@ -7,7 +7,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
-import { grassTierAmount } from '@/lib/services/grassPricing';
+import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, easternTodayISO, type ServiceStatus, type SampleService } from '@/lib/services/sampleData';
 import { serviceVisibleTo } from '@/lib/services/scope';
@@ -33,6 +33,7 @@ interface ServiceView {
   estimatedAt: string;
   vendorCost: number | null; markupPct: number | null; clientCost: number | null;
   vendorCostAdjustment: number | null; adjustmentReason: string;
+  grassTiers: { standard: number; overgrown: number; heavy: number };
   description: string;
   aiVerdict: string; aiNotes: string;
   reviewDecision: string; reviewNotes: string; reviewedBy: string;
@@ -96,6 +97,11 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         description: p.service_description || '',
         vendorCost: num(p.vendor_cost), markupPct: num(p.markup_pct), clientCost: num(p.client_cost),
         vendorCostAdjustment: num(p.vendor_cost_adjustment), adjustmentReason: p.vendor_cost_adjustment_reason || '',
+        grassTiers: {
+          standard: num(p.grass_rate_standard) ?? DEFAULT_GRASS_TIERS.standard,
+          overgrown: num(p.grass_rate_overgrown) ?? DEFAULT_GRASS_TIERS.overgrown,
+          heavy: num(p.grass_rate_heavy) ?? DEFAULT_GRASS_TIERS.heavy,
+        },
         aiVerdict: p.ai_verdict || '', aiNotes: p.ai_notes || '',
         reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: p.reviewed_by || '',
         answers: (() => { try { return JSON.parse(p.answers_json || '{}'); } catch { return {}; } })(),
@@ -116,6 +122,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       estimatedAt: s.estimatedAt || '',
       description: '',
       vendorCost: null, markupPct: null, clientCost: null, vendorCostAdjustment: null, adjustmentReason: '',
+      grassTiers: DEFAULT_GRASS_TIERS,
       aiVerdict: '', aiNotes: '', reviewDecision: '', reviewNotes: '', reviewedBy: '',
       answers: {}, before: [], after: [], petBefore: [], petAfter: [],
       isMaster: false, coveredCount: null, perRate: null, forBilling: '', masterServiceId: '', splitAt: '',
@@ -1052,7 +1059,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
         vendor = billTrip ? (defaultRateFor('trip_fee', 'base_trip_fee') ?? 0) : 0;
         reason = billTrip ? 'Not completed — trip fee' : 'Not completed — no charge';
       } else if (svc.worktype === 'landscaping' && svc.subtype === 'cut') {
-        vendor = grassTierAmount(String(heightAns || ''));
+        vendor = grassTierAmount(String(heightAns || ''), svc.grassTiers);
       }
     }
     const client = Number.isFinite(markup) ? Math.round(vendor * (1 + markup / 100) * 100) / 100 : vendor;

@@ -100,6 +100,12 @@ export const SERVICE_OBJECT: ObjectSpec = {
     NUM('covered_property_count', 'Covered Property Count'),
     NUM('per_property_rate', 'Per Property Rate'),
     DTIME('split_at', 'Split At'),
+    // Grass-cut tier payouts, snapshotted from the rule at generation (property
+    // grass cuts only). Submit resolves the payout from these by the answered
+    // "grass height"; blank → the code defaults (45/60/90). See lib/services/grassPricing.
+    NUM('grass_rate_standard', 'Grass Rate — Standard'),
+    NUM('grass_rate_overgrown', 'Grass Rate — Overgrown'),
+    NUM('grass_rate_heavy', 'Grass Rate — Heavy'),
   ],
 };
 
@@ -118,6 +124,11 @@ export const SERVICE_RULE_OBJECT: ObjectSpec = {
     SEL('props_mode', 'Property Mode', opt([['All (future-inclusive)', 'all'], ['List (fixed)', 'list']])),
     NUM('vendor_cost', 'Vendor Cost'),
     NUM('markup_pct', 'Markup %'),
+    // Grass-cut tier payouts (property grass cuts only). Configured in the rule's
+    // pricing section; generation stamps them onto each created service.
+    NUM('grass_rate_standard', 'Grass Rate — Standard'),
+    NUM('grass_rate_overgrown', 'Grass Rate — Overgrown'),
+    NUM('grass_rate_heavy', 'Grass Rate — Heavy'),
     TA('vendors_json', 'Vendors (JSON)'),
     TA('service_description', 'Service Description'),
     BOOL('recurring', 'Recurring'),

@@ -24,6 +24,7 @@
 import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
+import { DEFAULT_GRASS_TIERS } from './grassPricing';
 import { vendorEmail } from './vendors';
 import { notifyServiceAssigned } from '@/lib/notifications/triggers';
 import { appBaseUrl } from '@/lib/notifications/send';
@@ -364,6 +365,15 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
       } else {
         if (Number.isFinite(vendorCost)) orderProps.vendor_cost = vendorCost;
         if (clientCost !== null) orderProps.client_cost = clientCost;
+      }
+
+      // Property grass cuts carry their tier payouts (from the rule, else the code
+      // defaults) so submit can price by the answered height with no rule lookup.
+      if (t.scope === 'property' && worktype === 'landscaping' && subtype === 'cut') {
+        const num = (v: any, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
+        orderProps.grass_rate_standard = num(p.grass_rate_standard, DEFAULT_GRASS_TIERS.standard);
+        orderProps.grass_rate_overgrown = num(p.grass_rate_overgrown, DEFAULT_GRASS_TIERS.overgrown);
+        orderProps.grass_rate_heavy = num(p.grass_rate_heavy, DEFAULT_GRASS_TIERS.heavy);
       }
 
       // Stamp reference coordinates NOW (best-effort) so the calendar map can plot

@@ -7,6 +7,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { descriptionFor, defaultRateFor, mergeWorktypes, type Worktype, type CustomWorktypeDef } from '@/lib/services/worktypes';
+import { DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
 import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
 import { DatePicker } from '@/components/DatePicker';
@@ -109,6 +110,9 @@ interface Rule {
   propsMode: 'all' | 'list';                // 'all' = every applicable property incl. future adds; 'list' = a fixed subset
   includedProps: string[];                  // property scope, 'list' mode only: the specific property ids included
   vendorCost: string; markupPct: string;   // strings so decimals can be typed freely
+  // Grass-cut tier payouts (property grass cuts only) — optional; blank/undefined
+  // falls back to DEFAULT_GRASS_TIERS at generation.
+  grassStandard?: string; grassOvergrown?: string; grassHeavy?: string;
   vendors: string[];                        // assigned company/companies (1 = always; many = equal-volume rotation)
   description: string;                      // scope-of-work language (defaults from the worktype; editable)
   recurring: boolean;                       // false = one-time (no cadence); true = recurring (cadences required)
@@ -263,6 +267,9 @@ function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule 
     portfolios: parseArr(p.portfolios_json), communities: parseArr(p.communities_json), regions: parseArr(p.regions_json),
     propsMode: p.props_mode === 'list' ? 'list' : 'all', includedProps: parseArr(p.included_props_json),
     vendorCost: p.vendor_cost != null ? String(p.vendor_cost) : '', markupPct: p.markup_pct != null ? String(p.markup_pct) : '',
+    grassStandard: p.grass_rate_standard != null ? String(p.grass_rate_standard) : undefined,
+    grassOvergrown: p.grass_rate_overgrown != null ? String(p.grass_rate_overgrown) : undefined,
+    grassHeavy: p.grass_rate_heavy != null ? String(p.grass_rate_heavy) : undefined,
     vendors: parseArr(p.vendors_json), description: p.service_description || '',
     recurring: p.recurring !== 'false', cadences,
     initialDueDays: p.initial_due_days != null ? String(p.initial_due_days) : '', skipMonths: parseArr(p.skip_months_json),
@@ -303,6 +310,12 @@ function ruleToProps(r: Rule): Record<string, any> {
   };
   if (r.vendorCost !== '') props.vendor_cost = Number(r.vendorCost);
   if (r.markupPct !== '') props.markup_pct = Number(r.markupPct);
+  // Persist grass tiers only for property grass cuts (and only when set).
+  if (r.scope === 'property' && r.worktype === 'landscaping' && r.subtype === 'cut') {
+    if (r.grassStandard != null && r.grassStandard !== '') props.grass_rate_standard = Number(r.grassStandard);
+    if (r.grassOvergrown != null && r.grassOvergrown !== '') props.grass_rate_overgrown = Number(r.grassOvergrown);
+    if (r.grassHeavy != null && r.grassHeavy !== '') props.grass_rate_heavy = Number(r.grassHeavy);
+  }
   if (r.initialDueDays !== '') props.initial_due_days = Number(r.initialDueDays);
   if (r.startDate) props.start_date = r.startDate;
   if (r.stopDate) props.stop_date = r.stopDate;
@@ -948,11 +961,32 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
             )}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label className={lbl}>Cost Detail</label>
-              <div className="flex flex-nowrap items-end justify-center gap-4 sm:justify-start">
-                <PriceField label="Vendor Cost" adorn="$" minDecimals={2} colClass="shrink-0 w-24" value={rule.vendorCost} onChange={(v) => patch({ vendorCost: v })} />
-                <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
-                <PriceField label="Client Cost" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
-              </div>
+              {rule.scope === 'property' && rule.worktype === 'landscaping' && rule.subtype === 'cut' ? (
+                <>
+                  {/* Grass cut: the vendor payout is set by the grass height at
+                      completion, so pricing is three tiers. Standard also drives the
+                      base vendor/client shown before completion. */}
+                  <div className="flex flex-nowrap items-end gap-3 sm:justify-start overflow-x-auto">
+                    <PriceField label="Standard (<6 in)" adorn="$" minDecimals={2} colClass="shrink-0 w-24"
+                      value={rule.grassStandard ?? String(DEFAULT_GRASS_TIERS.standard)} onChange={(v) => patch({ grassStandard: v, vendorCost: v })} />
+                    <PriceField label="Overgrown (6–12 in)" adorn="$" minDecimals={2} colClass="shrink-0 w-24"
+                      value={rule.grassOvergrown ?? String(DEFAULT_GRASS_TIERS.overgrown)} onChange={(v) => patch({ grassOvergrown: v })} />
+                    <PriceField label="Heavy (>12 in)" adorn="$" minDecimals={2} colClass="shrink-0 w-24"
+                      value={rule.grassHeavy ?? String(DEFAULT_GRASS_TIERS.heavy)} onChange={(v) => patch({ grassHeavy: v })} />
+                  </div>
+                  <div className="flex flex-nowrap items-end gap-4 sm:justify-start mt-3">
+                    <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
+                    <PriceField label="Client (Standard)" adorn="$" highlight readOnly colClass="shrink-0 w-28" value={clientCost.toFixed(2)} />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1.5">Vendor payout is set by the grass height at completion; the markup applies to each tier.</p>
+                </>
+              ) : (
+                <div className="flex flex-nowrap items-end justify-center gap-4 sm:justify-start">
+                  <PriceField label="Vendor Cost" adorn="$" minDecimals={2} colClass="shrink-0 w-24" value={rule.vendorCost} onChange={(v) => patch({ vendorCost: v })} />
+                  <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
+                  <PriceField label="Client Cost" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
+                </div>
+              )}
             </div>
 
             {/* Vendor Assignment — one or more companies; count = current open volume. */}

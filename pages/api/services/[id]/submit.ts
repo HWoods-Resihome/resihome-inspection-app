@@ -17,7 +17,7 @@ import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
 import { easternTodayISO } from '@/lib/services/time';
-import { grassTierAmount } from '@/lib/services/grassPricing';
+import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
@@ -134,7 +134,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } else if (isProperty && worktype === 'landscaping' && subtype === 'cut') {
     // Height-based hard rate. Whether the back yard was serviced is verified by
     // the AI review (a knowledge-base check), not priced here.
-    const finalV = grassTierAmount(String(heightAns || ''));
+    // Tier payouts snapshotted on the record (from the rule); blank → defaults.
+    const num = (v: any, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
+    const tiers = {
+      standard: num(p0.grass_rate_standard, DEFAULT_GRASS_TIERS.standard),
+      overgrown: num(p0.grass_rate_overgrown, DEFAULT_GRASS_TIERS.overgrown),
+      heavy: num(p0.grass_rate_heavy, DEFAULT_GRASS_TIERS.heavy),
+    };
+    const finalV = grassTierAmount(String(heightAns || ''), tiers);
     props.vendor_cost = finalV;
     props.client_cost = clientOf(finalV);
   }
