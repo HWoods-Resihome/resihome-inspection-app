@@ -934,6 +934,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const [auditEvents, setAuditEvents] = useState<AuditEvent[] | null>(null);
   const [reassignOpen, setReassignOpen] = useState(false);
   const [reassignVendor, setReassignVendor] = useState(svc.vendor || '');
+  const [reassignQuery, setReassignQuery] = useState('');
   // Live assignable vendors from the approved Companies list (internal reassign).
   const [vendorNames, setVendorNames] = useState<string[]>(svc.vendor ? [svc.vendor] : []);
   useEffect(() => {
@@ -1080,7 +1081,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
                   <div className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Admin</div>
                   <button type="button" onClick={openAudit} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50">Audit Log</button>
-                  {canReassign && <button type="button" onClick={() => { setSettingsOpen(false); setReassignVendor(svc.vendor || vendorNames[0] || ''); setSettingsMsg(''); setReassignOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Reassign Vendor</button>}
+                  {canReassign && <button type="button" onClick={() => { setSettingsOpen(false); setReassignVendor(svc.vendor || ''); setReassignQuery(''); setSettingsMsg(''); setReassignOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Reassign Vendor</button>}
                   {canEditDue && <button type="button" onClick={() => { setSettingsOpen(false); setNewDue(svc.dueDate || ''); setSettingsMsg(''); setDueOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Change Due Date</button>}
                 </div></>)}
             </div>
@@ -1497,19 +1498,31 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       {/* Reassign Vendor modal (internal). */}
       {reassignOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setReassignOpen(false)}>
-          <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <div className="font-heading font-bold text-[15px] text-ink">Reassign Vendor</div>
-            <p className="text-[13px] text-gray-500 -mt-1">Currently <b className="text-ink">{svc.vendor || 'Unassigned'}</b>. Choose the vendor to take over this service.</p>
-            <div className="space-y-1.5">
-              {vendorNames.map((name) => (
-                <button key={name} type="button" onClick={() => setReassignVendor(name)}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-heading font-semibold ${reassignVendor === name ? 'bg-brand/5 border-brand text-brand' : 'bg-white border-gray-300 text-gray-700 hover:border-brand/50'}`}>
-                  {name}{name === svc.vendor ? ' · current' : ''}
-                </button>
-              ))}
+          <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-4 flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="font-heading font-bold text-[15px] text-ink shrink-0">Reassign Vendor</div>
+            <p className="text-[13px] text-gray-500 mt-1 shrink-0">Currently <b className="text-ink">{svc.vendor || 'Unassigned'}</b>. Choose the vendor to take over this service.</p>
+            <div className="relative mt-3 shrink-0">
+              <input type="text" value={reassignQuery} onChange={(e) => setReassignQuery(e.target.value)} placeholder="Search vendors…"
+                className="w-full text-sm border border-gray-300 rounded-lg pl-3 pr-9 py-2.5 bg-white focus:outline-none focus:border-brand" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             </div>
-            {settingsMsg && <div className="text-xs text-red-600">{settingsMsg}</div>}
-            <div className="flex gap-2 pt-1">
+            {/* Bounded, scrollable list so a long vendor roster scrolls INSIDE the
+                sheet instead of pushing the actions off-screen. */}
+            <div className="mt-2 flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-0.5">
+              {vendorNames
+                .filter((name) => !reassignQuery.trim() || name.toLowerCase().includes(reassignQuery.trim().toLowerCase()))
+                .map((name) => (
+                  <button key={name} type="button" onClick={() => setReassignVendor(name)}
+                    className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-heading font-semibold ${reassignVendor === name ? 'bg-brand/5 border-brand text-brand' : 'bg-white border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                    {name}{name === svc.vendor ? ' · current' : ''}
+                  </button>
+                ))}
+              {vendorNames.filter((name) => !reassignQuery.trim() || name.toLowerCase().includes(reassignQuery.trim().toLowerCase())).length === 0 && (
+                <div className="px-3 py-4 text-center text-[13px] text-gray-400">No vendors match “{reassignQuery.trim()}”.</div>
+              )}
+            </div>
+            {settingsMsg && <div className="text-xs text-red-600 mt-2 shrink-0">{settingsMsg}</div>}
+            <div className="flex gap-2 pt-3 shrink-0">
               <button type="button" onClick={() => setReassignOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
               <button type="button" disabled={reassigning || !reassignVendor || reassignVendor === svc.vendor} onClick={doReassign}
                 className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{reassigning ? '…' : 'Reassign'}</button>
