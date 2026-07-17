@@ -1313,19 +1313,18 @@ from earlier sections, **these win**.
    cleaned); insufficient diff → route to Review/Fix.
 
 ### Answers to open questions
-- **Community cost logic (what's needed).** Today property-scope services price on
-  submit (tiers/trip fee) but **community-scope services leave cost untouched**
-  ("community cost rules coming later") — except the community grass-cut MASTER,
-  which already prices `count × per_property_rate`. What's missing: a way for every
-  *other* community-scope service (Common Areas, Pool, Pet Stations, …) to resolve
-  `vendor_cost` + `client_cost`. Per §10.12 community contracts (vendor + pricing +
-  cadence) live on the **Community record**, so community pricing should resolve
-  from a **per-worktype contract rate on the Community object** (vendor amount) +
-  markup (client amount), stamped `rate_source='community'`. Build = (a) per-
-  worktype community rate fields on Community, (b) resolve community-scope cost from
-  them at generation/submit, (c) decide whether the grass-cut per-property split
-  rate also moves to Community (today it's on the rule). Still needed for the
-  record's payout even though the billing tab is being removed.
+- **Community cost logic — RESOLVED (Option B, owner 2026-07-17): keep it
+  rule-driven; NO code change.** Community-scope services are **already priced** at
+  generation — `generate.ts` stamps `vendor_cost`/`client_cost` from the rule, and
+  the community grass-cut MASTER prices `count × per_property_rate` and splits into
+  per-property children on close-out. There is **no $0 gap**. The only open question
+  was *where* community rates should live: on the rule (today) or on the Community
+  object per §10.12. Owner chose to **keep pricing on the rule** and noted the
+  Vendor-Management rework (which would have moved rates onto the Community object)
+  **is unlikely to happen** — so rule-driven community pricing is the **permanent**
+  model, not a stopgap. Consequence/limitation accepted: community rates are uniform
+  per-rule (can't price Community X differently from Community Y except via separate
+  rules). No per-worktype Community rate fields, no provisioner change, no migration.
 
 - **Geofence / anti-spoof (approach).** Reuse the inspection **evidence stamp**
   (already burns live lat/long + time). Capture live GPS + timestamp with each
