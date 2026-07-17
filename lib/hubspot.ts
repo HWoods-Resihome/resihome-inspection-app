@@ -5774,9 +5774,29 @@ export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; a
  * be triaged (records with 0 photos where photos were expected = the photos
  * never made it off the device; drafts persisted = stuck, still recoverable).
  */
-export interface PhotoAuditAnswer { recordId: string; type: string; section: string; total: number; hubspot: number; blob: number; draft: number; other: number; }
-export interface PhotoAuditReport { inspectionId: string | null; found: boolean; answers: PhotoAuditAnswer[]; totals: { answers: number; photos: number; hubspot: number; blob: number; draft: number; other: number }; }
-export async function auditInspectionPhotos(opts: { inspectionId?: string; query?: string }): Promise<PhotoAuditReport> {
+export interface PhotoAuditAnswer { recordId: string; type: string; section: string; total: number; hubspot: number; blob: number; draft: number; other: number; live?: number; dead?: number; }
+export interface PhotoAuditReport { inspectionId: string | null; found: boolean; answers: PhotoAuditAnswer[]; totals: { answers: number; photos: number; hubspot: number; blob: number; draft: number; other: number; live?: number; dead?: number; checked?: number }; deadSamples?: string[]; }
+
+/** HEAD-ish liveness check for a stored photo URL. Range 0-0 avoids downloading
+ *  the whole image; any 2xx = live, anything else (or a network throw) = dead.
+ *  Returns the HTTP status (or 0 on a network error) for dead-sample reporting. */
+async function checkUrlLive(url: string): Promise<{ ok: boolean; status: number }> {
+  const clean = url.split('#')[0];
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch(clean, { method: 'GET', headers: { Range: 'bytes=0-0' }, signal: ctrl.signal });
+    // Drain a tiny body so the socket can be reused; ignore errors.
+    try { await r.arrayBuffer(); } catch { /* ignore */ }
+    return { ok: r.ok || r.status === 206, status: r.status };
+  } catch {
+    return { ok: false, status: 0 };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export async function auditInspectionPhotos(opts: { inspectionId?: string; query?: string; verify?: boolean }): Promise<PhotoAuditReport> {
   let id = (opts.inspectionId || '').trim();
   if (!id && opts.query) {
     const matches = await fetchInspections({ search: opts.query }).catch(() => []);
@@ -5785,8 +5805,11 @@ export async function auditInspectionPhotos(opts: { inspectionId?: string; query
   const empty: PhotoAuditReport = { inspectionId: id || null, found: false, answers: [], totals: { answers: 0, photos: 0, hubspot: 0, blob: 0, draft: 0, other: 0 } };
   if (!id) return empty;
   const answers = await fetchAnswersForInspection(id).catch(() => []);
-  const t = { answers: 0, photos: 0, hubspot: 0, blob: 0, draft: 0, other: 0 };
+  const t = { answers: 0, photos: 0, hubspot: 0, blob: 0, draft: 0, other: 0, live: 0, dead: 0, checked: 0 };
   const rows: PhotoAuditAnswer[] = [];
+  const deadSamples: string[] = [];
+  const CHECK_CAP = 500;     // bound the liveness sweep to stay within maxDuration
+
   for (const a of answers) {
     const urls = [...(a.photoUrls || []), ...(a.afterPhotoUrls || [])];
     if (!urls.length && a.answerType !== 'section_photo') continue;
@@ -5797,10 +5820,34 @@ export async function auditInspectionPhotos(opts: { inspectionId?: string; query
       else if (isHubspotFileUrl(u)) row.hubspot++;
       else row.other++;
     }
+
+    if (opts.verify) {
+      // Check remote URLs (blob/hubspot/http) for liveness — a draft can't be
+      // fetched here (device-local), so it's neither live nor dead. Concurrency
+      // of 10 keeps 391 photos well inside the 60s function budget.
+      row.live = 0; row.dead = 0;
+      const remote = urls.filter((u) => !/^(blob:|data:)/.test(u));
+      for (let i = 0; i < remote.length && t.checked < CHECK_CAP; i += 10) {
+        const chunk = remote.slice(i, i + 10);
+        const results = await Promise.all(chunk.map((u) => checkUrlLive(u).then((res) => ({ u, res }))));
+        for (const { u, res } of results) {
+          t.checked++;
+          if (res.ok) { row.live!++; t.live++; }
+          else {
+            row.dead!++; t.dead++;
+            if (deadSamples.length < 8) {
+              try { const p = new URL(u.split('#')[0]); deadSamples.push(`${res.status || 'ERR'} ${p.host}${p.pathname}`); }
+              catch { deadSamples.push(`${res.status || 'ERR'} ${u.slice(0, 80)}`); }
+            }
+          }
+        }
+      }
+    }
+
     t.answers++; t.photos += row.total; t.hubspot += row.hubspot; t.blob += row.blob; t.draft += row.draft; t.other += row.other;
     rows.push(row);
   }
-  return { inspectionId: id, found: true, answers: rows, totals: t };
+  return { inspectionId: id, found: true, answers: rows, totals: t, ...(opts.verify ? { deadSamples } : {}) };
 }
 
 /**

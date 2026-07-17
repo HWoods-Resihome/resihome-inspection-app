@@ -18,9 +18,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!session?.email || !(await isAppAdmin(session.email).catch(() => false))) return res.status(403).json({ error: 'Admin only' });
   const inspection = typeof req.query.inspection === 'string' ? req.query.inspection.trim() : '';
   const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  // ?verify=1 → actually fetch each remote URL and report live vs dead (404/etc.)
+  // counts + sample failing URLs. Slower (network per photo), so it's opt-in.
+  const verify = req.query.verify === '1' || req.query.verify === 'true';
   if (!inspection && !query) return res.status(400).json({ error: 'Pass ?inspection=<recordId> or ?q=<address>.' });
   try {
-    const report = await auditInspectionPhotos({ inspectionId: inspection || undefined, query: query || undefined });
+    const report = await auditInspectionPhotos({ inspectionId: inspection || undefined, query: query || undefined, verify });
     return res.status(200).json({
       ...report,
       note: report.found
