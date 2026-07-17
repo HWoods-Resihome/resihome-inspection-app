@@ -43,10 +43,17 @@ function shouldSend(signature: string): boolean {
  *  - GPU/WebView-internal terminations — Chromium recovers on its own; not our code.
  *  - the `_precache_shell_` sentinel — the SW cache-warmer's placeholder route,
  *    which by design has no inspection to load (see pages/_app.tsx warm()).
+ *  - "attempted to hard navigate to the same URL" — a benign Next.js invariant
+ *    thrown when a soft data-refresh (router.replace(asPath)) coincides with a
+ *    new deployment: the build id changed, so Next can't soft-navigate and falls
+ *    back to a hard nav, then refuses to reload the identical URL. Harmless (the
+ *    user stays put with slightly stale data) and escapes the caller's .catch()
+ *    because Next throws it at the window level, not through the returned promise.
  */
 function isNoise(message: string, context?: ErrorContext): boolean {
   if (/^\s*script error\.?\s*$/i.test(message)) return true;
   if (/GPU process (was )?(terminated|lost|crashed)|WebGL context/i.test(message)) return true;
+  if (/attempted to hard navigate to the same URL/i.test(message)) return true;
   if (context && String((context as any).inspectionId || '') === '_precache_shell_') return true;
   return false;
 }
