@@ -13,6 +13,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { runServiceGeneration } from '@/lib/services/generate';
+import { easternTodayISO } from '@/lib/services/time';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req).catch(() => null);
@@ -23,7 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const apply = req.query.apply === '1' || req.query.apply === 'true';
   const onlyRuleId = typeof req.query.ruleId === 'string' && req.query.ruleId.trim() ? req.query.ruleId.trim() : undefined;
   const today = typeof req.query.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.today)
-    ? req.query.today : new Date().toISOString().slice(0, 10);
+    ? req.query.today : easternTodayISO();
   try {
     const report = await runServiceGeneration(apply, today, onlyRuleId);
     if (report === null) return res.status(200).json({ configured: false, mode: apply ? 'apply' : 'dry-run', note: 'Service Work Order / Service Rule object type ids not set — nothing to generate.' });

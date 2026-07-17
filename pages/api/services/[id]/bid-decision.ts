@@ -16,12 +16,10 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
+import { easternTodayISO, addDaysISO } from '@/lib/services/time';
 
-function addDays(days: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+// Due date = N days from Eastern "today" (business timezone).
+const addDays = (days: number): string => addDaysISO(easternTodayISO(), days);
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }

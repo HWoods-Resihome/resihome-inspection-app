@@ -27,14 +27,7 @@ import { isCommunityCutMaster, splitMasterCommunityCut } from '@/lib/services/sp
 import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { notifyServiceCompleted } from '@/lib/notifications/triggers';
 import { appBaseUrl } from '@/lib/notifications/send';
-import { easternTodayISO } from '@/lib/services/sampleData';
-
-/** Add whole days to a YYYY-MM-DD date, returned as YYYY-MM-DD (UTC-safe). */
-const addDaysISO = (iso: string, days: number): string => {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-};
+import { easternTodayISO, addDaysISO } from '@/lib/services/time';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }

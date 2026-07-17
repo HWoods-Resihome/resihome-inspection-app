@@ -8,6 +8,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runServiceAiReview } from '@/lib/services/aiReview';
+import { easternTodayISO } from '@/lib/services/time';
 
 export const config = { maxDuration: 300 };
 
@@ -18,7 +19,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const provided = auth.startsWith('Bearer ') ? auth.slice(7) : (typeof req.query.key === 'string' ? req.query.key : '');
   if (provided !== secret) return res.status(401).json({ error: 'Unauthorized' });
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = easternTodayISO();
   try {
     const report = await runServiceAiReview(true, today);
     if (report === null) return res.status(200).json({ ok: true, skipped: true, reason: 'Service objects not configured.' });

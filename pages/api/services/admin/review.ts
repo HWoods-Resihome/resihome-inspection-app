@@ -12,6 +12,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { runServiceAiReview } from '@/lib/services/aiReview';
+import { easternTodayISO } from '@/lib/services/time';
 
 export const config = { maxDuration: 300 };
 
@@ -24,7 +25,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const apply = req.query.apply === '1' || req.query.apply === 'true';
   const onlyId = typeof req.query.id === 'string' && req.query.id.trim() ? req.query.id.trim() : undefined;
   const today = typeof req.query.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.today)
-    ? req.query.today : new Date().toISOString().slice(0, 10);
+    ? req.query.today : easternTodayISO();
   try {
     const report = await runServiceAiReview(apply, today, onlyId);
     if (report === null) return res.status(200).json({ configured: false, mode: apply ? 'apply' : 'dry-run', note: 'Service Work Order object type id not set — nothing to review.' });

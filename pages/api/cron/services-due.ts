@@ -11,7 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { searchServiceWorkOrdersByStatus } from '@/lib/hubspot';
 import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
-import { easternTodayISO } from '@/lib/services/sampleData';
+import { easternTodayISO } from '@/lib/services/time';
 import { notifyServicePastDue } from '@/lib/notifications/triggers';
 import { appBaseUrl } from '@/lib/notifications/send';
 

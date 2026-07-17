@@ -16,6 +16,7 @@ import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder, r
 import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
+import { easternTodayISO } from '@/lib/services/time';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
@@ -206,7 +207,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let review: { verdict: string; status: string } | null = null;
     let reviewError: string | null = null;
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = easternTodayISO();
       const rep = await runServiceAiReview(true, today, id);
       if (!rep) {
         reviewError = 'Services object not configured — AI review skipped.';
