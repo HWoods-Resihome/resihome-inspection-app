@@ -1086,24 +1086,30 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                       {rule.enrollCombinator === 'or' ? 'OR' : 'AND'}
                     </button>
                   )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <ListPicker value={c.field} ariaLabel="Enrollment field" className={pick}
-                      options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
-                      onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patchCrit(i, { field: v, vals: first ? [first] : [] }); }} />
-                    <ListPicker value={c.op} ariaLabel="Operator" className={pick}
-                      options={OPS.map((o) => ({ value: o, label: o }))}
-                      onChange={(v) => patchCrit(i, { op: v, ...(v !== 'is any of' && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
-                    {c.op === 'is known' ? (
-                      <span className="text-[12px] text-gray-500 self-center">has any date on the property</span>
-                    ) : c.op === 'is any of' ? (
-                      <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
-                        onChange={(next) => patchCrit(i, { vals: next })} className={`${pick} flex-1 min-w-[140px]`} />
-                    ) : (
-                      <ListPicker value={c.vals[0] || ''} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
-                        options={valueOptsFor(c.field)} onChange={(v) => patchCrit(i, { vals: [v] })} />
-                    )}
+                  <div className="flex items-center gap-1.5">
+                    <div className="basis-[34%] shrink min-w-0">
+                      <ListPicker value={c.field} ariaLabel="Enrollment field" className={`${pick} w-full`}
+                        options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
+                        onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patchCrit(i, { field: v, vals: first ? [first] : [] }); }} />
+                    </div>
+                    <div className="basis-[26%] shrink min-w-0">
+                      <ListPicker value={c.op} ariaLabel="Operator" className={`${pick} w-full`}
+                        options={OPS.map((o) => ({ value: o, label: o }))}
+                        onChange={(v) => patchCrit(i, { op: v, ...(v !== 'is any of' && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {c.op === 'is known' ? (
+                        <span className="text-[12px] text-gray-500">has any date</span>
+                      ) : c.op === 'is any of' ? (
+                        <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
+                          onChange={(next) => patchCrit(i, { vals: next })} className={`${pick} w-full`} />
+                      ) : (
+                        <ListPicker value={c.vals[0] || ''} ariaLabel="Value" className={`${pick} w-full`}
+                          options={valueOptsFor(c.field)} onChange={(v) => patchCrit(i, { vals: [v] })} />
+                      )}
+                    </div>
                     <button type="button" onClick={() => removeCrit(i)} aria-label="Remove criterion"
-                      className="text-gray-400 hover:text-red-500 text-[16px] leading-none px-1.5 self-center">×</button>
+                      className="shrink-0 text-gray-400 hover:text-red-500 text-[18px] leading-none px-1">×</button>
                   </div>
                 </div>
               ))}
@@ -1132,25 +1138,31 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
                             {rule.stopCombinator === 'or' ? 'OR' : 'AND'}
                           </button>
                         )}
-                        <div className="flex flex-wrap items-center gap-2">
-                          <ListPicker value={c.field} ariaLabel="Stop field" className={pick}
-                            options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
-                            onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patchStopCrit(i, { field: v, vals: first ? [first] : [] }); }} />
-                          <ListPicker value={c.op} ariaLabel="Operator" className={pick}
-                            options={OPS.map((o) => ({ value: o, label: o }))}
-                            onChange={(v) => patchStopCrit(i, { op: v, ...(v !== 'is any of' && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
-                          {c.op === 'is known' ? (
-                            <span className="text-[12px] text-gray-500 self-center">has any date on the property</span>
-                          ) : c.op === 'is any of' ? (
-                            <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
-                              onChange={(next) => patchStopCrit(i, { vals: next })} className={`${pick} flex-1 min-w-[140px]`} />
-                          ) : (
-                            <ListPicker value={c.vals[0] || ''} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
-                              options={valueOptsFor(c.field)} onChange={(v) => patchStopCrit(i, { vals: [v] })} />
-                          )}
+                        <div className="flex items-center gap-1.5">
+                          <div className="basis-[34%] shrink min-w-0">
+                            <ListPicker value={c.field} ariaLabel="Stop field" className={`${pick} w-full`}
+                              options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
+                              onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patchStopCrit(i, { field: v, vals: first ? [first] : [] }); }} />
+                          </div>
+                          <div className="basis-[26%] shrink min-w-0">
+                            <ListPicker value={c.op} ariaLabel="Operator" className={`${pick} w-full`}
+                              options={OPS.map((o) => ({ value: o, label: o }))}
+                              onChange={(v) => patchStopCrit(i, { op: v, ...(v !== 'is any of' && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            {c.op === 'is known' ? (
+                              <span className="text-[12px] text-gray-500">has any date</span>
+                            ) : c.op === 'is any of' ? (
+                              <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
+                                onChange={(next) => patchStopCrit(i, { vals: next })} className={`${pick} w-full`} />
+                            ) : (
+                              <ListPicker value={c.vals[0] || ''} ariaLabel="Value" className={`${pick} w-full`}
+                                options={valueOptsFor(c.field)} onChange={(v) => patchStopCrit(i, { vals: [v] })} />
+                            )}
+                          </div>
                           {rule.stopCriteria.length > 1 && (
                             <button type="button" onClick={() => removeStopCrit(i)} aria-label="Remove stop criterion"
-                              className="text-gray-400 hover:text-red-500 text-[16px] leading-none px-1.5 self-center">×</button>
+                              className="shrink-0 text-gray-400 hover:text-red-500 text-[18px] leading-none px-1">×</button>
                           )}
                         </div>
                       </div>
