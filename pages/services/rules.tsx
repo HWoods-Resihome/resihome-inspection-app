@@ -64,6 +64,10 @@ const PROPERTY_FIELDS: { field: string; options: string[] }[] = [
   // Date field (no enum values) — used with "is known" to gate community grass-cut
   // eligibility on properties that have passed RRQC (`rrqc_pass_date`).
   { field: 'RRQC Pass Date', options: [] },
+  // The property's associated LEASING deal stage (via Property→Listing→Deal). Its
+  // value options are the leasing pipeline stages, loaded live (see dealStages).
+  // e.g. enroll when the deal enters "Pre-Lease Compliance" → a move-in clean.
+  { field: 'Deal Stage', options: [] },
 ];
 const FIELD_NAMES = PROPERTY_FIELDS.map((f) => f.field);
 const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field)?.options ?? [];
@@ -319,6 +323,15 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
     }).catch(() => {});
     return () => { alive = false; };
   }, []);
+  // Leasing-pipeline deal stages for the "Deal Stage" criterion value dropdown.
+  const [dealStages, setDealStages] = useState<{ value: string; label: string }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/services/deal-stages').then((r) => r.json()).then((d) => {
+      if (alive && Array.isArray(d?.stages)) setDealStages(d.stages.filter((s: any) => s && s.value));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const [savingRule, setSavingRule] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
   const [genMsg, setGenMsg] = useState('');
@@ -481,7 +494,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
   const valueOptsFor = (field: string): { value: string; label: string }[] =>
     field === 'Property Status' && coverage.statuses.length
       ? coverage.statuses.map((s) => ({ value: s.value, label: s.label }))
-      : optsFor(field).map((o) => ({ value: o, label: o }));
+      : field === 'Deal Stage'
+        ? dealStages
+        : optsFor(field).map((o) => ({ value: o, label: o }));
   const applicableProps = coverageProps;   // server-filtered to the selected portfolios + regions
   const visibleProps = applicableProps.filter((p) => !propSearch.trim() || `${p.address} ${p.region}`.toLowerCase().includes(propSearch.trim().toLowerCase()));
   const isPropOn = (id: string) => !!rule && (rule.propsMode === 'all' || rule.includedProps.includes(id));

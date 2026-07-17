@@ -4663,6 +4663,69 @@ async function fetchListingMoveInDate(listingRecordId: string): Promise<string |
   }
 }
 
+// ── Rules Engine "Deal Stage" criterion (leasing pipeline) ──────────────────
+// The stages of the LEASING deal pipeline, for the enroll/stop stage dropdowns.
+// Cached ~10 min. Value = HubSpot stage id (matches a deal's `dealstage`).
+let _leasingStages: { at: number; list: { value: string; label: string }[] } | null = null;
+export async function fetchLeasingDealStages(): Promise<{ value: string; label: string }[]> {
+  if (_leasingStages && Date.now() - _leasingStages.at < 10 * 60_000) return _leasingStages.list;
+  try {
+    const resp = await hubspotFetch(`/crm/v3/pipelines/deals`);
+    const pipes: any[] = resp?.results || [];
+    const lp = pipes.find((p) => String(p.id) === LEASING_PIPELINE_ID) || null;
+    const stages = lp ? (lp.stages || []) : [];
+    const list = stages
+      .slice()
+      .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
+      .map((s: any) => ({ value: String(s.id), label: String(s.label || s.id) }));
+    _leasingStages = { at: Date.now(), list };
+    return list;
+  } catch (e) {
+    console.warn('[deal-stages] leasing pipeline fetch failed:', e);
+    return _leasingStages?.list || [];
+  }
+}
+
+// Per-property CURRENT leasing-deal stage ids, via Property → Listing → Deal.
+// Returns propertyId → Set<stageId>. Only called when a rule uses a Deal Stage
+// criterion; capped to keep the nightly run bounded (each property costs a
+// couple of association calls). Best-effort — a property that errors is skipped.
+export async function fetchPropertyLeasingDealStages(propertyIds: string[]): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>();
+  const did = dealsTypeId();
+  const lid = listingTypeId();
+  const { property } = typeIds();
+  const CAP = 800;
+  const ids = propertyIds.slice(0, CAP);
+  for (const propId of ids) {
+    try {
+      const la = await hubspotFetch(`/crm/v4/objects/${property}/${propId}/associations/${lid}?limit=100`);
+      const listingIds: string[] = (la.results || []).map((r: any) => String(r.toObjectId ?? r.id)).filter(Boolean);
+      if (!listingIds.length) continue;
+      const dealIds = new Set<string>();
+      for (const listingId of listingIds) {
+        const da = await hubspotFetch(`/crm/v4/objects/${lid}/${listingId}/associations/${did}?limit=100`);
+        for (const r of da.results || []) { const id = r.toObjectId ?? r.id; if (id != null) dealIds.add(String(id)); }
+      }
+      if (!dealIds.size) continue;
+      const stages = new Set<string>();
+      const arr = [...dealIds];
+      for (let i = 0; i < arr.length; i += 100) {
+        const resp = await hubspotFetch(`/crm/v3/objects/${did}/batch/read`, {
+          method: 'POST', body: JSON.stringify({ properties: ['pipeline', 'dealstage'], inputs: arr.slice(i, i + 100).map((id) => ({ id })) }),
+        });
+        for (const rec of resp.results || []) {
+          const p = rec.properties || {};
+          if (String(p.pipeline ?? '') === LEASING_PIPELINE_ID && p.dealstage) stages.add(String(p.dealstage));
+        }
+      }
+      if (stages.size) out.set(propId, stages);
+    } catch { /* skip this property */ }
+  }
+  if (propertyIds.length > CAP) console.warn(`[deal-stages] capped at ${CAP} of ${propertyIds.length} properties`);
+  return out;
+}
+
 export interface ListingInfo {
   listingPrice: number | null;
   listingDate: string | null;

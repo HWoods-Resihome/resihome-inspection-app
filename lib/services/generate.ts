@@ -21,7 +21,7 @@
  *  - No cadence date math — due date is today + First Order Due (days), else +5.
  *  - No vendor rotation — the first assigned vendor is used for every order.
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { vendorEmail } from './vendors';
@@ -54,9 +54,19 @@ function parseCriteria(p: Record<string, any>): Criterion[] {
   const f = String(p.enroll_field || '');
   return f ? [{ field: f, op: String(p.enroll_op || 'is'), vals: parseVals(p.enroll_value) }] : [];
 }
-function matchCriterion(prop: { rrqcPassDate: string; status: string }, c: Criterion): boolean {
+interface EvalProp { rrqcPassDate: string; status: string; dealStages?: string[] }
+function matchCriterion(prop: EvalProp, c: Criterion): boolean {
   const field = c.field.toLowerCase();
   if (/rrqc/.test(field)) return c.op === 'is known' ? !!prop.rrqcPassDate : true;
+  // Deal Stage — the property's associated leasing deal(s) current stage id(s).
+  // vals hold stage ids; membership match, negated for "is not".
+  if (/deal/.test(field)) {
+    const stages = prop.dealStages || [];
+    const vals = c.vals.map((v) => v.trim()).filter(Boolean);
+    if (!vals.length) return true;
+    const hit = vals.some((v) => stages.includes(v));
+    return c.op === 'is not' ? !hit : hit;
+  }
   if (/status/.test(field)) {
     const s = (prop.status || '').toLowerCase();
     const vals = c.vals.map((v) => v.trim().toLowerCase()).filter(Boolean);
@@ -102,7 +112,7 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
   // no value is skipped so an empty row can't block/allow everything.
   const enrollCombinator = p.enroll_combinator === 'or' ? 'or' : 'and';
   const enrollCriteria = parseCriteria(p).filter(isEvaluableCriterion);
-  const enrollOk = (prop: { status: string; rrqcPassDate: string }): boolean => {
+  const enrollOk = (prop: EvalProp): boolean => {
     if (!enrollCriteria.length) return true;
     const results = enrollCriteria.map((c) => matchCriterion(prop, c));
     return enrollCombinator === 'or' ? results.some(Boolean) : results.every(Boolean);
@@ -116,7 +126,7 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
   const stopIsCondition = (p.stop_mode || 'condition') === 'condition';
   const stopCombinator = p.stop_combinator === 'or' ? 'or' : 'and';
   const stopCriteria = parseStopCriteria(p).filter(isEvaluableCriterion);
-  const stopHit = (prop: { status: string; rrqcPassDate: string }): boolean => {
+  const stopHit = (prop: EvalProp): boolean => {
     if (!stopEnabled || !stopIsCondition || !stopCriteria.length) return false;
     const results = stopCriteria.map((c) => matchCriterion(prop, c));
     return stopCombinator === 'or' ? results.some(Boolean) : results.every(Boolean);
@@ -124,8 +134,18 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
 
   const included = new Set(parseArr(p.included_props_json).map(String));
   const listMode = p.props_mode === 'list';
-  return props
-    .filter((prop) => !listMode || included.has(prop.id))
+  const candidates = props.filter((prop) => !listMode || included.has(prop.id));
+
+  // Deal Stage criteria (enroll or stop) → resolve each candidate's current
+  // leasing-deal stage(s) via Property→Listing→Deal (only when actually used).
+  const hasDealCrit = [...enrollCriteria, ...stopCriteria].some((c) => /deal/.test((c.field || '').toLowerCase()));
+  const dealMap = hasDealCrit
+    ? await fetchPropertyLeasingDealStages(candidates.map((c) => c.id)).catch(() => new Map<string, Set<string>>())
+    : new Map<string, Set<string>>();
+  const enrich = (prop: typeof candidates[number]): EvalProp & typeof candidates[number] => ({ ...prop, dealStages: [...(dealMap.get(prop.id) || [])] });
+
+  return candidates
+    .map(enrich)
     .filter((prop) => enrollOk(prop))
     .filter((prop) => !stopHit(prop))   // stop condition met → exclude
     .map((prop) => ({ id: prop.id, scope: 'property' as const, address: prop.address, locality: prop.locality, region: prop.region }));
@@ -137,6 +157,7 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
 function isEvaluableCriterion(c: Criterion): boolean {
   const f = (c.field || '').toLowerCase();
   if (/rrqc/.test(f)) return c.op === 'is known'; // only "is known" is evaluable for the date field
+  if (/deal/.test(f)) return c.vals.some((v) => v.trim() !== '');
   if (/status/.test(f)) return c.vals.some((v) => v.trim() !== '');
   return false;
 }
