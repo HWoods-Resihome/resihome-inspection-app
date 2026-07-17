@@ -58,7 +58,7 @@ function checksFor(all: AiCheck[], worktype: string, subtype: string): string[] 
     .map((c) => c.check);
 }
 
-export interface ServiceVerdict { verdict: 'clean' | 'needs_review'; geofenceOk: boolean; notes: string; issues: string[]; }
+export interface ServiceVerdict { verdict: 'clean' | 'needs_review'; workEvidenced: boolean; geofenceOk: boolean; notes: string; issues: string[]; }
 
 /** Run the AI review for one submitted order's evidence, against the given check set. */
 export async function reviewOne(order: { id: string; props: Record<string, any> }, allChecks: AiCheck[] = SAMPLE_AI_CHECKS): Promise<ServiceVerdict> {
@@ -73,11 +73,27 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
   const petBefore = splitUrls(p.pet_before_photo_urls);
   const petAfter = splitUrls(p.pet_after_photo_urls);
 
-  // Photo budget, labelled by group so the model knows before vs after.
-  const labelled: { label: string; url: string }[] = [];
-  const add = (label: string, urls: string[]) => urls.forEach((url) => labelled.push({ label, url }));
-  add('BEFORE', beforeUrls); add('AFTER', afterUrls); add('PET BEFORE', petBefore); add('PET AFTER', petAfter);
-  const picks = labelled.slice(0, MAX_PHOTOS);
+  // Photo budget, labelled by group. Selected round-robin across the non-empty
+  // groups so BEFORE *and* AFTER are always represented — otherwise a service with
+  // 8+ before photos would fill the budget with befores and send no afters, making
+  // the before/after diff impossible. Presented grouped (befores, then afters) so
+  // the model can compare the two sets pairwise.
+  const groups = [
+    { label: 'BEFORE', urls: [...beforeUrls] },
+    { label: 'AFTER', urls: [...afterUrls] },
+    { label: 'PET BEFORE', urls: [...petBefore] },
+    { label: 'PET AFTER', urls: [...petAfter] },
+  ].filter((g) => g.urls.length);
+  const groupOrder = new Map(groups.map((g, i) => [g.label, i]));
+  const picked: { label: string; url: string }[] = [];
+  while (picked.length < MAX_PHOTOS && groups.some((g) => g.urls.length)) {
+    for (const g of groups) {
+      if (picked.length >= MAX_PHOTOS) break;
+      const url = g.urls.shift();
+      if (url) picked.push({ label: g.label, url });
+    }
+  }
+  const picks = picked.sort((a, b) => (groupOrder.get(a.label)! - groupOrder.get(b.label)!));
   const blocks = await Promise.all(picks.map((x) => fetchPhotoBlock(x.url)));
   const photoContent: any[] = [];
   for (let i = 0; i < picks.length; i++) {
@@ -106,6 +122,12 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
     `decide if the evidence is CLEAN (auto-approve) or NEEDS REVIEW (route to a human). Evaluate against the checks below — ` +
     `every check matters equally — plus location/timing integrity. Judge from the visible evidence, the vendor's answers, and the ` +
     `structured metadata.\n\n` +
+    `WORK VERIFICATION (before ↔ after): the core question is whether the work ACTUALLY HAPPENED. Compare the BEFORE photos to the ` +
+    `AFTER photos and look for the specific change this service should produce — e.g. grass visibly cut/edged, pool cleared, area ` +
+    `cleaned/decluttered, trash removed, mulch laid. Set work_evidenced=false and route to NEEDS REVIEW when the change is missing or ` +
+    `unconvincing: before/after look essentially identical, the after doesn't show the expected result, there are no before photos to ` +
+    `compare against (for a service that should have them), there are no after photos at all, or the two sets appear to be different ` +
+    `places. A convincing, visible before→after improvement consistent with the service is what earns work_evidenced=true.\n\n` +
     `LOCATION & TIMING: every photo has a burned-in evidence stamp (bottom-left) showing the address, local capture time, GPS ` +
     `coordinates, and a ✓ or ✗ proximity mark. ✓ = the capture GPS was within ~${PROXIMITY_THRESHOLD_M}m of the property (on-site); ` +
     `✗ = it was outside that radius. READ these stamps. Treat as a GEOFENCE CONCERN (set geofence_ok=false) any of: an AFTER photo ` +
@@ -131,11 +153,12 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
       type: 'object',
       properties: {
         verdict: { type: 'string', enum: ['clean', 'needs_review'], description: 'clean = auto-approve to Completed; needs_review = route to a human.' },
+        work_evidenced: { type: 'boolean', description: 'true when the before→after photos convincingly show the expected work was done; false when the change is missing/unconvincing, before or after photos are absent, or the sets look like different places. A false value must route to needs_review.' },
         geofence_ok: { type: 'boolean', description: 'false when the photo evidence stamps show an off-site (✗) or missing capture GPS, a location that does not match the address, or implausible capture timing. A false value must route to needs_review.' },
         notes: { type: 'string', description: 'One or two plain sentences explaining the decision for the coordinator.' },
-        issues: { type: 'array', items: { type: 'string' }, description: 'Short bullet list of specific concerns (empty when clean). Prefix any location/timing concern with "Geofence:".' },
+        issues: { type: 'array', items: { type: 'string' }, description: 'Short bullet list of specific concerns (empty when clean). Prefix a before/after concern with "Work:" and a location/timing concern with "Geofence:".' },
       },
-      required: ['verdict', 'geofence_ok', 'notes'],
+      required: ['verdict', 'work_evidenced', 'geofence_ok', 'notes'],
     },
   };
 
@@ -157,11 +180,14 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
   } catch { /* noop */ }
   const block = (data?.content || []).find((c: any) => c.type === 'tool_use' && c.name === 'report_verdict');
   const input = block?.input || {};
-  // A geofence concern is a hard router to review — never auto-complete an order
-  // whose location/timing evidence is suspect, even if the work looks done.
+  // Geofence and before/after work-evidence are both hard routers to review —
+  // never auto-complete an order whose location is suspect or whose photos don't
+  // actually show the work, even if the vendor's answers say it's done.
   const geofenceOk = input.geofence_ok !== false;
+  const workEvidenced = input.work_evidenced !== false;
   const verdict: ServiceVerdict = {
-    verdict: (input.verdict === 'clean' && geofenceOk) ? 'clean' : 'needs_review',
+    verdict: (input.verdict === 'clean' && geofenceOk && workEvidenced) ? 'clean' : 'needs_review',
+    workEvidenced,
     geofenceOk,
     notes: String(input.notes || '').slice(0, 900),
     issues: Array.isArray(input.issues) ? input.issues.map((s: any) => String(s)).slice(0, 12) : [],
@@ -221,11 +247,12 @@ export async function runServiceAiReview(apply: boolean, todayISO: string, onlyI
       if (clean) result.completed++; else result.routedToReview++;
 
       if (apply) {
+        const workPrefix = v.workEvidenced ? '' : '⚠ Work not evidenced: before/after photos don’t clearly show the work was done — verify before completing.\n\n';
         const geoPrefix = v.geofenceOk ? '' : '⚠ Geofence: photo location/timing evidence is off-site or missing — verify before completing.\n\n';
         const notes = [v.notes, ...(v.issues.length ? ['Issues:', ...v.issues.map((i) => `• ${i}`)] : [])].join('\n');
         const props: Record<string, any> = {
           ai_verdict: v.verdict === 'clean' ? 'clean' : 'needs_review',
-          ai_notes: geoPrefix.concat(isMasterCut && v.verdict === 'clean' ? 'Community grass-cut master — routed to review to confirm covered homes and split into per-property billing.\n\n' : '').concat(notes).slice(0, 2000),
+          ai_notes: workPrefix.concat(geoPrefix).concat(isMasterCut && v.verdict === 'clean' ? 'Community grass-cut master — routed to review to confirm covered homes and split into per-property billing.\n\n' : '').concat(notes).slice(0, 2000),
           status: clean ? 'completed' : 'review',
         };
         if (clean) {
@@ -236,8 +263,8 @@ export async function runServiceAiReview(apply: boolean, todayISO: string, onlyI
         await patchServiceWorkOrder(order.id, props);
         void recordServiceAudit({
           serviceId: order.id, action: 'ai_review', actorName: 'AI Review',
-          detail: clean ? 'AI review clean → Completed' : `AI review flagged → Review${v.geofenceOk ? '' : ' (geofence)'}`,
-          meta: { verdict: v.verdict, geofenceOk: v.geofenceOk },
+          detail: clean ? 'AI review clean → Completed' : `AI review flagged → Review${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).length ? ` (${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).join(', ')})` : ''}`,
+          meta: { verdict: v.verdict, workEvidenced: v.workEvidenced, geofenceOk: v.geofenceOk },
         });
       }
       result.items.push({ id: order.id, service, verdict: v.verdict, notes: v.notes, issues: v.issues, action: apply ? (clean ? 'completed' : 'review') : (clean ? 'would-complete' : 'would-review') });
