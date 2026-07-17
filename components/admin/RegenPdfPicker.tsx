@@ -21,6 +21,8 @@ type Item = { id: string; templateType: string; label: string; address: string; 
 // "Last N days" windows for the regen filter (0 = all time).
 const DAY_WINDOWS: { value: number; label: string }[] = [
   { value: 0, label: 'All time' },
+  { value: 2, label: 'Last 2 days' },
+  { value: 3, label: 'Last 3 days' },
   { value: 7, label: 'Last 7 days' },
   { value: 14, label: 'Last 14 days' },
   { value: 30, label: 'Last 30 days' },
