@@ -1029,6 +1029,30 @@ export async function fetchPropertyCommunityName(propertyRecordId: string): Prom
 }
 
 /**
+ * The `rrqc_walk_email` distribution address on the Community object associated
+ * with a property, or null. Used to CC a community's RRQC walk contact on the
+ * New Construction RRQC completion email. Fail-open → null (no community, no
+ * association, or a blank field all yield null, so the email just goes to the
+ * inspector).
+ */
+export async function fetchPropertyCommunityRrqcWalkEmail(propertyRecordId: string): Promise<string | null> {
+  try {
+    const meta = await resolveCommunityMeta();
+    if (!meta) return null;
+    const { property } = typeIds();
+    const assoc = await hubspotFetch(`/crm/v4/objects/${property}/${propertyRecordId}/associations/${meta.typeId}?limit=1`);
+    const communityId = assoc?.results?.[0]?.toObjectId;
+    if (!communityId) return null;
+    const rec = await hubspotFetch(`/crm/v3/objects/${meta.typeId}/${communityId}?properties=rrqc_walk_email`);
+    const email = String(rec?.properties?.rrqc_walk_email || '').trim();
+    return email || null;
+  } catch (e) {
+    console.warn('[community] rrqc_walk_email fetch failed:', e);
+    return null;
+  }
+}
+
+/**
  * The FIRST Property record associated to a Community object, or null. Used to
  * place a community inspection on the map — its own record has no street address,
  * so we borrow the community's first property's location. Fail-open.

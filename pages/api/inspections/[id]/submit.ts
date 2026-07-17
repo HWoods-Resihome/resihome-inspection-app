@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields, readInspectionProps, stampRrqcResultOnProperty } from '@/lib/hubspot';
+import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields, readInspectionProps, stampRrqcResultOnProperty, fetchPropertyCommunityRrqcWalkEmail } from '@/lib/hubspot';
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { createComplianceTicketsOnSubmit } from '@/lib/complianceTickets';
 import { postListingPriceAlertOnSubmit } from '@/lib/listingPriceAlert';
@@ -399,6 +399,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!isRateCard && inspection && (inspection.pdfMasterUrl || inspection.pdfUrl)) {
       // A PDF already exists (e.g. reopen → resubmit) → /api/pdf won't re-send
       // (not its first PDF), so send here WITH the existing report attached.
+      // New Construction RRQC also CCs the associated community's rrqc_walk_email
+      // (fail-open — inspector-only if there's no community or the field is blank).
+      let extraTo: string[] = [];
+      if ((inspection.templateType || '') === 'qc_new_construction_rrqc' && inspection.propertyRecordId) {
+        const walkEmail = await fetchPropertyCommunityRrqcWalkEmail(inspection.propertyRecordId).catch(() => null);
+        if (walkEmail) extraTo = [walkEmail];
+      }
       await notifyInspectionCompleted({
         inspectionId: id,
         inspectorEmail: inspection.inspectorEmail,
@@ -406,6 +413,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         address: inspection.propertyAddressSnapshot || inspection.inspectionName || 'the property',
         pdfUrl: inspection.pdfMasterUrl || inspection.pdfUrl,
         baseUrl: appBaseUrl(req),
+        extraTo,
       });
     }
 

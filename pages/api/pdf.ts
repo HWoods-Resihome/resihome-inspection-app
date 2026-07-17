@@ -3,7 +3,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
 import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
-import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection, readInspectionProps, fetchInspectionById } from '@/lib/hubspot';
+import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection, readInspectionProps, fetchInspectionById, fetchPropertyCommunityRrqcWalkEmail } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
 import { externalOwnedWriteDenial } from '@/lib/inspectionGuard';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
@@ -249,6 +249,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const isRateCard = (insp?.templateType || '') === 'pm_scope_rate_card';
         const completed = st === 'completed' || st === 'complete' || st === 'submitted';
         if (insp && completed && !isRateCard) {
+          // New Construction RRQC: also send to the associated community's
+          // rrqc_walk_email distribution address, if the property is linked to a
+          // community and that field is set. Otherwise the email just goes to the
+          // inspector. Fail-open — a lookup error never blocks the send.
+          let extraTo: string[] = [];
+          if ((insp.templateType || '') === 'qc_new_construction_rrqc' && insp.propertyRecordId) {
+            const walkEmail = await fetchPropertyCommunityRrqcWalkEmail(insp.propertyRecordId).catch(() => null);
+            if (walkEmail) extraTo = [walkEmail];
+          }
           await notifyInspectionCompleted({
             inspectionId: body.inspectionRecordId,
             inspectorEmail: insp.inspectorEmail,
@@ -256,6 +265,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             address: insp.propertyAddressSnapshot || insp.inspectionName || 'the property',
             pdfUrl,
             baseUrl: appBaseUrl(req),
+            extraTo,
           });
         }
       } catch (e: any) { console.warn('[pdf] completion email skipped:', String(e?.message || e).slice(0, 140)); }

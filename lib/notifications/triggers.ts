@@ -27,14 +27,18 @@ const fullAddr = (street: string, locality?: string | null): string => {
 export async function notifyInspectionCompleted(o: {
   inspectionId: string; inspectorEmail?: string | null; templateLabel: string; address: string;
   pdfUrl?: string | null; baseUrl: string; force?: boolean;
+  /** Extra To recipients beyond the inspector (e.g. a community's RRQC walk
+   *  distribution address). Invalid/blank entries are dropped downstream. */
+  extraTo?: Array<string | null | undefined>;
 }): Promise<void> {
   try {
     const to = String(o.inspectorEmail || '').trim();
     if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'inspection_completed')))) return;
+    const alsoTo = (o.extraTo || []).map((x) => String(x || '').trim()).filter((x) => validEmail(x));
     let attachment: { filename: string; content: Buffer; mimeType: string } | null = null;
     if (o.pdfUrl) { const buf = await fetchToBuffer(o.pdfUrl); if (buf) attachment = { filename: pdfName('inspection', o.inspectionId), content: buf, mimeType: 'application/pdf' }; }
     await sendNotificationEmail({
-      to, subject: `Inspection Completed — ${o.address}`,
+      to, alsoTo, subject: `Inspection Completed — ${o.address}`,
       heading: 'Inspection Completed',
       intro: `Your ${o.templateLabel} at ${o.address} is complete.${attachment ? ' A copy of the report is attached.' : ''}`,
       rows: [['Property', o.address], ['Inspection', o.templateLabel]],

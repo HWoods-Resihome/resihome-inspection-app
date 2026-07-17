@@ -26,6 +26,9 @@ function esc(s: string): string {
 
 export interface NotificationEmail {
   to: string;
+  /** Extra To recipients beyond the primary (e.g. a community RRQC distribution
+   *  address). De-duped against `to`; invalid/blank entries are dropped. */
+  alsoTo?: string[];
   subject: string;
   heading: string;           // pink header title
   intro: string;             // one-line lead paragraph
@@ -76,9 +79,21 @@ export async function sendNotificationEmail(e: NotificationEmail): Promise<{ sen
     return { sent: false, error: 'system_email_not_configured' };
   }
   try {
+    // Primary recipient + any extra To addresses, trimmed, valid, de-duped
+    // (case-insensitively), preserving order with `to` first.
+    const seen = new Set<string>();
+    const toList = [e.to, ...(e.alsoTo || [])]
+      .map((x) => String(x || '').trim())
+      .filter((x) => {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)) return false;
+        const k = x.toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
     return await sendReplyEmailWithToken({
       refreshToken, fromEmail, fromName: process.env.SYSTEM_GMAIL_FROM_NAME || 'ResiWalk',
-      to: [e.to],
+      to: toList,
       subject: e.subject, htmlBody: buildHtml(e), textBody: buildText(e),
       attachments: e.attachment ? [e.attachment] : [],
     });
