@@ -264,20 +264,20 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             aria-label={panelOpen ? 'Close notes/photos' : 'Add notes/photos'}
             aria-expanded={panelOpen}
             title={panelOpen ? 'Close notes/photos' : 'Add notes/photos (Optional)'}
-            className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-heading font-semibold transition ${
+            className={`shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full transition ${
               panelOpen
                 ? 'bg-gray-700 text-white hover:bg-gray-800'
                 : 'bg-gray-100 text-gray-600 hover:bg-brand/10 hover:text-brand'
             } ${hasContent && !panelOpen ? 'ring-2 ring-brand/40' : ''}`}
           >
-            {/* Camera + pencil glyph combo */}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {/* Camera + pencil glyph combo (icon-only — the label lives in
+                aria-label/title so it isn't wordy on the row). */}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="6" width="14" height="11" rx="2" />
               <circle cx="9" cy="11.5" r="2.2" />
               <path d="M5.5 6L6.5 4h5L12.5 6" />
               <path d="M18 9l3.5 3.5L19 21l-4 1 1-4 6.5-6.5z" transform="scale(0.7) translate(8 6)" />
             </svg>
-            <span>Notes/Photos</span>
           </button>
         )}
       </div>
