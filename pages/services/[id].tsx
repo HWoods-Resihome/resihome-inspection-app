@@ -47,9 +47,10 @@ interface ServiceView {
 
 const EDITABLE = new Set(['', 'estimated', 'assigned']);
 // Standardized to mirror the inspection template: a section header is a black
-// bold title on a light-grey band across the top of its white card; question
-// labels within a section are black bold (photo group labels stay grey-uppercase).
-const SECTION_HEAD = '-mx-4 -mt-4 mb-4 px-4 py-2.5 bg-gray-50 border-b border-gray-200 rounded-t-2xl font-heading font-bold text-[15px] text-ink';
+// bold title on a light-PINK (brand-tinted) band across the top of its white card,
+// matching the Scope Rate Card + Q&A inspection section headers; question labels
+// within a section are black bold (photo group labels stay grey-uppercase).
+const SECTION_HEAD = '-mx-4 -mt-4 mb-4 px-4 py-2.5 bg-brand/5 border-b border-brand/20 rounded-t-2xl font-heading font-bold text-[15px] text-ink';
 const Q_LABEL = 'block text-sm font-heading font-bold text-ink mb-1.5';
 const splitUrls = (v: any): string[] => String(v || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
 const num = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null; };
@@ -246,7 +247,7 @@ function CollapsibleSection({ title, subtitle, right, defaultOpen = true, bodyCl
   return (
     <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
-        className="w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-left">
+        className="w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-brand/5 border-b border-brand/20 text-left">
         <div className="min-w-0">
           <div className="font-heading font-bold text-[15px] text-ink">{title}</div>
           {subtitle && <p className="text-[12px] font-normal text-gray-500 mt-0.5">{subtitle}</p>}

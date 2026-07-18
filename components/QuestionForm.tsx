@@ -2302,7 +2302,7 @@ export function QuestionForm({
                 type="button"
                 onClick={() => toggleCollapsed(inst.instanceKey)}
                 aria-expanded={!isCollapsed}
-                className="w-full bg-gray-50 text-gray-900 border-b border-gray-200 px-4 py-3 flex items-center justify-between text-left hover:bg-gray-100 transition"
+                className="w-full bg-brand/5 text-gray-900 border-b border-brand/20 px-4 py-3 flex items-center justify-between text-left hover:bg-brand/10 transition"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <svg

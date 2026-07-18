@@ -1149,7 +1149,7 @@ export function QcReinspectForm(props: Props) {
             <button
               type="button"
               onClick={() => toggleCollapse(s.key)}
-              className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-left"
+              className="w-full flex items-center justify-between px-4 py-2.5 bg-brand/5 border-b border-brand/20 text-left"
             >
               <div className="flex items-center gap-2 min-w-0">
                 <span className={'text-gray-400 transition-transform ' + (isCollapsed ? '' : 'rotate-90')}>&#9654;</span>
