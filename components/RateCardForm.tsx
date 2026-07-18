@@ -1932,7 +1932,11 @@ export function RateCardForm(props: RateCardFormProps) {
       return { ...m, [sectionId]: existing.filter((l) => l.externalId !== externalId) };
     });
     if (!linesHydrated || props.readOnly) return;
-    const recordId = recordIdsByExternalId[externalId];
+    // Read the recordId from the REF, not the render-time closure: a create that
+    // just stitched back its id (a few ms earlier) may not be in the closure yet,
+    // so the closure read would miss it, take the "no server record" branch, and
+    // leave the HubSpot record un-archived → it reappears on reload and still bills.
+    const recordId = recordIdsByExternalIdRef.current[externalId] || recordIdsByExternalId[externalId];
     if (!recordId) {
       // No server record yet — its create may still be IN FLIGHT. Mark the
       // externalId so the create's completion archives it (below, in

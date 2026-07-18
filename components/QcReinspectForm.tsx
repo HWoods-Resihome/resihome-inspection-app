@@ -471,14 +471,20 @@ export function QcReinspectForm(props: Props) {
 
   async function addAfterPhotos(key: string, section: string, location: string, newUrls: string[]) {
     if (newUrls.length === 0) return;
-    const merged = [...(afterPhotos[key] || []), ...newUrls];
+    // Derive from (and immediately update) the ref, not the render-time closure —
+    // otherwise two rapid actions before a re-render both start from the same stale
+    // snapshot and the second silently reverts the first (lost photos / resurrected
+    // deletes). The ref update lets back-to-back edits compose.
+    const merged = [...(afterPhotosRef.current[key] || []), ...newUrls];
+    afterPhotosRef.current = { ...afterPhotosRef.current, [key]: merged };
     setAfterPhotos((cur) => ({ ...cur, [key]: merged }));
     try { await persistAfterPhotos(key, section, location, merged); }
     catch (e: any) { if (!isOfflineError(e)) void dialog.alert(`Could not save photos: ${e?.message || e}`); }
   }
 
   async function removeAfterPhoto(key: string, section: string, location: string, url: string) {
-    const merged = (afterPhotos[key] || []).filter((u) => u !== url);
+    const merged = (afterPhotosRef.current[key] || []).filter((u) => u !== url);
+    afterPhotosRef.current = { ...afterPhotosRef.current, [key]: merged };
     setAfterPhotos((cur) => ({ ...cur, [key]: merged }));
     try { await persistAfterPhotos(key, section, location, merged); }
     catch (e: any) { if (!isOfflineError(e)) void dialog.alert(`Could not update photos: ${e?.message || e}`); }
@@ -499,7 +505,7 @@ export function QcReinspectForm(props: Props) {
     const updated = { ...roomVerdictRef.current, [key]: next };
     roomVerdictRef.current = updated;
     setRoomVerdict(updated);
-    void persistAfterPhotos(key, section, location, afterPhotos[key] || [])
+    void persistAfterPhotos(key, section, location, afterPhotosRef.current[key] || [])
       .catch((e) => console.warn('[QC] room verdict save failed:', e));
   }
   function setRoomNoteText(key: string, text: string) {
@@ -510,7 +516,7 @@ export function QcReinspectForm(props: Props) {
   // Persist the room note (called on blur) onto the room's after-photo record.
   function saveRoomNote(key: string, section: string, location: string) {
     if (props.readOnly) return;
-    void persistAfterPhotos(key, section, location, afterPhotos[key] || [])
+    void persistAfterPhotos(key, section, location, afterPhotosRef.current[key] || [])
       .catch((e) => console.warn('[QC] room note save failed:', e));
   }
 
@@ -560,15 +566,17 @@ export function QcReinspectForm(props: Props) {
   // Swap an After photo for its marked-up version (re-upload + replace, persist).
   async function replaceAfterPhoto(key: string, section: string, location: string, index: number, file: File) {
     try {
-      const oldForReplace = (afterPhotos[key] || [])[index];
+      const oldForReplace = (afterPhotosRef.current[key] || [])[index];
       // Annotating an un-synced draft: discard the original queued draft so it and
       // the annotated copy don't BOTH upload+attach (duplicate photo).
       if (oldForReplace && oldForReplace.startsWith('blob:')) { try { await discardQueuedByUrls([oldForReplace]); removePhotoAttachByUrl([oldForReplace]); } catch { /* best-effort */ } }
       const url = await uploadPhotoOrQueue(file, props.inspectionRecordId, key, { replacesUrl: oldForReplace });
-      const arr = [...(afterPhotos[key] || [])];
+      // Read the LATEST array via the ref (an upload await elapsed; the closure is stale).
+      const arr = [...(afterPhotosRef.current[key] || [])];
       if (index < 0 || index >= arr.length) return;
       const oldUrl = arr[index];
       arr[index] = url;
+      afterPhotosRef.current = { ...afterPhotosRef.current, [key]: arr };
       setAfterPhotos((cur) => ({ ...cur, [key]: arr }));
       await persistAfterPhotos(key, section, location, arr);
       // Keep line tags in sync — swap the old URL for the marked-up one.
