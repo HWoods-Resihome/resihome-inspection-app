@@ -110,3 +110,35 @@ export async function notifyServicePastDue(o: {
     });
   } catch (e: any) { console.warn('[notify] service_past_due failed:', String(e?.message || e).slice(0, 160)); }
 }
+
+/** Daily DIGEST: one email per vendor listing ALL of their past-due open services
+ *  (a running summary, so a service keeps appearing until it's completed — this is
+ *  the standing past-due nudge + escalation). Respects the vendor's past-due
+ *  notification toggle. */
+export async function notifyVendorPastDueDigest(o: {
+  vendorEmail?: string | null; vendorName?: string | null; baseUrl: string; force?: boolean;
+  services: { serviceId: string; address: string; locality?: string; worktypeLabel: string; subtypeLabel: string; dueDate?: string; daysOverdue: number }[];
+}): Promise<void> {
+  try {
+    const to = String(o.vendorEmail || '').trim();
+    if (!o.services.length) return;
+    if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'service_past_due')))) return;
+    // Most overdue first; cap the emailed list so a big backlog can't bloat the email.
+    const sorted = [...o.services].sort((a, b) => b.daysOverdue - a.daysOverdue);
+    const CAP = 40;
+    const shown = sorted.slice(0, CAP);
+    const n = o.services.length;
+    const rows: Array<[string, string]> = shown.map((s) => [
+      `${s.worktypeLabel} (${s.subtypeLabel})`,
+      `${fullAddr(s.address, s.locality)} — was due ${fmtMDY(s.dueDate)} · ${s.daysOverdue}d overdue`,
+    ]);
+    if (n > CAP) rows.push(['…and more', `${n - CAP} additional past-due service(s) — open My Services to see them all`]);
+    await sendNotificationEmail({
+      to, subject: `Past Due Summary — ${n} service${n === 1 ? '' : 's'} awaiting completion`,
+      heading: 'Past Due Services',
+      intro: `You have ${n} past-due service${n === 1 ? '' : 's'}. Please submit ${n === 1 ? 'its' : 'their'} completion as soon as possible.`,
+      rows,
+      linkUrl: `${o.baseUrl}/services`, linkLabel: 'Open My Services',
+    });
+  } catch (e: any) { console.warn('[notify] service_past_due_digest failed:', String(e?.message || e).slice(0, 160)); }
+}

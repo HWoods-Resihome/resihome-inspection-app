@@ -11,6 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runServiceGeneration } from '@/lib/services/generate';
 import { easternTodayISO } from '@/lib/services/time';
+import { recordErrorEvent } from '@/lib/errorLog';
 
 export const config = { maxDuration: 300 };
 
@@ -26,9 +27,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const report = await runServiceGeneration(true, today);
     if (report === null) return res.status(200).json({ ok: true, skipped: true, reason: 'Service objects not configured.' });
     console.log('[cron/services-generate]', JSON.stringify({ created: report.created, skipped: report.skippedExisting, errors: report.errors }));
+    // Surface per-rule generation failures in the Admin ▸ Error Log so a broken
+    // rule/target isn't buried in Vercel logs. One event summarizing the run, with
+    // up to 10 failing (rule → target → error) samples.
+    if (report.errors > 0) {
+      const samples = report.items
+        .filter((it) => it.action === 'error')
+        .slice(0, 10)
+        .map((it) => `${it.ruleName || it.ruleId} · ${it.target}: ${it.error || 'unknown error'}`);
+      void recordErrorEvent({
+        kind: 'server', source: 'server',
+        message: `Service generation finished with ${report.errors} error(s) (created ${report.created}). ${samples.join(' | ')}`.slice(0, 1000),
+        url: '/api/cron/services-generate',
+        meta: { created: report.created, skippedExisting: report.skippedExisting, errors: report.errors, today },
+      });
+    }
     return res.status(200).json({ ok: true, created: report.created, skippedExisting: report.skippedExisting, errors: report.errors });
   } catch (e: any) {
     console.error('[cron/services-generate] failed:', e);
+    // A hard failure of the whole run → Admin ▸ Error Log (best-effort).
+    void recordErrorEvent({
+      kind: 'server', source: 'server',
+      message: `Service generation cron FAILED: ${String(e?.message || e)}`.slice(0, 1000),
+      url: '/api/cron/services-generate',
+      meta: { today },
+    });
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
   }
 }
