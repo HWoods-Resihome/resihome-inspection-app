@@ -51,5 +51,19 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Microphone: the AI camera, voice line assistant, Live Room Scan, and
+         video-with-audio capture all call getUserMedia({audio}). Without these the
+         OS denies audio and those features fail/record silence with no prompt. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Location: the evidence stamp / services geofence burn live GPS into photos
+         via navigator.geolocation; without these every capture stamps
+         "Location unverified" and the proximity proof never renders. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Android 13+ runtime notification permission (native push). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
 </manifest>
