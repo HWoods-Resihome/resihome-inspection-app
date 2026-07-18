@@ -1011,6 +1011,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const canEditDue = isInternal && svc.live && ['estimated', 'assigned'].includes(svc.status);
   const [dueOpen, setDueOpen] = useState(false);
   const [newDue, setNewDue] = useState(svc.dueDate || '');
+  const [dueReason, setDueReason] = useState('');
   const [savingDue, setSavingDue] = useState(false);
 
   const openAudit = async () => {
@@ -1040,11 +1041,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     setSavingDue(true); setSettingsMsg('');
     try {
       const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/due-date`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dueDate: newDue }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dueDate: newDue, reason: dueReason.trim() }),
       });
       const d = await r.json();
       if (!r.ok) { setSettingsMsg(d.error || 'Could not change the due date.'); return; }
-      setDueOpen(false);
+      setDueOpen(false); setDueReason('');
       router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});   // refresh with the new due date
     } catch { setSettingsMsg('Couldn’t reach the server. Try again.'); }
     finally { setSavingDue(false); }
@@ -1604,9 +1605,13 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             <div className="font-heading font-bold text-[15px] text-ink">Change Due Date</div>
             <p className="text-[13px] text-gray-500 -mt-1">Currently due <b className="text-ink">{svc.dueDate ? fmtMDY(svc.dueDate) : '—'}</b>. Pick a new date to push it out.</p>
             <DatePicker value={newDue} onChange={setNewDue} className={`${inputCls} flex items-center justify-between`} ariaLabel="New due date" />
+            <div>
+              <label className="block text-[11px] font-heading font-semibold uppercase tracking-wide text-gray-400 mb-1">Reason <span className="normal-case font-normal text-gray-400">(logged to the audit trail)</span></label>
+              <input type="text" value={dueReason} onChange={(e) => setDueReason(e.target.value)} placeholder="Why is this date changing?" className={inputCls} />
+            </div>
             {settingsMsg && <div className="text-xs text-red-600">{settingsMsg}</div>}
             <div className="flex gap-2 pt-1">
-              <button type="button" onClick={() => setDueOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
+              <button type="button" onClick={() => { setDueOpen(false); setDueReason(''); }} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
               <button type="button" disabled={savingDue || !newDue || newDue === svc.dueDate} onClick={doChangeDue}
                 className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{savingDue ? '…' : 'Save'}</button>
             </div>

@@ -22,6 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const dueDate = String((req.body || {}).dueDate || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return res.status(400).json({ error: 'dueDate must be YYYY-MM-DD.' });
+  const reason = String((req.body || {}).reason || '').trim().slice(0, 300);
 
   try {
     const rec = await fetchServiceWorkOrder(id);
@@ -34,7 +35,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (from === dueDate) return res.status(200).json({ ok: true, id, dueDate, unchanged: true });
 
     await patchServiceWorkOrder(id, { due_date: dueDate });
-    void recordServiceAudit({ serviceId: id, action: 'edit', actorEmail: email, actorName: session?.name, detail: `Due date changed: ${from || '—'} → ${dueDate}` });
+    void recordServiceAudit({ serviceId: id, action: 'edit', actorEmail: email, actorName: session?.name, detail: `Due date changed: ${from || '—'} → ${dueDate}${reason ? ` — ${reason}` : ''}` });
     return res.status(200).json({ ok: true, id, dueDate });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });

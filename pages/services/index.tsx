@@ -306,6 +306,61 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const pageStart = (currentPage - 1) * pageSize;
   const pagedRows = visibleRows.slice(pageStart, pageStart + pageSize);
 
+  // Persist filters/sort across navigation (like the calendar) so clicking into a
+  // service and coming back returns the exact filtered/sorted view you left.
+  const LIST_KEY = 'resiwalk.svc.list';
+  const listHydrated = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(LIST_KEY);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (typeof s.status === 'string') setStatus(s.status);
+        if (Array.isArray(s.worktype)) setWorktype(s.worktype);
+        if (Array.isArray(s.vendor)) setVendor(s.vendor);
+        if (Array.isArray(s.region)) setRegion(s.region);
+        if (typeof s.search === 'string') setSearch(s.search);
+        if (typeof s.pastDueOnly === 'boolean') setPastDueOnly(s.pastDueOnly);
+        if (typeof s.sortField === 'string') setSortField(s.sortField);
+        if (s.sortDir === 'asc' || s.sortDir === 'desc') setSortDir(s.sortDir);
+        if (typeof s.pageSize === 'number') setPageSize(s.pageSize);
+        if (typeof s.filtersOpen === 'boolean') setFiltersOpen(s.filtersOpen);
+      }
+    } catch { /* ignore corrupt state */ }
+    listHydrated.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!listHydrated.current) return;
+    try { sessionStorage.setItem(LIST_KEY, JSON.stringify({ status, worktype, vendor, region, search, pastDueOnly, sortField, sortDir, pageSize, filtersOpen })); } catch { /* quota/private */ }
+  }, [status, worktype, vendor, region, search, pastDueOnly, sortField, sortDir, pageSize, filtersOpen]);
+
+  // CSV export of the CURRENT filtered/sorted list (internal only — no cost data,
+  // just the operational columns). Exports every matching row, not just the page.
+  const exportCsv = () => {
+    const headers = ['Address', 'City/State/ZIP', 'Community', 'Portfolio', 'Region', 'Work Type', 'Subtype', 'Vendor', 'Status', 'Due Date', 'Property Status'];
+    const esc = (v: unknown) => {
+      const s = String(v ?? '');
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [headers.join(',')];
+    for (const s of visibleRows) {
+      lines.push([
+        s.address, s.locality, s.community || '', s.portfolio, s.region,
+        worktypeLabel(s.worktype), subtypeLabel(s.worktype, s.subtype),
+        s.vendor || 'Unassigned', STATUS_LABEL[s.status] || s.status,
+        s.dueDate ? fmtMDY(s.dueDate) : '', s.propertyStatus || '',
+      ].map(esc).join(','));
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `services-${todayISO}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   const chip = (val: ServiceStatus | 'all', label: string) => (
     <button type="button" onClick={() => { setStatus(val); setPastDueOnly(false); }}
       className={`w-full text-center text-[11px] font-heading font-semibold px-2 py-1.5 rounded-full border transition whitespace-nowrap ${
@@ -410,6 +465,13 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
               className="w-full text-sm border border-gray-300 rounded-lg pl-3 pr-9 py-2.5 bg-white focus:outline-none focus:border-brand" />
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
           </div>
+          {!isVendor && (
+            <button type="button" onClick={exportCsv} disabled={visibleRows.length === 0} aria-label="Export CSV"
+              title={`Export ${visibleRows.length} service${visibleRows.length === 1 ? '' : 's'} to CSV`}
+              className="shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50 transition-colors disabled:opacity-40">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+            </button>
+          )}
           <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen} aria-label="Filters"
             className="shrink-0 inline-flex items-center justify-center gap-1 w-14 h-11 rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50 transition-colors">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
