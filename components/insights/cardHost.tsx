@@ -1,39 +1,40 @@
 /**
- * Card minimize/restore plumbing for the Insights dashboard.
+ * Card collapse/expand plumbing for the Insights dashboard.
  *
- * Goal: let any CardFrame-based card be minimized (hidden) from the canvas and
- * restored from a dropdown — WITHOUT prop-drilling a callback through every card
+ * Goal: let any CardFrame-based card be collapsed IN PLACE (header stays, body
+ * hides) and expanded again — WITHOUT prop-drilling a callback through every card
  * component. We use two contexts:
- *   - HostContext: the dashboard-level api ({ hidden, minimize }).
- *   - SlotContext: the CURRENT card's minimize handler, provided by <CardSlot>.
- * CardFrame reads SlotContext and renders its own minimize button when present.
+ *   - HostContext: the dashboard-level api ({ collapsed, toggle }).
+ *   - SlotContext: the CURRENT card's collapse state + toggle, from <CardSlot>.
+ * CardFrame reads SlotContext and renders its own collapse chevron when present.
  *
- * The grid/sizing structure is untouched: a minimized card simply renders null
- * in place (its row reflows via the existing auto-fit columns); restoring snaps
- * it back exactly where it was declared.
+ * The grid/sizing structure is untouched: a collapsed card keeps its header row
+ * (so it's never lost from view) and simply drops its body; the row reflows via
+ * the existing auto-fit columns.
  */
 import { createContext, useContext, type ReactNode } from 'react';
 
 export interface CardHostApi {
-  hidden: Set<string>;
-  minimize: (id: string) => void;
+  collapsed: Set<string>;
+  toggle: (id: string) => void;
 }
 
 const HostContext = createContext<CardHostApi | null>(null);
-const SlotContext = createContext<{ minimize: () => void } | null>(null);
+const SlotContext = createContext<{ collapsed: boolean; toggle: () => void } | null>(null);
 
-/** Read the current card's minimize handler (CardFrame uses this for its button). */
-export function useCardSlotMinimize() { return useContext(SlotContext); }
+/** Read the current card's collapse state + toggle (CardFrame uses this for its
+ *  header chevron). */
+export function useCardSlotCollapse() { return useContext(SlotContext); }
 
 export function CardHost({ value, children }: { value: CardHostApi; children: ReactNode }) {
   return <HostContext.Provider value={value}>{children}</HostContext.Provider>;
 }
 
-/** Wrap a card with an id so it can be minimized. Renders null while hidden. */
+/** Wrap a card with an id so it can be collapsed. Always renders (the card's own
+ *  header stays visible); CardFrame hides just the body when collapsed. */
 export function CardSlot({ id, children }: { id: string; children: ReactNode }) {
   const host = useContext(HostContext);
-  if (host && host.hidden.has(id)) return null;
-  const slot = host ? { minimize: () => host.minimize(id) } : null;
+  const slot = host ? { collapsed: host.collapsed.has(id), toggle: () => host.toggle(id) } : null;
   return <SlotContext.Provider value={slot}>{children}</SlotContext.Provider>;
 }
 
