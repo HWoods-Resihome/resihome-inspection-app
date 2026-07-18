@@ -287,6 +287,12 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
     const stopCount = Number(p.stop_count);
     result.rulesActive++;
 
+    // One-time (non-recurring) rule — e.g. a deal-stage-triggered move-in clean:
+    // generate EXACTLY ONE order per target for the life of the rule, never
+    // regenerating after it completes (recurring rules DO regenerate the next
+    // occurrence once the current one closes).
+    const recurring = p.recurring !== 'false';
+
     const worktype = (p.worktype || 'landscaping') as Worktype;
     const subtype = p.subtype || '';
     const vendors = parseArr(p.vendors_json).map(String);
@@ -318,6 +324,14 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
       // Stop-after-N: this target has already generated its cap → stop.
       if (stopCountMode && Number.isFinite(stopCount) && stopCount >= 1 && (genCountByKey.get(enrollmentKey) || 0) >= stopCount) {
         continue; // silently not created (won't count toward wouldCreate)
+      }
+      // Run-once: a one-time rule that has EVER generated for this target (open or
+      // completed) never generates again — so a move-in clean fires once when the
+      // deal hits the trigger stage and doesn't loop while the deal sits there.
+      if (!recurring && (genCountByKey.get(enrollmentKey) || 0) >= 1) {
+        result.skippedExisting++;
+        result.items.push({ ...base, action: 'skip-open' });
+        continue;
       }
       if (openKeys.has(enrollmentKey)) {
         result.skippedExisting++;
