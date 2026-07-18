@@ -24,6 +24,7 @@ import {
   uploadFileWithId,
   attachFilesToInspectionRecord,
   updateInspection,
+  readInspectionProps,
   stampFirstCompleted,
   stampPropertyStatusAtCompletion,
   populateBillingFields,
@@ -41,6 +42,13 @@ export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
 
 // In-flight lock — prevents double-tap from running two QC finalizations.
 const inFlightQcFinalize = new Set<string>();
+// Durable cross-instance lock (mirrors submit.ts): serverless instances don't
+// share the Set above, so a double-tap landing on two instances could both pass
+// the per-instance guard + terminal check and render/attach TWO QC reports. A
+// short-lived stamp on the record closes that window. Best-effort (HubSpot has no
+// conditional write); time-boxed so a crash can't wedge it.
+const QC_LOCK_MS = 120_000;
+const QC_LOCK_PROP = process.env.QC_FINALIZE_LOCK_PROPERTY || 'qc_finalize_in_progress';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -74,6 +82,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
   inFlightQcFinalize.add(id);
+
+  // Durable cross-instance lock — reject a concurrent finalize landing on another
+  // serverless instance before it renders/attaches a duplicate report.
+  const lockNow = Date.now();
+  if (QC_LOCK_PROP) {
+    try {
+      const lockProps = await readInspectionProps(id, [QC_LOCK_PROP]).catch(() => null);
+      const prev = lockProps?.[QC_LOCK_PROP];
+      const prevMs = prev ? (Date.parse(String(prev)) || Number(prev) || 0) : 0;
+      if (prevMs && lockNow - prevMs < QC_LOCK_MS) {
+        inFlightQcFinalize.delete(id);
+        res.status(409).json({ error: 'This inspection is already being submitted on another device. Please wait.' });
+        return;
+      }
+      await updateInspection(id, { [QC_LOCK_PROP]: String(lockNow) });
+    } catch (e) {
+      console.warn('[qc-finalize] durable lock unavailable (continuing without it):', e);
+    }
+  }
 
   const t0 = Date.now();
   try {

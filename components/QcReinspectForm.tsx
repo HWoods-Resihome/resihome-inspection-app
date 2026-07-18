@@ -839,6 +839,15 @@ export function QcReinspectForm(props: Props) {
       void dialog.alert('Enter the maintenance ticket description for the new item(s) found, or choose “No”.');
       return;
     }
+    // Claim the submit NOW — BEFORE the ~10s photo-flush/room-save/await block
+    // below. Previously the guard was set only after those awaits, so a second tap
+    // (or a genuine double-tap) during After-photo upload passed the re-entry check
+    // and ran a parallel finalize → duplicate QC report + duplicate maintenance
+    // ticket. Every early return in the async block releases it; the finally does
+    // on completion/error.
+    submittingRef.current = true;
+    setSubmitting(true);
+    const release = () => { submittingRef.current = false; setSubmitting(false); };
     // Don't finalize while After photos are still uploading — qc-finalize re-reads
     // the answers from HubSpot to build the report, so a queued (unsynced) photo
     // would be missing from the record. Retry, then HARD-BLOCK while pending;
@@ -865,15 +874,15 @@ export function QcReinspectForm(props: Props) {
         const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
         if (offline) {
           void dialog.alert(`${pendingPhotos} After photo${pendingPhotos === 1 ? '' : 's'} still need${pendingPhotos === 1 ? 's' : ''} to upload, but you're offline. Move to signal and stay on this screen until they finish — they aren't saved yet.`);
-          return;
+          release(); return;
         }
         const stuck = /failed to upload\s*\d+/i.test(lastErr || '');
         if (!stuck) {
           void dialog.alert(`${pendingPhotos} After photo${pendingPhotos === 1 ? '' : 's'} ${pendingPhotos === 1 ? 'is' : 'are'} still uploading. Keep this screen open a few more seconds, then submit again — ${pendingPhotos === 1 ? "it isn't" : "they aren't"} saved yet.`);
-          return;
+          release(); return;
         }
         const proceed = await dialog.confirm(`${pendingPhotos} After photo${pendingPhotos === 1 ? '' : 's'} keep${pendingPhotos === 1 ? 's' : ''} failing to upload (check your signal). If you submit now ${pendingPhotos === 1 ? 'it' : 'they'} will NOT be on the report. Submit without ${pendingPhotos === 1 ? 'it' : 'them'}?`, { confirmLabel: 'Submit without photos', cancelLabel: 'Keep trying' });
-        if (!proceed) return;
+        if (!proceed) { release(); return; }
       }
     }
     // Authoritatively re-save every room's verdict / note / after-photos — per-tap
@@ -890,16 +899,14 @@ export function QcReinspectForm(props: Props) {
       await persistMaintTicket();
     } catch (e: any) {
       void dialog.alert(`Could not save the latest room results before submitting (${e?.message || e}). Your inspection was NOT submitted — check your connection and try Submit again.`);
-      return;
+      release(); return;
     }
     // Wait for any in-flight line pass/fail + note saves to confirm before finalize.
     for (let i = 0; i < 24 && qcInFlightRef.current > 0; i++) { await new Promise((r) => setTimeout(r, 250)); }
     if (qcInFlightRef.current > 0) {
       void dialog.alert('Your latest results are still saving. Keep this screen open a few more seconds, then submit again.');
-      return;
+      release(); return;
     }
-    submittingRef.current = true;
-    setSubmitting(true);
     try {
       await burnTaggedLabelsQc();
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/qc-finalize`, {
