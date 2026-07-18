@@ -5486,12 +5486,21 @@ function SectionHeader(p: SectionHeaderProps) {
           ) : (
             <div className="font-heading font-bold text-gray-900 min-w-0 flex-1 truncate text-lg">{p.heading}</div>
           )}
-          {/* Photo status inline next to the room name. */}
+          {/* Photo status inline next to the room name. NEEDED = amber camera with a
+              small alert dot (stands out); ADDED = neutral grey camera + count (the
+              "normal" state it returns to once a photo is captured). SVG (not the 📷
+              emoji) so the amber colour actually applies. */}
           {!editingTitle && p.photosMissing && (
-            <span title="Photos needed — this section requires at least one photo" aria-label="Photos needed" className="text-amber-600 text-sm whitespace-nowrap shrink-0">📷</span>
+            <span title="Photos needed — this section requires at least one photo" aria-label="Photos needed" className="relative inline-flex items-center shrink-0 text-amber-500">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white" />
+            </span>
           )}
           {!editingTitle && p.photosCount > 0 && (
-            <span className="text-gray-500 text-xs whitespace-nowrap shrink-0">📷 {p.photosCount}</span>
+            <span className="inline-flex items-center gap-1 text-gray-400 text-xs whitespace-nowrap shrink-0">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
+              {p.photosCount}
+            </span>
           )}
           {/* Edit / delete / collapse controls — right-aligned to the edge of
               the name row (the X and chevron sit flush right). */}
