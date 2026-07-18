@@ -7,7 +7,7 @@
  * put while the body scrolls inside the card.
  */
 import { CardFrame, CardNote } from '../cardChrome';
-import { inspectorRoster, fmtDuration, fmtNumber } from '@/lib/insightsMetrics';
+import { inspectorRoster, fmtNumber } from '@/lib/insightsMetrics';
 import type { InsightsRow } from '@/lib/insightsSnapshot';
 
 const ICON = (
@@ -30,8 +30,6 @@ export function InspectorRoster({ rows }: { rows: InsightsRow[] }) {
               <th className="py-2 pl-4 pr-2">Inspector</th>
               <th className="py-2 px-2 text-right" title="# inspections"># insp</th>
               <th className="py-2 px-2 text-right" title="Scheduled + in progress"># incmpl</th>
-              <th className="py-2 px-2 text-right" title="Avg scheduled date → completed (total turnaround)">avg turnaround</th>
-              <th className="py-2 px-2 text-right" title="Avg started → completed (active work)">avg work</th>
               <th className="py-2 px-2 text-right">avg photos</th>
               <th className="py-2 pr-4 pl-2 text-right">total photos</th>
             </tr>
@@ -48,8 +46,6 @@ export function InspectorRoster({ rows }: { rows: InsightsRow[] }) {
                     ? <span className="inline-block rounded-full bg-[#ff0060]/15 text-[#ff0060] font-heading font-semibold text-xs px-2 py-0.5">{r.incomplete}</span>
                     : <span className="text-[#71717a]">0</span>}
                 </td>
-                <td className="py-1.5 px-2 text-right text-[#a1a1aa]">{fmtDuration(r.avgTurnaroundMs)}</td>
-                <td className="py-1.5 px-2 text-right text-[#a1a1aa]">{fmtDuration(r.avgWorkMs)}</td>
                 <td className="py-1.5 px-2 text-right text-[#a1a1aa]">{r.avgPhotos == null ? '—' : r.avgPhotos.toFixed(1)}</td>
                 <td className="py-1.5 pr-4 pl-2 text-right text-[#a1a1aa]">{fmtNumber(r.totalPhotos)}</td>
               </tr>

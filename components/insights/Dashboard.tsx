@@ -17,16 +17,14 @@ import { PassFailBars } from './cards/PassFailBars';
 import { InspectorRoster } from './cards/InspectorRoster';
 import { CompletedTable } from './cards/CompletedTable';
 import { TrendChart } from './cards/TrendChart';
-import { PassRateGauge } from './cards/PassRateGauge';
-import { PropertyStatusPivot } from './cards/PropertyStatusPivot';
 import { GrassFails } from './cards/GrassFails';
 import { KbChanges } from './cards/KbChanges';
-import { KbVelocity } from './cards/KbVelocity';
 import { PreferenceMismatches } from './cards/PreferenceMismatches';
 import { AiOverridesByInspector } from './cards/AiOverridesByInspector';
 import { AiOverridesByCategory } from './cards/AiOverridesByCategory';
 import { ScopeCost } from './cards/ScopeCost';
 import { ScopeApprovals } from './cards/ScopeApprovals';
+import { RateCardLines } from './cards/RateCardLines';
 import { CardHost, CardSlot, CARD_CATALOG } from './cardHost';
 import {
   EMPTY_FILTERS, applyFilters, computeKpis, countActiveFilters, filterOverrides,
@@ -198,10 +196,9 @@ export function InsightsDashboard() {
             {/* (1) Compact KPI tiles (always shown — the at-a-glance headline) */}
             <KpiTiles kpis={kpis} />
 
-            {/* (2) Pass/fail bars + property-status pivot */}
+            {/* (2) Pass/fail bars */}
             <TwoCol>
               <CardSlot id="passfail"><PassFailBars rows={filtered} /></CardSlot>
-              <CardSlot id="propstatus"><PropertyStatusPivot rows={filtered} /></CardSlot>
             </TwoCol>
 
             {/* (3) Inspector performance + 1099 grass-condition fails */}
@@ -217,11 +214,11 @@ export function InsightsDashboard() {
               <CardSlot id="scope-approvals"><ScopeApprovals rows={filtered} /></CardSlot>
             </TwoCol>
 
-            {/* (4) Completion-time trend + quality gauges */}
-            <TwoCol>
-              <CardSlot id="trend"><TrendChart history={history} /></CardSlot>
-              <CardSlot id="gauges"><PassRateGauge kpis={kpis} /></CardSlot>
-            </TwoCol>
+            {/* (3c) Most-used rate card line items (all-time + last week) */}
+            <CardSlot id="ratecard-lines"><RateCardLines rows={filtered} /></CardSlot>
+
+            {/* (4) Completion-time trend */}
+            <CardSlot id="trend"><TrendChart history={history} /></CardSlot>
 
             {/* (5) AI overrides — who overrides most + biggest training opportunities */}
             <TwoCol>
@@ -229,11 +226,8 @@ export function InsightsDashboard() {
               <CardSlot id="overrides-category"><AiOverridesByCategory overrides={filteredOverrides} /></CardSlot>
             </TwoCol>
 
-            {/* (6) AI learning velocity + preference overrides (training signals) */}
-            <TwoCol>
-              <CardSlot id="velocity"><KbVelocity /></CardSlot>
-              <CardSlot id="overrides"><PreferenceMismatches events={filteredOverrides} /></CardSlot>
-            </TwoCol>
+            {/* (6) Preference overrides (training signals) */}
+            <CardSlot id="overrides"><PreferenceMismatches events={filteredOverrides} /></CardSlot>
 
             {/* (7) AI Knowledge Base changes feed (full width) */}
             <CardSlot id="kb"><KbChanges /></CardSlot>

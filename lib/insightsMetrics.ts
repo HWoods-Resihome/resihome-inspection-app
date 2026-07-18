@@ -299,6 +299,33 @@ export function scopeCategoryTree(rows: InsightsRow[]): ScopeCatNode[] {
   return out.sort((a, b) => b.total - a.total);
 }
 
+export interface RateCardLineUsage { code: string; label: string; allTime: number; lastWeek: number; }
+
+/**
+ * Most-used Rate Card line items across the (filtered) rows. Usage is counted by
+ * occurrence — each time a line item appears on an inspection is +1. `allTime`
+ * counts every row; `lastWeek` counts only rows whose date is within the last 7
+ * days. A row's date is its completed → approved → scheduled date (first set).
+ * Sorted by all-time usage, descending. `nowMs` defaults to now.
+ */
+export function rateCardLineUsage(rows: InsightsRow[], nowMs: number = Date.now()): RateCardLineUsage[] {
+  const weekAgo = nowMs - 7 * 24 * 60 * 60 * 1000;
+  const acc = new Map<string, RateCardLineUsage>();
+  for (const r of rows) {
+    const lines = r.rateCardLines;
+    if (!lines || !lines.length) continue;
+    const dateMs = hubspotToMs(r.completedAt) ?? hubspotToMs(r.approvedAt) ?? hubspotToMs(r.scheduledDate);
+    const recent = dateMs != null && dateMs >= weekAgo && dateMs <= nowMs;
+    for (const ln of lines) {
+      let u = acc.get(ln.code);
+      if (!u) { u = { code: ln.code, label: ln.label || ln.code, allTime: 0, lastWeek: 0 }; acc.set(ln.code, u); }
+      u.allTime++;
+      if (recent) u.lastWeek++;
+    }
+  }
+  return Array.from(acc.values()).sort((a, b) => b.allTime - a.allTime || b.lastWeek - a.lastWeek);
+}
+
 /** Distinct current property-status values present in the rows (for the rail). */
 export function propertyStatusOptions(rows: InsightsRow[]): string[] {
   const set = new Set<string>();

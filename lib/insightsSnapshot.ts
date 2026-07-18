@@ -91,6 +91,10 @@ export interface InsightsRow {
   // that have rate-card lines; absent otherwise). Sums clientCost by the line's
   // catalog category. Powers the per-category scope-cost breakdown.
   scopeCategoryCosts?: Record<string, number>;
+  // Rate Card line items used on this inspection — one entry per line occurrence
+  // ({ code, label }). Powers the "most-used rate card line items" card (usage is
+  // counted by occurrence). Set on scope rows with rate-card lines; absent otherwise.
+  rateCardLines?: { code: string; label: string }[];
   reportUrl: string | null;     // best available report PDF (master → attachment)
   propertyId: string | null;                 // HubSpot Property record id (property_id_ref)
   propertyStatus: string | null;             // the property's CURRENT live status (e.g. 'Vacant - On Market') — for analytics filtering across ALL rows
@@ -448,9 +452,12 @@ async function enrichScopeCategoryCosts(rows: InsightsRow[]): Promise<void> {
   if (targets.length === 0) return;
 
   const catByCode = new Map<string, string>();
+  const labelByCode = new Map<string, string>();
   try {
     for (const c of await getCachedCatalog()) {
-      if (c.lineItemCode && c.category) catByCode.set(c.lineItemCode, c.category);
+      if (!c.lineItemCode) continue;
+      if (c.category) catByCode.set(c.lineItemCode, c.category);
+      if (c.laborShortDescription) labelByCode.set(c.lineItemCode, c.laborShortDescription);
     }
   } catch (e) {
     console.warn('[insights-scope] catalog load failed:', e);
@@ -464,13 +471,19 @@ async function enrichScopeCategoryCosts(rows: InsightsRow[]): Promise<void> {
       try {
         const answers = await fetchAnswersForInspection(row.recordId);
         const byCat: Record<string, number> = {};
+        const lines: { code: string; label: string }[] = [];
         for (const a of answers) {
           const line = a.rateCardLine;
-          if (!line || typeof line.clientCost !== 'number') continue;
+          if (!line || !line.lineItemCode) continue;
+          // Usage: one entry per line occurrence (label from the catalog, else code).
+          lines.push({ code: line.lineItemCode, label: labelByCode.get(line.lineItemCode) || line.lineItemCode });
+          // Category $ breakdown: only lines with a numeric client cost.
+          if (typeof line.clientCost !== 'number') continue;
           const cat = catByCode.get(line.lineItemCode) || '(uncategorized)';
           byCat[cat] = (byCat[cat] || 0) + line.clientCost;
         }
         if (Object.keys(byCat).length) row.scopeCategoryCosts = byCat;
+        if (lines.length) row.rateCardLines = lines;
       } catch {
         /* best-effort: leave this scope's category breakdown unset */
       }

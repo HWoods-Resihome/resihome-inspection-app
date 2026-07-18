@@ -42,15 +42,13 @@ export function CardSlot({ id, children }: { id: string; children: ReactNode }) 
  *  Ids must match the <CardSlot id> used in the dashboard. */
 export const CARD_CATALOG: { id: string; title: string }[] = [
   { id: 'passfail', title: 'Pass / fail by inspector' },
-  { id: 'propstatus', title: 'Inspections by property status' },
   { id: 'roster', title: 'Inspector performance' },
   { id: 'grass', title: '1099 Grass Condition fails' },
   { id: 'completed', title: 'Completed inspections' },
   { id: 'scope-cost', title: 'Scope cost by inspector' },
   { id: 'scope-approvals', title: 'Scope approvals by reviewer' },
+  { id: 'ratecard-lines', title: 'Most-used rate card line items' },
   { id: 'trend', title: 'Completion-time trend' },
-  { id: 'gauges', title: 'Quality gauges' },
-  { id: 'velocity', title: 'AI learning velocity' },
   { id: 'overrides', title: 'Inspector preference overrides' },
   { id: 'overrides-inspector', title: 'AI overrides by inspector' },
   { id: 'overrides-category', title: 'AI overrides by category' },
