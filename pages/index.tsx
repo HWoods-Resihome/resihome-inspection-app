@@ -121,7 +121,13 @@ export default function Home() {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
   }, [search]);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(savedView.statusFilter ?? 'all');
+  // Default to All OPEN (hide completed) — the working view. One-time migration:
+  // saved views written before this default carried the old 'all' default, so
+  // until the view has the statusDefaulted marker (stamped by the persist effect
+  // below) the saved status is ignored and everyone lands on 'open' once; choices
+  // made after that stick like any other saved filter.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
+    savedView.statusDefaulted ? (savedView.statusFilter ?? 'open') : 'open');
   // Sort field + direction. Default: the combined Date sort, newest first. The
   // server accepts date | address | inspector | price | property_status (older
   // saved views of 'updated'/'scheduled' fall through to 'date').
@@ -174,6 +180,7 @@ export default function Home() {
     try {
       window.localStorage.setItem('resiwalk_home_view_v1', JSON.stringify({
         search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, regionFilter, pageSize, page, filtersOpen,
+        statusDefaulted: true,   // marks the view as post-'open'-default (see init above)
       }));
     } catch { /* storage disabled — view just won't persist */ }
   }, [search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, regionFilter, pageSize, page, filtersOpen]);

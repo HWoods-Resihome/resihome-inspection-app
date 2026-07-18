@@ -30,6 +30,12 @@ export default function InsightsPortal() {
   const [access, setAccess] = useState<Access | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'inspections' | 'services'>('inspections');
+  // Deep link: /insights?tab=services opens directly on the Services tab (the
+  // Services app's gear menu links here so its Insights lands in context).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('tab') === 'services') setTab('services');
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

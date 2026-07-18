@@ -167,7 +167,9 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   // Tapping the All chip cycles between the two.
   // Vendors land on all OPEN services sorted by status (Assigned first); everyone
   // else defaults to everything sorted by due date.
-  const [status, setStatus] = useState<ServiceStatus | 'all' | 'all_open'>(isVendor ? 'all_open' : 'all');
+  // Default EVERYONE to All Open (hide completed) on first load — the working
+  // view; All (incl. completed) is one tap away on the status toggle.
+  const [status, setStatus] = useState<ServiceStatus | 'all' | 'all_open'>('all_open');
   const [worktype, setWorktype] = useState<string[]>([]);
   const [vendor, setVendor] = useState<string[]>([]);
   const [region, setRegion] = useState<string[]>([]);

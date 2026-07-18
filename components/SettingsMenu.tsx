@@ -62,7 +62,9 @@ export function SettingsMenu({ isAdmin, isVendor, onOpen }: { isAdmin: boolean; 
             {/* Admin tools — admins only. Identical across Inspections & Services. */}
             {isAdmin && (
               <>
-                <Link href="/insights" onClick={() => setOpen(false)} className={rowCls}>
+                {/* From the Services app, Insights opens directly on its Services
+                    tab; from Inspections it opens on the Inspections tab. */}
+                <Link href={router.pathname.startsWith('/services') ? '/insights?tab=services' : '/insights'} onClick={() => setOpen(false)} className={rowCls}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
                   Insights
                 </Link>

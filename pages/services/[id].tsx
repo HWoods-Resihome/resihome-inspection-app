@@ -1516,6 +1516,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
       {lightbox && gallery.groups.length > 0 && (
         <PhotoLightbox
+          hideSave
           groups={gallery.groups}
           photosByGroup={gallery.map}
           initialGroupId={lightbox.groupId}
