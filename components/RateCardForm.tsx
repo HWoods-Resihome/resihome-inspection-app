@@ -4446,7 +4446,7 @@ export function RateCardForm(props: RateCardFormProps) {
                           </span>
                         </span>
                         {photosMissing && !isUploadingHere && (
-                          <span className="text-xs text-amber-800 font-semibold whitespace-nowrap">&ge;1 Required</span>
+                          <span className="text-xs text-amber-600 font-semibold whitespace-nowrap">&ge;1 Required</span>
                         )}
                         {isUploadingHere && (
                           <span className="text-xs text-brand font-semibold whitespace-nowrap">

@@ -2315,7 +2315,7 @@ export function QuestionForm({
                   <h2 className="font-heading font-bold text-lg truncate">{inst.displayName}</h2>
                   {photosMissing && (
                     <span
-                      className="inline-flex items-center gap-1 text-xs bg-amber-400 text-amber-950 font-heading font-bold px-2 py-0.5 rounded-full shrink-0"
+                      className="inline-flex items-center gap-1 text-xs text-amber-600 font-heading font-semibold shrink-0"
                       title="This section requires at least one photo"
                     >
                       📷 Photos Needed
@@ -2352,7 +2352,7 @@ export function QuestionForm({
                           </span>
                         </button>
                         {photosMissing && uploadingSection?.instanceKey !== inst.instanceKey && (
-                          <span className="text-xs text-amber-800 font-semibold whitespace-nowrap">&ge;1 Required</span>
+                          <span className="text-xs text-amber-600 font-semibold whitespace-nowrap">&ge;1 Required</span>
                         )}
                         {uploadingSection?.instanceKey === inst.instanceKey && (
                           <span className="text-xs text-brand font-semibold">
