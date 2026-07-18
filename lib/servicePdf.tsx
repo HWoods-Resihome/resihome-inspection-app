@@ -156,10 +156,10 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
         {(() => {
           // Vendor + Due / Submitted / Cost are all in the header + summary tiles
           // above, so the Work Order section carries only the extras: completion
-          // date, client markup, and any payout adjustment. Hidden when empty.
+          // date and any payout adjustment. Markup % is internal — never shown on
+          // the client PDF (it only exposes our margin). Hidden when empty.
           const rows: { label: string; value: string }[] = [];
           if (d.completedAt) rows.push({ label: 'Completed', value: humanDate(d.completedAt) });
-          if (d.variant === 'client' && d.markupPct) rows.push({ label: 'Markup', value: `${d.markupPct}%` });
           if (d.variant !== 'client' && d.adjustment) rows.push({ label: 'Payout adjustment', value: `-${d.adjustment}${d.adjustmentReason ? ` (${d.adjustmentReason})` : ''}` });
           return rows.length ? (
             <Section title="Work Order">
