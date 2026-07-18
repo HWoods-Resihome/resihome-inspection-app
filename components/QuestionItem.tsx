@@ -191,19 +191,9 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             </svg>
             Take Photos
           </button>
-          {!plainStyle && (
-            <label className="inline-flex items-center gap-1.5 text-sm bg-brand/10 text-brand font-heading font-semibold py-1.5 px-3 rounded cursor-pointer hover:bg-brand/20">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-              Choose Files
-              <input type="file" accept="image/*" multiple className="hidden"
-                onChange={(e) => handlePhotoUpload(e.target.files)} disabled={!!uploadProgress} />
-            </label>
-          )}
+          {/* "Take Photos" only (the in-app camera also covers gallery selection);
+              the separate Choose Files/Upload button was removed to match the other
+              inspection forms. */}
         </div>
         )}
         {uploadProgress && (
@@ -437,29 +427,8 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                     : 'border-gray-300 text-gray-400 hover:border-brand/50 hover:text-brand'
                 }`}
               >+</button>
-              {/* Choose Files: gallery import as a matching dashed tile. Hidden for
-                  plainStyle templates (the in-app camera also covers the gallery). */}
-              {!plainStyle && (
-                <label
-                  title="Choose photos from your device"
-                  className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 hover:border-brand/50 hover:text-brand flex items-center justify-center cursor-pointer"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={(e) => handlePhotoUpload(e.target.files)}
-                    disabled={!!uploadProgress}
-                    className="hidden"
-                  />
-                </label>
-              )}
+              {/* Take-only (the in-app camera also covers gallery selection) — the
+                  separate Choose Files tile was removed to match the other forms. */}
               </>)}
             </div>
             {uploadProgress && (

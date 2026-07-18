@@ -2369,28 +2369,9 @@ export function QuestionForm({
                             </svg>
                             Take
                           </button>
-                          {/* scopeStyle: single Take button (the in-app camera also
-                              covers gallery selection), matching the Scope Rate Card. */}
-                          {!scopeStyle && (
-                          <label className={`inline-flex items-center gap-1 text-xs bg-brand/10 text-brand font-semibold py-1 px-2 rounded hover:bg-brand/20 ${
-                            uploadingSection?.instanceKey === inst.instanceKey ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                          }`}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                              <polyline points="17 8 12 3 7 8" />
-                              <line x1="12" y1="3" x2="12" y2="15" />
-                            </svg>
-                            Upload
-                            <input
-                              type="file"
-                              accept="image/*"
-                              multiple
-                              onChange={(e) => handleSectionPhotoChange(inst.instanceKey, e.target.files)}
-                              disabled={uploadingSection?.instanceKey === inst.instanceKey}
-                              className="hidden"
-                            />
-                          </label>
-                          )}
+                          {/* Single "Take" button on every form (the in-app camera
+                              also covers gallery selection) — the separate Upload
+                              button was removed to match the Scope Rate Card. */}
                         </div>
                       )}
                     </div>
