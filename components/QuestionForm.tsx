@@ -2315,10 +2315,11 @@ export function QuestionForm({
                   <h2 className="font-heading font-bold text-lg truncate min-w-0 flex-1">{inst.displayName}</h2>
                   {photosMissing && (
                     <span
-                      className="inline-flex items-center gap-1 text-xs text-amber-600 font-heading font-semibold shrink-0"
-                      title="This section requires at least one photo"
+                      className="text-sm shrink-0"
+                      title="Photos needed — this section requires at least one photo"
+                      aria-label="Photos needed"
                     >
-                      📷 Photos Needed
+                      📷
                     </span>
                   )}
                 </div>

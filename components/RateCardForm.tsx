@@ -5488,7 +5488,7 @@ function SectionHeader(p: SectionHeaderProps) {
           )}
           {/* Photo status inline next to the room name. */}
           {!editingTitle && p.photosMissing && (
-            <span title="Section photo required" className="text-amber-600 font-semibold text-xs whitespace-nowrap shrink-0">📷 Photos Needed</span>
+            <span title="Photos needed — this section requires at least one photo" aria-label="Photos needed" className="text-amber-600 text-sm whitespace-nowrap shrink-0">📷</span>
           )}
           {!editingTitle && p.photosCount > 0 && (
             <span className="text-gray-500 text-xs whitespace-nowrap shrink-0">📷 {p.photosCount}</span>

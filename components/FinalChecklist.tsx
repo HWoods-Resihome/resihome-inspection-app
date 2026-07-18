@@ -753,10 +753,10 @@ export function FinalChecklist(props: Props) {
         type="button"
         onClick={toggleOpen}
         aria-expanded={open}
-        className="w-full px-4 py-3 bg-brand/5 hover:bg-brand/10 border-b border-gray-200 flex items-center gap-2 text-left"
+        className="w-full px-4 py-3 bg-brand/5 hover:bg-brand/10 border-b border-brand/20 flex items-center gap-2 text-left"
       >
-        <span className="font-semibold text-gray-900 text-sm sm:text-base">{props.title || 'Final Checklist'}</span>
-        <span className="text-[11px] text-brand font-semibold">(Required)</span>
+        <span className="font-heading font-bold text-lg text-gray-900 truncate min-w-0">{props.title || 'Final Checklist'}</span>
+        <span className="text-[11px] text-brand font-semibold shrink-0">(Required)</span>
         <span className="text-gray-400 ml-auto shrink-0">{open ? '▾' : '▸'}</span>
       </button>
 
