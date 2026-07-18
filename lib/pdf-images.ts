@@ -8,7 +8,7 @@ import { safeProxyFetch, readBodyCapped, ProxyFetchError } from '@/lib/safeProxy
 
 // Hard ceiling on a fetched source image so a huge/attacker-supplied URL can't
 // OOM the PDF render.
-const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024; // output is <=520px; a 12MB source is ample. Bounds peak memory (concurrency x this) so a few oversized uploads can't OOM the render.
 
 // Embedded photos are sized/compressed for documentation legibility while
 // keeping the PDF small — photo-heavy scopes were pushing the finalize email

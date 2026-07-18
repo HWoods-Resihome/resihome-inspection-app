@@ -9,6 +9,7 @@ import type {
 } from '@/lib/types';
 import type { SavedAnswer } from '@/lib/hubspot';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
+import { isCompletedStatus } from '@/lib/userAccess';
 import {
   saveCachedInspection, loadCachedInspection,
   saveCachedQuestions, loadCachedQuestions,
@@ -582,7 +583,10 @@ export default function ExistingInspection() {
 
   // stage === 'form'
   if (!inspection) return null;
-  const isCompleted = (inspection.status || '').toLowerCase() === 'completed';
+  // Use the canonical terminal test (completed | complete | submitted) — the server
+  // (submit/cancel/reopen) uses this, so a bare === 'completed' let a 'submitted'/
+  // 'complete' record render editable while the server silently rejected the writes.
+  const isCompleted = isCompletedStatus(inspection.status);
   const isCancelled = (inspection.status || '').toLowerCase() === 'cancelled';
   const statusReadOnly = isCompleted || isCancelled;
   // External (1099) users may only edit/cancel inspections they own; any other

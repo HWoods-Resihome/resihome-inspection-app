@@ -21,6 +21,10 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import crypto from 'crypto';
 import { createSessionCookie, readReturnTo, clearReturnToCookie, type SessionUser } from '@/lib/auth';
 import { fetchActiveUsers } from '@/lib/hubspot';
+import { enforceRateLimit } from '@/lib/rateLimit';
+
+const reviewClientIp = (req: NextApiRequest): string =>
+  String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
 
 const REVIEW_EMAIL = (process.env.APP_REVIEW_EMAIL || 'apptest@resihome.com').trim().toLowerCase();
 
@@ -42,6 +46,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // Disabled unless a password is configured — clearing the env var turns the
   // whole review-login path off (404, as if it doesn't exist).
   if (!expected) return res.status(404).json({ error: 'Not available' });
+  // Throttle online guessing of the fixed review password (the 600ms delay alone
+  // doesn't cap volume) — mirrors the OTP/vendor endpoints.
+  if (enforceRateLimit(res, { key: reviewClientIp(req), route: 'review-login', max: 5, windowMs: 15 * 60_000 })) return;
 
   const email = String(req.body?.email || '').trim().toLowerCase();
   const password = String(req.body?.password || '');

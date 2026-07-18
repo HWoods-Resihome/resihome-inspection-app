@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isExternalEmail } from '@/lib/userAccess';
 import { fetchActiveUsers } from '@/lib/hubspot';
 import type { HubSpotUser } from '@/lib/types';
 
@@ -42,6 +43,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  // External (1099) users must NOT receive the internal staff/inspector directory
+  // (name + email of every user) — that's a ready-made phishing/enumeration list.
+  // Mirrors the external gate on /api/templates and /api/communities.
+  if (isExternalEmail(session.email)) return res.status(200).json({ users: [] });
   const refresh = String(req.query.refresh || '') === '1';
   const now = Date.now();
   if (CACHE && now - CACHE.fetchedAt < TTL_MS && !refresh) {

@@ -27,7 +27,7 @@ const MAX_ATTEMPTS = 4;
 const TOTAL_BUDGET_MS = 45000;
 // Hard ceiling on a fetched source image so a huge/attacker-supplied URL can't
 // OOM the PDF render (mirrors lib/pdf-images.ts).
-const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024; // output is <=520px; a 12MB source is ample. Bounds peak memory (concurrency x this) so a few oversized uploads can't OOM the render.
 
 /**
  * Fetch + downscale ONE photo to a JPEG data URI, robustly: time-boxed, and

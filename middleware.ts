@@ -86,6 +86,11 @@ const PUBLIC_PATHS = new Set<string>([
 ]);
 
 function isStaticAsset(pathname: string): boolean {
+  // NEVER treat an API route as a static asset — every /api/* path must go through
+  // the session/vendor gate below. Otherwise a route ending in .js/.png/etc (or a
+  // future catch-all) would silently skip auth. API handlers also self-auth, but
+  // this removes the latent bypass entirely.
+  if (pathname.startsWith('/api/')) return false;
   return (
     pathname.startsWith('/_next/') ||
     pathname === '/favicon.ico' ||

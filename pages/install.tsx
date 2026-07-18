@@ -1,5 +1,6 @@
 import Head from 'next/head';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { SW_URL } from '@/lib/useAppUpdate';
 
 /**
  * /install — on-device PWA install + self-diagnosis (no DevTools needed).
@@ -58,7 +59,10 @@ export default function InstallPage() {
     let swOk = false; let swDetail = 'Service worker not supported.';
     if ('serviceWorker' in navigator) {
       try {
-        await navigator.serviceWorker.register('/sw.js');
+        // Register the SAME versioned URL as the main app (lib/useAppUpdate) — a
+        // bare '/sw.js' here would replace the versioned registration and defeat
+        // per-deploy update detection (stale JS served after deploy).
+        await navigator.serviceWorker.register(SW_URL, { updateViaCache: 'none' });
         const reg = await navigator.serviceWorker.ready.catch(() => null as any);
         const controller = navigator.serviceWorker.controller;
         if (reg?.active && !controller && typeof sessionStorage !== 'undefined' && !sessionStorage.getItem('rw_sw_reload')) {

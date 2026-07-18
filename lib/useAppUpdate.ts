@@ -24,7 +24,7 @@ import { useEffect, useState } from 'react';
 
 const BOOT_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || '';
 const POLL_MS = 5 * 60 * 1000;
-const SW_URL = `/sw.js${BOOT_VERSION ? `?v=${BOOT_VERSION}` : ''}`;
+export const SW_URL = `/sw.js${BOOT_VERSION ? `?v=${BOOT_VERSION}` : ''}`;
 const UPDATE_EVENT = 'resiwalk-sw-update';
 // Only auto-apply on reopen if the app was backgrounded at least this long, so a
 // quick app-switch back into an active inspection isn't interrupted by a reload.

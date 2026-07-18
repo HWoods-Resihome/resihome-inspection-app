@@ -6,11 +6,16 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { fetchActiveUsers } from '@/lib/hubspot';
 import { recordErrorEvent } from '@/lib/errorLog';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  // Per-IP throttle so the email-existence check can't be used to enumerate active
+  // HubSpot users at volume.
+  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
+  if (enforceRateLimit(res, { key: ip, route: 'login-check', max: 30, windowMs: 15 * 60_000 })) return;
   try {
     const { email } = req.body || {};
     if (!email || typeof email !== 'string') {
