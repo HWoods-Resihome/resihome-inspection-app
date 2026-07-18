@@ -203,7 +203,6 @@ export function InsightsDashboard() {
               <CardSlot id="roster"><InspectorRoster rows={filtered} /></CardSlot>
               <CardSlot id="grass"><GrassFails rows={filtered} /></CardSlot>
             </TwoCol>
-            <CardSlot id="completed"><CompletedTable rows={filtered} /></CardSlot>
 
             {/* (3b) Scope Rate Card cost + approvals */}
             <TwoCol>
@@ -219,6 +218,9 @@ export function InsightsDashboard() {
 
             {/* (5) AI overrides — by account or category (toggle) */}
             <CardSlot id="overrides-ai"><AiOverrides overrides={filteredOverrides} /></CardSlot>
+
+            {/* (6) Completed inspections (with CSV export) — last section */}
+            <CardSlot id="completed"><CompletedTable rows={filtered} /></CardSlot>
           </div>
           </CardHost>
         )}
