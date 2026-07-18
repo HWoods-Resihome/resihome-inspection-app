@@ -23,7 +23,7 @@ import ServicePager from '@/components/ServicePager';
 import { AiSparkle } from '@/components/AiSparkle';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { DatePicker } from '@/components/DatePicker';
-import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync } from '@/lib/services/offlineServices';
+import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync, toDurableRef, rehydrateRef } from '@/lib/services/offlineServices';
 
 interface ServiceView {
   id: string; live: boolean;
@@ -710,12 +710,18 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
   // Latest draft snapshot (hosted photo urls only), in a ref so the teardown
   // handlers always flush the CURRENT values (never a stale closure).
-  const keepHosted = (arr: string[]) => arr.filter((u) => !u.startsWith('blob:'));
+  // For localStorage: keep un-uploaded photos as durable ref:<localId> tokens (NOT
+  // dropped) so a photo captured offline survives an app reload before it uploads —
+  // rehydrated from IndexedDB bytes on load. Hosted URLs pass through unchanged.
+  const toDurable = (arr: string[]) => arr.map(toDurableRef);
+  // For the SERVER autosave: hosted URLs only (the server can't resolve a device-
+  // local ref: or a blob:).
+  const hostedOnly = (arr: string[]) => (arr || []).filter((u) => /^https?:\/\//i.test(u));
   const draftRef = useRef<any>({});
   draftRef.current = {
-    answers, before: keepHosted(before), after: keepHosted(after),
-    petBefore: keepHosted(petBefore), petAfter: keepHosted(petAfter),
-    bidWanted, bidDesc, bidCost, bidPhotos: keepHosted(bidPhotos),
+    answers, before: toDurable(before), after: toDurable(after),
+    petBefore: toDurable(petBefore), petAfter: toDurable(petAfter),
+    bidWanted, bidDesc, bidCost, bidPhotos: toDurable(bidPhotos),
   };
   const writeLocal = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draftRef.current)); } catch { /* quota / private mode */ } };
   // Persist the draft to the Work Order (no status change). `beacon` uses
@@ -723,7 +729,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const serverSave = (beacon = false): void => {
     if (!editable || !svc.live || stopSave.current) return;
     const d = draftRef.current;
-    const body = JSON.stringify({ answers: d.answers, before: d.before, after: d.after, petBefore: d.petBefore, petAfter: d.petAfter });
+    const body = JSON.stringify({ answers: d.answers, before: hostedOnly(d.before), after: hostedOnly(d.after), petBefore: hostedOnly(d.petBefore), petAfter: hostedOnly(d.petAfter) });
     const url = `/api/services/${encodeURIComponent(svc.id)}/autosave`;
     try {
       if (beacon && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
@@ -761,6 +767,19 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       setBidWanted(seed.bidWanted); setBidDesc(seed.bidDesc); setBidCost(seed.bidCost); setBidPhotos(seed.bidPhotos);
       // Baseline the persisted snapshot so opening a record doesn't fire a needless save.
       lastPersisted.current = JSON.stringify(seed);
+      // Restore any durable ref:<localId> tokens (photos captured offline before
+      // this reload) to displayable URLs — hosted if they've since uploaded, else a
+      // fresh object URL from the IndexedDB bytes. Async + best-effort; a dropped
+      // token (bytes truly gone) is filtered out rather than shown broken.
+      const hasRefs = (a: string[]) => a.some((u) => typeof u === 'string' && u.startsWith('ref:'));
+      const restore = async (arr: string[], set: (v: string[]) => void) => {
+        if (!hasRefs(arr)) return;
+        const out = (await Promise.all(arr.map((u) => (u.startsWith('ref:') ? rehydrateRef(u) : Promise.resolve(u))))).filter((u): u is string => !!u);
+        set(out);
+      };
+      void restore(seed.before, setBefore); void restore(seed.after, setAfter);
+      void restore(seed.petBefore, setPetBefore); void restore(seed.petAfter, setPetAfter);
+      void restore(seed.bidPhotos, setBidPhotos);
     }
     stopSave.current = false;
     hydrated.current = true;

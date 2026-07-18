@@ -97,6 +97,33 @@ const online = () => typeof navigator === 'undefined' || navigator.onLine !== fa
 
 /** Convert a display URL to a durable ref: draft blob URLs → `ref:<localId>`; hosted URLs pass through. */
 function toRef(url: string): string { const lid = draftToLocalId.get(url); return lid ? `ref:${lid}` : url; }
+
+/** Public: persist-safe token for a draft photo. A blob: draft becomes `ref:<localId>`
+ *  (durable, survives reload); a hosted URL passes through unchanged. Use this when
+ *  saving the in-progress draft so an un-uploaded photo isn't dropped on reload. */
+export function toDurableRef(url: string): string { return toRef(url); }
+
+/** Public: restore a persisted photo token to a displayable URL after reload.
+ *  `ref:<localId>` → the hosted URL if it uploaded while away, else a fresh session
+ *  object URL recreated from the durable IndexedDB bytes (re-registering the maps so
+ *  a later submit re-refs it and sync can swap it). Returns null only when the bytes
+ *  are truly gone; a hosted URL passes through. */
+export async function rehydrateRef(ref: string): Promise<string | null> {
+  if (!ref || !ref.startsWith('ref:')) return ref || null;
+  const localId = ref.slice(4);
+  try {
+    const resolved = await idbGet<{ url: string }>(RESOLVED, localId);
+    if (resolved?.url) return resolved.url;                 // uploaded while away
+    const existing = localIdToObjectUrl.get(localId);
+    if (existing) return existing;                          // already rehydrated this session
+    const rec = await idbGet<{ bytes: ArrayBuffer }>(PHOTOS, localId);
+    if (!rec?.bytes) return null;                           // bytes gone → unrecoverable
+    const objUrl = URL.createObjectURL(new Blob([rec.bytes], { type: 'image/jpeg' }));
+    draftToLocalId.set(objUrl, localId);
+    localIdToObjectUrl.set(localId, objUrl);
+    return objUrl;
+  } catch { return null; }
+}
 async function resolveRef(ref: string): Promise<string | null> {
   if (!ref.startsWith('ref:')) return ref;
   const r = await idbGet<{ url: string }>(RESOLVED, ref.slice(4));
