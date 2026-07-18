@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import type { GetServerSideProps } from 'next';
@@ -238,12 +238,26 @@ function AiNotes({ text }: { text: string }) {
   return <div className="space-y-2">{out}</div>;
 }
 
+// Shared collapse/expand-all signal: every CollapsibleSection under the provider
+// syncs its open state to the signal whenever the token bumps (initial render's
+// token 0 is a no-op, so each section's defaultOpen is still respected). Lets the
+// record view toggle all sections at once, like the inspection template.
+const SectionCollapseCtx = createContext<{ open: boolean; token: number } | null>(null);
+
 // A white card whose grey header band toggles the body open/closed — mirrors the
 // collapsible sections in the inspection template.
 function CollapsibleSection({ title, subtitle, right, defaultOpen = true, bodyClass = 'space-y-4', children }: {
   title: React.ReactNode; subtitle?: string; right?: React.ReactNode; defaultOpen?: boolean; bodyClass?: string; children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const signal = useContext(SectionCollapseCtx);
+  const lastToken = useRef(0);
+  useEffect(() => {
+    if (signal && signal.token !== lastToken.current) {
+      lastToken.current = signal.token;
+      setOpen(signal.open);
+    }
+  }, [signal]);
   return (
     <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
@@ -956,6 +970,17 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   }, [svc, form]);
   const [lightbox, setLightbox] = useState<{ groupId: string; index: number } | null>(null);
 
+  // ── Collapse / expand all sections (record view) — mirrors the inspection
+  // template. `allOpen` tracks the button's next action; bumping the token forces
+  // every CollapsibleSection under the provider to that state.
+  const [collapseSignal, setCollapseSignal] = useState({ open: true, token: 0 });
+  const [allSectionsOpen, setAllSectionsOpen] = useState(true);
+  const toggleAllSections = () => {
+    const open = !allSectionsOpen;
+    setAllSectionsOpen(open);
+    setCollapseSignal((s) => ({ open, token: s.token + 1 }));
+  };
+
   // ── Settings (internal): audit log + reassign vendor ──
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
@@ -1179,7 +1204,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
           </div>
         ) : (
-          <>
+          <SectionCollapseCtx.Provider value={collapseSignal}>
             {/* PDFs (live records, once submitted). Vendor copy shows the Vendor Cost
                 and is available to everyone; the Client copy shows the Client Cost and
                 is internal-only, unlocked once the review is finalized (Completed). */}
@@ -1215,6 +1240,24 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 <p className="text-[13px] text-ink whitespace-pre-line">{svc.description}</p>
               </section>
             )}
+
+            {/* Collapse / expand ALL sections at once — mirrors the inspection
+                template's control. Sits just above the section stack. */}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={toggleAllSections}
+                className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-500 hover:text-gray-800 transition-colors"
+                title={allSectionsOpen ? 'Collapse all sections' : 'Expand all sections'}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                     className={`transition-transform ${allSectionsOpen ? '' : 'rotate-180'}`}>
+                  <polyline points="18 15 12 9 6 15" />
+                </svg>
+                {allSectionsOpen ? 'Collapse all' : 'Expand all'}
+              </button>
+            </div>
 
             {/* Community grass-cut master: the covered-home list, SECOND (below the
                 description). Crew sees it; reviewer curates it before split.
@@ -1466,7 +1509,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 )}
               </>
             )}
-          </>
+          </SectionCollapseCtx.Provider>
         )}
       </main>
 
