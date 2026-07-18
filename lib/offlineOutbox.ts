@@ -228,7 +228,9 @@ export async function flushOutbox(
       // can no longer silently lose a line and leave the report short.
       lastError = `Network error reaching the server (${String(e?.message || e).slice(0, 80)}).`;
       bumpAttempts(entry.id);
-      break;
+      continue;  // skip THIS entry, keep syncing others — a single failing inspection
+                 // must not block every other inspection's queue (head-of-line fix).
+                 // It stays queued (never removed) and replays next tick.
     }
     if (res.ok) {
       let data: any = null;
@@ -282,16 +284,23 @@ export async function flushOutbox(
       console.error(`[outbox] dropping entry ${entry.id} after ${res.status}: ${body.slice(0, 200)}`);
       remove(entry.id);
       failedPermanently++;
+    } else if (res.status === 429) {
+      // Rate-limited — respect backpressure: STOP the pass (hammering makes it
+      // worse) and replay next tick. Never dropped.
+      const body = await res.text().catch(() => '');
+      lastError = `Server busy (HTTP 429)${body ? `: ${body.slice(0, 160)}` : ''} — retrying shortly.`;
+      bumpAttempts(entry.id);
+      break;
     } else {
-      // 429 / 5xx — transient server error. NEVER drop the change (it's the
-      // inspector's entered data); surface the server's message, count the
-      // attempt for diagnostics, and stop — it replays in order next tick /
-      // reconnect. The submit gate blocks finalize while the queue is non-empty,
-      // so a flaky link can't silently drop a line from the report + totals.
+      // 5xx transient server error. NEVER drop the change (it's the inspector's
+      // entered data); count the attempt and SKIP to the next entry so one failing
+      // inspection doesn't block the rest of the queue (head-of-line fix). It stays
+      // queued and replays next tick; the submit gate blocks finalize while the
+      // queue is non-empty, so a flaky link can't silently drop a line.
       const body = await res.text().catch(() => '');
       lastError = `Server error (HTTP ${res.status})${body ? `: ${body.slice(0, 200)}` : ''} — retrying.`;
       bumpAttempts(entry.id);
-      break;
+      continue;
     }
   }
   return { synced, remaining: read().length, failedPermanently, lastError };

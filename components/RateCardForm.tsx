@@ -42,7 +42,7 @@ import { reportSyncOutcome } from '@/lib/syncTelemetry';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
 import { removePhotoAttachByUrl } from '@/lib/photoAttachOutbox';
 import { isLocalInspectionId } from '@/lib/pendingInspections';
-import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
+import { drainPhotoAttachOutbox, countPhotoAttach } from '@/lib/photoAttachOutbox';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { setErrorContext } from '@/lib/clientErrorReporter';
@@ -3514,6 +3514,16 @@ export function RateCardForm(props: RateCardFormProps) {
         { confirmLabel: 'Submit without photos', cancelLabel: 'Keep trying' }
       );
       if (!proceed) return;
+    }
+    // Also wait on the photo-ATTACH outbox: a photo can be fully uploaded (out of
+    // the byte queue, so pendingPhotos=0) while its attach instruction is still
+    // queued after a transient /attach-photo failure — finalize would then render
+    // the PDF before that photo is attached, dropping it from the report. Drain +
+    // gate so the report can't render mid-attach.
+    try { await drainPhotoAttachOutbox(); } catch { /* retries via the global driver */ }
+    if (countPhotoAttach(props.inspectionRecordId) > 0) {
+      await dialog.alert('A photo is still finishing attaching to the report. Keep this screen open a few seconds, then submit again — it isn’t on the record yet.');
+      return;
     }
     // Pre-flight: required section photos present?
     const missingSections: string[] = [];
