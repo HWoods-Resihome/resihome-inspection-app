@@ -2501,53 +2501,32 @@ export function QuestionForm({
         {!firstSummaryKey && bottomFc}
       </div>
 
-      {/* Sticky submit bar.
-          Layout: Cancel Inspection (destructive) anchored LEFT so it's
-          isolated from the primary actions. Save & Close + Submit grouped
-          on the right. Save & Close gets a green hover/active style for
-          visual reassurance that it's saving work. Matches the same layout
-          used in RateCardForm so behavior is consistent across templates. */}
+      {/* Sticky submit bar. Unified across every inspection template: Save & Close
+          (green) anchored LEFT, Submit (brand) on the RIGHT, no destructive Cancel
+          in the footer. Matches the scope-style forms + RateCardForm so the footer
+          is identical everywhere. Read-only inspections center a single Close. */}
       <div className="lz-foot fixed bottom-0 inset-x-0 z-30 bg-white border-t-2 border-brand px-3 sm:px-4 py-1.5 shadow-lg" style={{ bottom: 'var(--sync-footer-h, 0px)', transition: 'bottom .25s ease' }}>
         <div className={`max-w-3xl mx-auto flex items-center gap-2 ${readOnly ? 'justify-center' : 'justify-between'}`}>
-          {/* scopeStyle templates drop the destructive Cancel button and move
-              Save & Close to the LEFT (Submit stays on the right). Completed /
+          {/* Completed /
               read-only inspections have no left actions, so the whole bar
               (Close + status) is centered instead. */}
+          {/* Unified footer across ALL inspection templates (matches the scope-
+              style forms + RateCardForm): Save & Close anchored LEFT, Submit on the
+              right, and NO destructive Cancel in the footer — cancellation is done
+              from the inspection list, consistent with every other form. */}
           {!readOnly && (
           <div className="shrink-0">
-            {!readOnly && onCancelInspection && !scopeStyle && (
-              <button
-                type="button"
-                onClick={onCancelInspection}
-                className="px-2.5 sm:px-3 py-2 border border-red-300 rounded-lg hover:bg-red-50 font-heading font-semibold text-red-700 text-xs sm:text-sm whitespace-nowrap"
-                title="Mark this Inspection as Cancelled in HubSpot"
-              >
-                Cancel
-              </button>
-            )}
-            {!readOnly && scopeStyle && (
-              <button
-                type="button"
-                onClick={() => { void handleSaveAndClose(); }}
-                className="px-2.5 sm:px-3 py-2 border border-emerald-300 rounded-lg hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 font-heading font-semibold text-emerald-700 text-xs sm:text-sm transition-colors whitespace-nowrap"
-                title="Save any pending changes and return to the inspection list. Inspection stays In Progress."
-              >
-                Save &amp; Close
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => { void handleSaveAndClose(); }}
+              className="px-2.5 sm:px-3 py-2 border border-emerald-300 rounded-lg hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 font-heading font-semibold text-emerald-700 text-xs sm:text-sm transition-colors whitespace-nowrap"
+              title="Save any pending changes and return to the inspection list. Inspection stays In Progress."
+            >
+              Save &amp; Close
+            </button>
           </div>
           )}
           <div className="flex items-center gap-2 justify-end shrink-0">
-            {!readOnly && !scopeStyle && (
-              <button
-                type="button"
-                onClick={() => { void handleSaveAndClose(); }}
-                className="px-2.5 sm:px-3 py-2 border border-emerald-300 rounded-lg hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 font-heading font-semibold text-emerald-700 text-xs sm:text-sm transition-colors whitespace-nowrap"
-                title="Save any pending changes and return to the inspection list. Inspection stays In Progress."
-              >
-                Save &amp; Close
-              </button>
-            )}
             {readOnly && (
               <button
                 type="button"
