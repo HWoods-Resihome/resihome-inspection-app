@@ -5493,7 +5493,7 @@ function SectionHeader(p: SectionHeaderProps) {
               ADDED = neutral grey camera + count (the normal state it returns to). */}
           {!editingTitle && (p.photosMissing || p.photosCount > 0) && (
             <span
-              className={`inline-flex items-center gap-1 w-[3.25rem] shrink-0 ${p.photosMissing ? 'text-amber-500' : 'text-gray-400'}`}
+              className={`inline-flex items-center gap-1 w-10 shrink-0 ${p.photosMissing ? 'text-amber-500' : 'text-gray-400'}`}
               title={p.photosMissing ? 'Photos needed — this section requires at least one photo' : `${p.photosCount} photo${p.photosCount === 1 ? '' : 's'} added`}
               aria-label={p.photosMissing ? 'Photos needed' : `${p.photosCount} photos added`}
             >
