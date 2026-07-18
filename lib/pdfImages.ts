@@ -20,6 +20,11 @@ const EMBED_QUALITY = 70;
 const CONCURRENCY = 6;      // bounded parallel fetch+resize (caps memory/time + CDN throttling)
 const FETCH_TIMEOUT_MS = 18000;
 const MAX_ATTEMPTS = 4;
+// Global wall-clock budget for the WHOLE embed pass. finalize/qc-finalize run under
+// a 60s function limit; without this a few permanently-slow photos (4×18s retries
+// each) blow the budget and the entire finalize is KILLED (no PDF, no email). Past
+// the deadline we stop starting/​retrying fetches and let the rest fall back to links.
+const TOTAL_BUDGET_MS = 45000;
 // Hard ceiling on a fetched source image so a huge/attacker-supplied URL can't
 // OOM the PDF render (mirrors lib/pdf-images.ts).
 const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
@@ -31,10 +36,12 @@ const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
  * otherwise leave the photo as a "View photo" link in the report instead of the
  * image. A sharp DECODE error isn't retried (won't change on re-fetch).
  */
-async function fetchAndEmbed(url: string): Promise<string | null> {
+async function fetchAndEmbed(url: string, deadline: number): Promise<string | null> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;  // out of budget → link fallback
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    const timer = setTimeout(() => ctrl.abort(), Math.min(FETCH_TIMEOUT_MS, remaining));
     try {
       // SSRF guard: poster URLs are client-influenced (the app stores whatever URL
       // the client writes into an answer's photoUrls), so a caller could point one
@@ -80,11 +87,12 @@ export async function buildEmbeddedPhotoMap(entries: string[]): Promise<Record<s
     entries.map((e) => getPosterUrl(e)).filter((u) => /^https?:\/\//i.test(u))
   ));
   const out: Record<string, string> = {};
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
   let cursor = 0;
   const worker = async () => {
-    while (cursor < posters.length) {
+    while (cursor < posters.length && Date.now() < deadline) {
       const url = posters[cursor++];
-      const data = await fetchAndEmbed(url);
+      const data = await fetchAndEmbed(url, deadline);
       if (data) out[url] = data; // else leave unmapped → renderer falls back to the link
     }
   };
