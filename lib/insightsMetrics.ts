@@ -432,6 +432,29 @@ export function timeToFinishMs(r: InsightsRow): number | null {
   return diffMs(r.approvedAt || r.completedAt, r.startedAt);
 }
 
+export interface RegionCompletion { region: string; avgMs: number; count: number; }
+
+/**
+ * Average completion time per region — for the trend card's by-region table.
+ * Uses the same completion-time definition as the KPIs (only completed rows with
+ * both dates count). Sorted slowest-first. Rows without a region bucket under
+ * "(no region)".
+ */
+export function completionTimeByRegion(rows: InsightsRow[]): RegionCompletion[] {
+  const acc = new Map<string, { sum: number; count: number }>();
+  for (const r of rows) {
+    const ms = completionTimeMs(r);
+    if (ms == null) continue;
+    const region = (r.region || '').trim() || REGION_NONE;
+    const a = acc.get(region) || { sum: 0, count: 0 };
+    a.sum += ms; a.count++;
+    acc.set(region, a);
+  }
+  return Array.from(acc.entries())
+    .map(([region, a]) => ({ region, avgMs: a.sum / a.count, count: a.count }))
+    .sort((x, y) => y.avgMs - x.avgMs);
+}
+
 function mean(values: number[]): number | null {
   if (!values.length) return null;
   return values.reduce((a, b) => a + b, 0) / values.length;

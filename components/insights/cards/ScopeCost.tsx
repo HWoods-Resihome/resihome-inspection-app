@@ -52,7 +52,7 @@ export function ScopeCost({ rows }: { rows: InsightsRow[] }) {
 
   return (
     <CardFrame
-      title="Scope cost by inspector" icon={ICON}
+      title="Scope Cost" icon={ICON}
       subtitle={totals.count
         ? `${fmtNumber(totals.count)} scopes · ${fmtCurrency(totals.total)} total · ${fmtCurrency(totals.avg)} avg`
         : 'Scope Rate Card client cost'}

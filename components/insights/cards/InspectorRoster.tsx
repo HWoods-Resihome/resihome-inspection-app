@@ -18,7 +18,7 @@ export function InspectorRoster({ rows }: { rows: InsightsRow[] }) {
   const roster = inspectorRoster(rows);
   return (
     <CardFrame
-      title="Inspector performance" icon={ICON}
+      title="Inspector Performance" icon={ICON}
       bodyClassName="px-0 pb-0 max-h-[320px] overflow-auto"
     >
       {roster.length === 0 ? (

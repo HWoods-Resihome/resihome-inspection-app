@@ -18,10 +18,7 @@ import { InspectorRoster } from './cards/InspectorRoster';
 import { CompletedTable } from './cards/CompletedTable';
 import { TrendChart } from './cards/TrendChart';
 import { GrassFails } from './cards/GrassFails';
-import { KbChanges } from './cards/KbChanges';
-import { PreferenceMismatches } from './cards/PreferenceMismatches';
-import { AiOverridesByInspector } from './cards/AiOverridesByInspector';
-import { AiOverridesByCategory } from './cards/AiOverridesByCategory';
+import { AiOverrides } from './cards/AiOverrides';
 import { ScopeCost } from './cards/ScopeCost';
 import { ScopeApprovals } from './cards/ScopeApprovals';
 import { RateCardLines } from './cards/RateCardLines';
@@ -217,20 +214,11 @@ export function InsightsDashboard() {
             {/* (3c) Most-used rate card line items (all-time + last week) */}
             <CardSlot id="ratecard-lines"><RateCardLines rows={filtered} /></CardSlot>
 
-            {/* (4) Completion-time trend */}
-            <CardSlot id="trend"><TrendChart history={history} /></CardSlot>
+            {/* (4) Completion-time trend + by-region table */}
+            <CardSlot id="trend"><TrendChart history={history} rows={filtered} /></CardSlot>
 
-            {/* (5) AI overrides — who overrides most + biggest training opportunities */}
-            <TwoCol>
-              <CardSlot id="overrides-inspector"><AiOverridesByInspector overrides={filteredOverrides} /></CardSlot>
-              <CardSlot id="overrides-category"><AiOverridesByCategory overrides={filteredOverrides} /></CardSlot>
-            </TwoCol>
-
-            {/* (6) Preference overrides (training signals) */}
-            <CardSlot id="overrides"><PreferenceMismatches events={filteredOverrides} /></CardSlot>
-
-            {/* (7) AI Knowledge Base changes feed (full width) */}
-            <CardSlot id="kb"><KbChanges /></CardSlot>
+            {/* (5) AI overrides — by account or category (toggle) */}
+            <CardSlot id="overrides-ai"><AiOverrides overrides={filteredOverrides} /></CardSlot>
           </div>
           </CardHost>
         )}

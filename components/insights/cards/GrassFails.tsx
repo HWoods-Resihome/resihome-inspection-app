@@ -33,8 +33,8 @@ export function GrassFails({ rows }: { rows: InsightsRow[] }) {
   const fails = grassConditionFails(rows);
   return (
     <CardFrame
-      title="1099 Grass Condition — fails" icon={ICON}
-      subtitle="leasing-agent inspections where the lawn failed"
+      title="1099 Grass Condition Fails" icon={ICON}
+      subtitle="Leasing-agent inspections where the lawn failed"
       headerRight={fails.length > 0
         ? <span className="inline-block rounded-full bg-[#ff0060]/15 text-[#ff0060] font-heading font-semibold text-xs px-2 py-0.5">{fails.length}</span>
         : null}

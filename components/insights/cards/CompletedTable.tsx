@@ -55,7 +55,7 @@ export function CompletedTable({ rows }: { rows: InsightsRow[] }) {
 
   return (
     <CardFrame
-      title="Completed inspections" subtitle={`${completed.length} total`} icon={ICON} headerRight={exportBtn}
+      title="Completed Inspections" subtitle={`${completed.length} total`} icon={ICON} headerRight={exportBtn}
       bodyClassName="px-0 pb-0 max-h-[420px] overflow-auto"
     >
       {completed.length === 0 ? (

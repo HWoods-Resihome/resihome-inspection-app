@@ -23,8 +23,8 @@ export function ScopeApprovals({ rows }: { rows: InsightsRow[] }) {
 
   return (
     <CardFrame
-      title="Scope approvals by reviewer" icon={ICON}
-      subtitle="count + $ approved per reviewer"
+      title="Scope Approvals" icon={ICON}
+      subtitle="Count + $ approved per reviewer"
       bodyClassName="p-0 max-h-[420px] overflow-auto"
     >
       {groups.length === 0 ? (

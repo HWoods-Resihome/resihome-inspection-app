@@ -41,16 +41,13 @@ export function CardSlot({ id, children }: { id: string; children: ReactNode }) 
 /** Static catalog of minimizable cards (id → title) for the restore dropdown.
  *  Ids must match the <CardSlot id> used in the dashboard. */
 export const CARD_CATALOG: { id: string; title: string }[] = [
-  { id: 'passfail', title: 'Pass / fail by inspector' },
-  { id: 'roster', title: 'Inspector performance' },
-  { id: 'grass', title: '1099 Grass Condition fails' },
-  { id: 'completed', title: 'Completed inspections' },
-  { id: 'scope-cost', title: 'Scope cost by inspector' },
-  { id: 'scope-approvals', title: 'Scope approvals by reviewer' },
-  { id: 'ratecard-lines', title: 'Most-used rate card line items' },
-  { id: 'trend', title: 'Completion-time trend' },
-  { id: 'overrides', title: 'Inspector preference overrides' },
-  { id: 'overrides-inspector', title: 'AI overrides by inspector' },
-  { id: 'overrides-category', title: 'AI overrides by category' },
-  { id: 'kb', title: 'AI Knowledge Base changes' },
+  { id: 'passfail', title: 'Pass / Fail' },
+  { id: 'roster', title: 'Inspector Performance' },
+  { id: 'grass', title: '1099 Grass Condition Fails' },
+  { id: 'completed', title: 'Completed Inspections' },
+  { id: 'scope-cost', title: 'Scope Cost' },
+  { id: 'scope-approvals', title: 'Scope Approvals' },
+  { id: 'ratecard-lines', title: 'Most-Used Rate Card Line Items' },
+  { id: 'trend', title: 'Completion-Time Trend' },
+  { id: 'overrides-ai', title: 'AI Overrides' },
 ];

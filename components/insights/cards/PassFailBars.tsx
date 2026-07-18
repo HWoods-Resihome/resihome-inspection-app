@@ -41,7 +41,7 @@ export function PassFailBars({ rows }: { rows: InsightsRow[] }) {
 
   return (
     <CardFrame
-      title={`Pass / fail by ${by}`} icon={ICON} headerRight={toggle}
+      title="Pass / Fail" icon={ICON} headerRight={toggle}
       bodyClassName="p-4 max-h-[320px] overflow-auto"
     >
       {data.length === 0 ? (

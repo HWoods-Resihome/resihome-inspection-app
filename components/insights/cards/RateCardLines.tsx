@@ -19,7 +19,7 @@ export function RateCardLines({ rows }: { rows: InsightsRow[] }) {
   const shown = usage.slice(0, MAX_ROWS);
   return (
     <CardFrame
-      title="Most-used rate card line items"
+      title="Most-Used Rate Card Line Items"
       subtitle={usage.length ? `${usage.length} distinct line item${usage.length === 1 ? '' : 's'} used` : undefined}
       icon={ICON}
       bodyClassName="px-0 pb-0 max-h-[320px] overflow-auto"
