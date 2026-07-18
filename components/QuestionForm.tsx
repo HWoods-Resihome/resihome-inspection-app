@@ -1847,6 +1847,15 @@ export function QuestionForm({
     return { passCount: pass, failCount: fail };
   }, [answers]);
 
+  // Does this template have any Good/Fail (verdict) questions? Drives whether the
+  // header Pass/Fail tally shows — so it appears on EVERY verdict form (RRQC,
+  // occupancy, community, 1099), matching the scope-style inspections, but never
+  // shows a misleading "0 Pass 0 Fail" on a form that has no verdict questions.
+  const hasVerdictQuestions = useMemo(
+    () => questions.some((q) => (q.responseOptions || []).some((o) => answerTone(o) !== null)),
+    [questions],
+  );
+
   // The Review/Sign-off/Summary section (if any) renders LAST — after the reused
   // Scope HVAC/Smart Home/Utilities bubbles. (After the cleanup these merge into
   // one "Review & Sign-Off" section.)
@@ -2221,9 +2230,9 @@ export function QuestionForm({
                 here (instead of a full-width row below) removes a line and trims
                 the header's height. The save indicator is hidden on short
                 landscape to reclaim space. */}
-            {(scopeStyle || !readOnly) && (
+            {(hasVerdictQuestions || !readOnly) && (
               <div className="shrink-0 flex flex-col items-end justify-center gap-1">
-                {scopeStyle && (
+                {hasVerdictQuestions && (
                   <div className="flex items-center gap-1.5 text-[11px] font-heading font-bold">
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{passCount} Pass</span>
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{failCount} Fail</span>
