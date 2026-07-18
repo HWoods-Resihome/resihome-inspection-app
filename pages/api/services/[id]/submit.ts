@@ -15,6 +15,7 @@ import type { ServiceRecord } from '@/lib/services/model';
 import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder, readServiceForms, fetchPropertyStatus } from '@/lib/hubspot';
 import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
+import { notifyServiceSubmittedSlack, notifyServiceBidCreatedSlack } from '@/lib/services/serviceSlack';
 import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
 import { easternTodayISO } from '@/lib/services/time';
 import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
@@ -207,9 +208,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Internal Slack alerts (dark until an admin sets a channel). A bid item was
+    // just created → notify; the submitted-for-review alert fires per final status
+    // below.
+    const pSlack = existing?.props || {};
+    const slackCtx = {
+      serviceId: id, address: String(pSlack.address_snapshot || pSlack.service_name || ''),
+      worktype: String(pSlack.worktype || ''), subtype: String(pSlack.subtype || ''),
+      vendorName: pSlack.vendor_name || null,
+    };
+    if (bidId) void notifyServiceBidCreatedSlack({ ...slackCtx, bidId, description: String(bid?.description || ''), vendorCost: Number(bid?.vendorCost) || null });
+
     // Not completed → we already routed straight to Review and skipped AI.
     if (routeToReview) {
       void recordServiceAudit({ serviceId: id, action: 'ai_review', actorName: 'System', detail: 'Not completed — AI skipped, routed to Review', meta: { skipped: true } });
+      void notifyServiceSubmittedSlack(slackCtx);
       return res.status(200).json({ ok: true, id, status: 'review', review: null, reviewError: null, skippedAi: true, bidId, bidError });
     }
 
@@ -235,6 +248,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.warn('[services/submit] inline AI review failed (cron will retry):', e);
     }
 
+    // AI routed it to human review → notify internal.
+    if (review?.status === 'review') void notifyServiceSubmittedSlack(slackCtx);
     return res.status(200).json({ ok: true, id, status: review?.status || 'submitted', review, reviewError, bidId, bidError });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });

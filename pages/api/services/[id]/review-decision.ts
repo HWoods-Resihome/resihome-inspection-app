@@ -26,6 +26,7 @@ import { defaultRateFor } from '@/lib/services/worktypes';
 import { isCommunityCutMaster, splitMasterCommunityCut } from '@/lib/services/split';
 import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { notifyServiceCompleted } from '@/lib/notifications/triggers';
+import { notifyServiceRejectedSlack } from '@/lib/services/serviceSlack';
 import { appBaseUrl } from '@/lib/notifications/send';
 import { easternTodayISO, addDaysISO } from '@/lib/services/time';
 
@@ -92,6 +93,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await patchServiceWorkOrder(id, props);
     const decisionLabel = decision === 'reject' ? 'Rejected — payment denied' : decision === 'modify' ? 'Modified pricing' : 'Approved';
     void recordServiceAudit({ serviceId: id, action: 'review', actorEmail: email, actorName: session?.name, detail: `${decisionLabel}: ${notes}`.slice(0, 500), meta: { decision } });
+
+    // Internal Slack alert on a rejection (dark until an admin sets a channel).
+    if (decision === 'reject') {
+      void notifyServiceRejectedSlack({
+        serviceId: id, address: String(p.address_snapshot || p.service_name || ''),
+        worktype: String(p.worktype || ''), subtype: String(p.subtype || ''), vendorName: p.vendor_name || null,
+        reviewer: session?.name || email || null, notes,
+      });
+    }
 
     // Community grass-cut MASTER → split into one completed per-property billing
     // line each (children carry for_billing; master leaves billing). A rejection
