@@ -3,6 +3,7 @@ import { recordAiFeedback, type AiFeedbackEvent } from '@/lib/aiFeedback';
 import { maybeRefreshLearnedKnowledge } from '@/lib/aiKnowledgeLearning';
 import { getSessionFromRequest } from '@/lib/auth';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { isExternalEmail } from '@/lib/userAccess';
 
 /**
  * Sink for AI feedback events (see lib/aiFeedbackClient.ts) — how a human
@@ -46,7 +47,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       recordAiFeedback({ ...(e as AiFeedbackEvent), actorEmail, actorName })));
     // Near-real-time learning: fold new feedback into the AI Knowledge base
     // (throttled to ~once / 3 min across the fleet, only when there's activity).
-    if (events.length) await maybeRefreshLearnedKnowledge();
+    // Gate the fold to INTERNAL users — the learned KB is injected into every AI
+    // prompt fleet-wide, so an external (1099/vendor) account must not be able to
+    // shape it. Their feedback is still recorded above (attribution/insights); it
+    // just doesn't drive the shared KB. (The prompts also now treat the KB as
+    // untrusted data, so embedded instructions can't steer a verdict regardless.)
+    if (events.length && !isExternalEmail(session.email)) await maybeRefreshLearnedKnowledge();
   } catch {
     /* swallow — feedback capture must never fail loudly */
   }
