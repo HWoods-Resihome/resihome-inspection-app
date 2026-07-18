@@ -15,6 +15,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
 import { getSessionFromRequest } from '@/lib/auth';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { safeProxyFetch, readBodyCapped, isAllowedPhotoHost } from '@/lib/safeProxyFetch';
 import { isExternalEmail } from '@/lib/userAccess';
 import { recordAiUsage } from '@/lib/aiUsage';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
@@ -150,10 +151,13 @@ async function streamTurn(
 async function fetchPhotoBlock(url: string): Promise<any | null> {
   try {
     const clean = url.split('#')[0]; // video entries are "poster#v=video"
-    if (!/^https?:\/\//i.test(clean)) return null;
-    const r = await fetch(clean);
+    // SSRF guard: allowed photo hosts only, fetched via safeProxyFetch (validates
+    // every redirect hop resolves to a public IP) so a client-supplied URL can't
+    // pull an internal/metadata address into the model.
+    if (!isAllowedPhotoHost(clean)) return null;
+    const r = await safeProxyFetch(clean);
     if (!r.ok) return null;
-    const buf = Buffer.from(await r.arrayBuffer());
+    const buf = await readBodyCapped(r, 40 * 1024 * 1024);
     const jpeg = await sharp(buf).rotate().resize(PHOTO_EDGE, PHOTO_EDGE, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 60 }).toBuffer();
     return { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } };
   } catch {

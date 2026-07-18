@@ -360,6 +360,14 @@ export const pdfStyles = StyleSheet.create({
     height: '100%',
     objectFit: 'cover',
   },
+  photoCellPlaceholder: {
+    width: '100%',
+    height: '100%',
+    color: PDF_COLORS.brand,
+    fontSize: 7,
+    textAlign: 'center',
+    paddingTop: 28,
+  },
   videoBadge: {
     position: 'absolute',
     bottom: 2,
@@ -587,9 +595,14 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
         const poster = getPosterUrl(entry);
         const video = isVideoEntry(entry) ? getVideoUrl(entry) : '';
         const fileHref = video || poster;
-        // EMBED the downscaled thumbnail when we have one (keeps the PDF small);
-        // otherwise fall back to the full-size poster URL.
-        const imgSrc = (embedded && embedded[poster]) || poster;
+        // EMBED the downscaled thumbnail when we have one (a data: URI). On an
+        // embed MISS we must NOT hand the raw poster URL to <Image> — react-pdf
+        // would fetch it server-side at render time with no SSRF guard (a crafted
+        // photo URL could reach an internal/metadata address; it's the exact hole
+        // fixed for the standalone PDF in lib/pdf.tsx). Only ever draw a data: URI;
+        // otherwise show a link to the photo.
+        const embeddedSrc = embedded ? embedded[poster] : undefined;
+        const hasEmbedded = typeof embeddedSrc === 'string' && embeddedSrc.startsWith('data:');
         // Gallery link (starts at this photo) when a base is set; else the file.
         // Join correctly whether the base already carries query params (per-PDF
         // scoping, e.g. ?k=vendor&v=slug).
@@ -598,7 +611,9 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
         return (
           <Link key={`${entry}-${i}`} src={href} style={pdfStyles.photoCell}>
             {/* eslint-disable-next-line jsx-a11y/alt-text */}
-            <Image src={imgSrc} style={pdfStyles.photoCellImage} />
+            {hasEmbedded
+              ? <Image src={embeddedSrc as string} style={pdfStyles.photoCellImage} />
+              : <Text style={pdfStyles.photoCellPlaceholder}>View photo ↗</Text>}
             {video ? <Text style={pdfStyles.videoBadge}>VIDEO</Text> : null}
           </Link>
         );
