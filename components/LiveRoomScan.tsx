@@ -93,6 +93,7 @@ export function LiveRoomScan(props: Props) {
   const inferTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const stillTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const inFlight = useRef(false);
+  const finishedRef = useRef(false);  // guards finish() against a double-tap
   const openRef = useRef(true);
   const lastFrameSigRef = useRef<Uint8ClampedArray | null>(null);  // last analyzed silent-tick frame
   const audioRecRef = useRef<MediaRecorder | null>(null);
@@ -471,6 +472,8 @@ export function LiveRoomScan(props: Props) {
   }
 
   async function finish() {
+    if (finishedRef.current) return;  // re-entry guard: a double-tap would otherwise
+    finishedRef.current = true;       // add every staged line + still TWICE.
     teardown();
     // Commit staged lines + push the stamped stills into the room photos.
     for (const line of stagedRef.current) {

@@ -2522,7 +2522,7 @@ export function RateCardForm(props: RateCardFormProps) {
     if (props.readOnly) return;
     const url = (photosBySection[sectionId] || [])[index];
     if (!url) return;
-    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    const line = (linesBySectionRef.current[sectionId] || []).find((l) => l.externalId === externalId);
     if (!line) return;
     if (!(line.photoUrls || []).includes(url)) {
       handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), url] });
@@ -2534,7 +2534,7 @@ export function RateCardForm(props: RateCardFormProps) {
     if (props.readOnly) return;
     const url = (photosBySection[sectionId] || [])[index];
     if (!url) return;
-    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    const line = (linesBySectionRef.current[sectionId] || []).find((l) => l.externalId === externalId);
     if (!line) return;
     handleSaveLineForSection(sectionId, { ...line, photoUrls: (line.photoUrls || []).filter((u) => u !== url) });
   }
@@ -2553,7 +2553,7 @@ export function RateCardForm(props: RateCardFormProps) {
     if (props.readOnly) return url;
     const sectionId = cameraSectionId;
     if (!sectionId) return url;
-    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === lineExternalId);
+    const line = (linesBySectionRef.current[sectionId] || []).find((l) => l.externalId === lineExternalId);
     if (!line) return url;
     if (!(line.photoUrls || []).includes(url)) {
       handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), url] });
@@ -2564,7 +2564,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // Untag / delete a photo from a line item.
   function deleteLinePhoto(sectionId: string, externalId: string, index: number) {
     if (props.readOnly) return;
-    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    const line = (linesBySectionRef.current[sectionId] || []).find((l) => l.externalId === externalId);
     if (!line) return;
     const next = (line.photoUrls || []).filter((_, i) => i !== index);
     handleSaveLineForSection(sectionId, { ...line, photoUrls: next });
@@ -2573,7 +2573,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // Replace a line photo with an annotated version.
   async function replaceLinePhoto(sectionId: string, externalId: string, index: number, file: File) {
     if (props.readOnly) return;
-    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    const line = (linesBySectionRef.current[sectionId] || []).find((l) => l.externalId === externalId);
     if (!line) return;
     const arr = [...(line.photoUrls || [])];
     if (index < 0 || index >= arr.length) return;
@@ -2603,7 +2603,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // handlers but on the line's afterPhotoUrls. Powers the after-photo lightbox.
   function deleteAfterPhoto(sectionId: string, externalId: string, index: number) {
     if (props.readOnly) return;
-    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    const line = (linesBySectionRef.current[sectionId] || []).find((l) => l.externalId === externalId);
     if (!line) return;
     const next = (line.afterPhotoUrls || []).filter((_, i) => i !== index);
     handleSaveLineForSection(sectionId, { ...line, afterPhotoUrls: next });
@@ -2611,7 +2611,7 @@ export function RateCardForm(props: RateCardFormProps) {
 
   async function replaceAfterPhoto(sectionId: string, externalId: string, index: number, file: File) {
     if (props.readOnly) return;
-    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    const line = (linesBySectionRef.current[sectionId] || []).find((l) => l.externalId === externalId);
     if (!line) return;
     const arr = [...(line.afterPhotoUrls || [])];
     if (index < 0 || index >= arr.length) return;
