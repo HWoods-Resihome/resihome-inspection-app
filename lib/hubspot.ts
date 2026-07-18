@@ -2057,7 +2057,7 @@ const INSPECTION_LIST_PROPERTIES = [
   // Added for ResiWalk Insights analytics (region filter, turnaround timestamps,
   // pass/fail, photo counts). Harmless extra fields for the home list.
   'region_snapshot', 'submitted_at', 'approved_at', 'approved_by_name',
-  'inspection_result', 'total_photos_attached',
+  'inspection_result', 'total_photos_attached', 'first_photo_at', 'last_photo_at',
   // Property status: the frozen value (set at completion), the sortable snapshot
   // (kept fresh by enrichPropertyStatuses), and the property ref so active rows
   // can be enriched with the live status (see enrichPropertyStatuses).
@@ -2116,6 +2116,8 @@ function mapInspectionRow(r: any): InspectionSummary {
     inspectionResult: (p.inspection_result === 'pass' || p.inspection_result === 'fail') ? p.inspection_result : null,
     totalPhotosAttached: p.total_photos_attached != null && p.total_photos_attached !== ''
       ? Number(p.total_photos_attached) : null,
+    firstPhotoAt: p.first_photo_at || null,
+    lastPhotoAt: p.last_photo_at || null,
     propertyStatusAtCompletion: (p.property_status_at_completion || '').toString().trim() || null,
     // Display value: start from the frozen value (completed rows are done here);
     // active rows get the live status filled in by enrichPropertyStatuses.
@@ -7191,6 +7193,14 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureGroup(inspection, 'inspection_results', 'Inspection Results');
   await ensureProp(inspection, 'property_status_at_completion', {
     name: 'property_status_at_completion', label: 'Property Status at Completion', type: 'string', fieldType: 'text', groupName: 'inspection_results',
+  });
+  // First / last photo capture time — stamped at submit from the client's capture
+  // window; completion time is measured as (last − first) for the Insights metric.
+  await ensureProp(inspection, 'first_photo_at', {
+    name: 'first_photo_at', label: 'First Photo At', type: 'datetime', fieldType: 'date', groupName: 'inspection_results',
+  });
+  await ensureProp(inspection, 'last_photo_at', {
+    name: 'last_photo_at', label: 'Last Photo At', type: 'datetime', fieldType: 'date', groupName: 'inspection_results',
   });
   // Reference coordinates stamped at creation so the calendar map plots the pin
   // without a live geocode (falls back to client geocoding when absent).

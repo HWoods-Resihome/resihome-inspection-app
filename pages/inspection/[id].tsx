@@ -22,6 +22,7 @@ import { isLocalInspectionId, realIdFor, getPendingInspection, buildSeedPayload 
 import { reportError } from '@/lib/clientErrorReporter';
 import { isNetworkError } from '@/lib/netError';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
+import { getPhotoWindow, clearPhotoWindow } from '@/lib/photoCaptureWindow';
 
 
 // The three inspection forms are heavy and MUTUALLY EXCLUSIVE — exactly one
@@ -359,13 +360,23 @@ export default function ExistingInspection() {
       const totalPhotos = answers.reduce((acc, a) => acc + a.photoUrls.length, 0)
         + Object.values(sectionPhotoUrls).reduce((acc, urls) => acc + urls.length, 0);
 
+      // First → last photo capture window (recorded at capture time), used to
+      // measure completion time as the on-site photo span. Best-effort: absent
+      // (e.g. no photos, or captured before this shipped) → server just doesn't
+      // stamp it and the metric falls back to the classic turnaround.
+      const photoWindow = getPhotoWindow(inspectionId);
+
       const r = await fetch(`/api/inspections/${inspectionId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ totalQuestionsAnswered, totalPhotos, inspectionResult: meta?.inspectionResult ?? null }),
+        body: JSON.stringify({
+          totalQuestionsAnswered, totalPhotos, inspectionResult: meta?.inspectionResult ?? null,
+          ...(photoWindow ? { firstPhotoAt: photoWindow.first, lastPhotoAt: photoWindow.last } : {}),
+        }),
       });
       const data = await r.json();
       if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
+      clearPhotoWindow(inspectionId);
       setSubmitResultUrl(data.hubspotUrl || '');
 
       setStage('generating_pdf');

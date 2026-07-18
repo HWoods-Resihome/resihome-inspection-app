@@ -85,6 +85,8 @@ export interface InsightsRow {
   qcFailCount: number | null;
   inspectionResult: 'pass' | 'fail' | null;  // 1099/Vacancy overall pass/fail
   totalPhotos: number | null;                // total_photos_attached (stamped at submit)
+  firstPhotoAt: string | null;               // first photo capture time (epoch-ms datetime)
+  lastPhotoAt: string | null;                // last photo capture time — completion time = last − first
   totalClientCost: number | null;            // Scope Rate Card $ (excluded from pass/fail)
   approverName: string | null;               // who approved (approved_by) — for the scope cost/approvals cards
   // Scope Rate Card per-category client cost { category: $ } (set on scope rows
@@ -195,6 +197,8 @@ function toRow(s: InspectionSummary): InsightsRow {
     qcFailCount: s.qcFailCount,
     inspectionResult: s.inspectionResult ?? null,
     totalPhotos: s.totalPhotosAttached ?? null,
+    firstPhotoAt: s.firstPhotoAt ?? null,
+    lastPhotoAt: s.lastPhotoAt ?? null,
     totalClientCost: s.totalClientCost,
     approverName: s.approvedByName ?? null,
     reportUrl: s.pdfMasterUrl || s.pdfUrl || null,

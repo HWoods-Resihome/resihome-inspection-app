@@ -22,6 +22,7 @@ import { isAnyCameraOpen, subscribeCameraOpen } from '@/lib/cameraOpenState';
 import { enqueuePhotoAttach, type PhotoAttachTarget } from '@/lib/photoAttachOutbox';
 import { isNativeBgUploadAvailable, mirrorPhotoToNativeBgUpload, clearNativeBgUploadPhoto, reconcileNativeBgUpload, scheduleNativeBgProcessing } from '@/lib/nativeBridge';
 import { isLocalInspectionId, realIdFor } from '@/lib/pendingInspections';
+import { recordPhotoCapture } from '@/lib/photoCaptureWindow';
 
 // iOS/iPadOS WebKit (incl. Chrome on iOS, which is WebKit). Several canvas/bitmap
 // paths misbehave here, so we branch on it below.
@@ -452,6 +453,13 @@ export async function uploadPhotoOrQueue(
       localId, inspectionRecordId, sectionId, kind: 'photo', bytes, filename,
       replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, lineField: opts?.lineField, attach: opts?.attach, createdAt: Date.now(),
     };
+    // Fold this photo's capture time into the inspection's first→last photo window
+    // (read at submit to stamp first_photo_at/last_photo_at). Best-effort; keyed by
+    // the real record id so it matches the id the submit uses. Never blocks capture.
+    try {
+      const realId = isLocalInspectionId(inspectionRecordId) ? (realIdFor(inspectionRecordId) || '') : inspectionRecordId;
+      if (realId) recordPhotoCapture(realId, rec.createdAt);
+    } catch { /* best-effort */ }
     // Persist durably in the BACKGROUND. The capture (and the camera's "Done")
     // must NEVER wait on — or fail from — a stalled IndexedDB write: the IDB ops
     // are serialized + 8s-timeout-guarded, so one wedged write used to stall every

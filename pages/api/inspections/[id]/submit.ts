@@ -151,6 +151,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (typeof totalPhotos === 'number') {
       props.total_photos_attached = totalPhotos;
     }
+    // First → last photo capture window (epoch ms), for the "completion time =
+    // first photo to last photo" metric. Best-effort: only stamped when the client
+    // sends a valid window; unknown props are stripped by hubspotFetch if the
+    // schema fields don't exist yet, so this never blocks the submit.
+    const firstPhotoAt = Number(body.firstPhotoAt);
+    const lastPhotoAt = Number(body.lastPhotoAt);
+    if (Number.isFinite(firstPhotoAt) && Number.isFinite(lastPhotoAt) && lastPhotoAt >= firstPhotoAt) {
+      props.first_photo_at = firstPhotoAt;
+      props.last_photo_at = lastPhotoAt;
+    }
 
     await updateInspection(id, props);
     // Non-rate-card templates complete here → stamp first completion timestamp

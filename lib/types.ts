@@ -131,6 +131,12 @@ export interface InspectionSummary {
   // used by searchInspectionsPage) populates these; other constructors omit them.
   inspectionResult?: 'pass' | 'fail' | null;
   totalPhotosAttached?: number | null;
+  // First / last photo capture time (epoch-ms datetime), stamped at submit from
+  // the client's capture window. Powers the "completion time = first photo → last
+  // photo" Insights metric. List mapper only; null for inspections done before it
+  // shipped (or with no photos).
+  firstPhotoAt?: string | null;
+  lastPhotoAt?: string | null;
   // Property lifecycle status FROZEN at completion (`property_status_at_completion`),
   // stamped when the inspection finalizes/submits-to-completed. Null while the
   // inspection is still scheduled / in progress / pending approval (status stays

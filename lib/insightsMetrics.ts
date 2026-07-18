@@ -416,10 +416,24 @@ function diffMs(end: string | null, start: string | null): number | null {
   return ms >= 0 ? ms : null;
 }
 
-/** Total turnaround for one row, or null if not a completed row with both dates. */
-export function completionTimeMs(r: InsightsRow): number | null {
+/** Classic turnaround: (approvedAt || completedAt) − scheduledDate, completed rows
+ *  only. Used for the On-Time (≤24h) rate, which stays on this basis. */
+export function turnaroundMs(r: InsightsRow): number | null {
   if (r.status !== 'completed') return null;
   return diffMs(r.approvedAt || r.completedAt, r.scheduledDate);
+}
+
+/**
+ * Completion time for one row. Measured as the on-site PHOTO window (last photo −
+ * first photo) when both capture timestamps are present — the definition for
+ * inspections done after photo-time capture shipped. Falls back to the classic
+ * scheduled → approved turnaround for rows without photo timestamps (historical).
+ */
+export function completionTimeMs(r: InsightsRow): number | null {
+  const first = hubspotToMs(r.firstPhotoAt);
+  const last = hubspotToMs(r.lastPhotoAt);
+  if (first != null && last != null && last >= first) return last - first;
+  return turnaroundMs(r);
 }
 
 /** Time-to-start: startedAt − scheduledDate (null if no startedAt). */
@@ -522,7 +536,10 @@ export function computeKpis(rows: InsightsRow[]): Kpis {
     if (r.templateType === TEMPLATE_SCOPE && typeof r.totalClientCost === 'number') {
       scopeCost += r.totalClientCost;
     }
-    const turn = completionTimeMs(r); // null unless completed with both dates
+    // On-Time stays on the classic scheduled→approved turnaround (NOT the photo
+    // window — an on-site photo span is almost always ≤24h, which would make
+    // On-Time meaningless).
+    const turn = turnaroundMs(r);
     if (turn != null) { onTimeDenom++; if (turn <= ON_TIME_MS) onTimeNum++; }
   }
   const pf = passFail(rows);
