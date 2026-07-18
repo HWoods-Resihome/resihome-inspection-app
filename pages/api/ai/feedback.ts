@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { recordAiFeedback, type AiFeedbackEvent } from '@/lib/aiFeedback';
 import { maybeRefreshLearnedKnowledge } from '@/lib/aiKnowledgeLearning';
 import { getSessionFromRequest } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 /**
  * Sink for AI feedback events (see lib/aiFeedbackClient.ts) — how a human
@@ -22,6 +23,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // auth cookie, so legitimate clients are unaffected.
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
+  // Per-user cap — this feeds the learned KB folded into every AI prompt.
+  if (enforceRateLimit(res, { key: session.email || 'anon', route: 'ai-feedback', max: 60, windowMs: 60_000 })) return;
 
   try {
     const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});

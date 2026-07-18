@@ -19,6 +19,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
 import { getSessionFromRequest } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { getKnowledgeBasePromptText } from '@/lib/hubspot';
@@ -123,6 +124,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
+  // Per-user cost/abuse cap on this (paid) vision call.
+  if (enforceRateLimit(res, { key: session.email || 'anon', route: 'ai-room-scan', max: 30, windowMs: 60_000 })) return;
 
   try {
     const body = req.body || {};

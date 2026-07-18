@@ -14,6 +14,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
 import { getSessionFromRequest } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { isExternalEmail } from '@/lib/userAccess';
 import { recordAiUsage } from '@/lib/aiUsage';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
@@ -207,6 +208,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // have no scope workflow here, so deny them — correct scoping AND a guard
   // against an external account driving (paid) AI calls.
   if (isExternalEmail(session.email)) return res.status(403).json({ error: 'Not authorized.' });
+  // Per-user cap on this expensive multi-round vision review (before SSE headers).
+  if (enforceRateLimit(res, { key: session.email || 'anon', route: 'ai-scope-review', max: 12, windowMs: 60_000 })) return;
 
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');

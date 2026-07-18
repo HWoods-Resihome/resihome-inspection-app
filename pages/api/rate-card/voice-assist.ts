@@ -21,6 +21,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { recordAiUsage } from '@/lib/aiUsage';
 import { getKnowledgeBasePromptText } from '@/lib/hubspot';
 import { matchCatalog, getCatalogEmbeddings } from '@/lib/voiceCatalogMatch';
@@ -469,6 +470,7 @@ function lineToSummary(
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.method === 'GET' && enforceRateLimit(res, { key: session.email || 'anon', route: 'ai-voice-warm', max: 20, windowMs: 60_000 })) return;
 
   // Warm-up ping (GET): pre-load the expensive cold-start work — the catalog
   // and its embeddings — so the inspector's FIRST spoken line is fast. No LLM
@@ -496,6 +498,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // Per-user cap: one utterance can fan out to several Sonnet rounds, so bound it
+  // before opening the SSE stream (return the 429 as a normal JSON response).
+  if (enforceRateLimit(res, { key: session.email || 'anon', route: 'ai-voice-assist', max: 40, windowMs: 60_000 })) return;
 
   // Stream the response as Server-Sent Events. Text deltas (clarify questions /
   // preamble) flow to the client as they generate; the final resolution is sent

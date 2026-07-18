@@ -12,6 +12,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
 import { getSessionFromRequest } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { getKnowledgeBasePromptText } from '@/lib/hubspot';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
@@ -278,6 +279,7 @@ const SUGGEST_TOOL = {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.method === 'GET' && enforceRateLimit(res, { key: session.email || 'anon', route: 'ai-live-warm', max: 20, windowMs: 60_000 })) return;
 
   // Warm-up ping (GET): pre-load the cold-start work — catalog + its embeddings
   // + the Voyage query path — and prime Haiku (TLS + server-side prompt cache),
@@ -311,6 +313,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // The live AI camera polls this ~24×/min while open — cap per user so it can't
+  // run away (and so a scripted loop can't drive unbounded vision spend).
+  if (enforceRateLimit(res, { key: session.email || 'anon', route: 'ai-room-scan-live', max: 45, windowMs: 60_000 })) return;
 
   try {
     const body = req.body || {};

@@ -11,6 +11,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { recordAiUsage, estimateTranscribeCostUSD } from '@/lib/aiUsage';
 
 // gpt-4o-mini-transcribe is faster + more accurate than whisper-1 for short
@@ -44,6 +45,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  // Per-user cap on the (paid) Whisper transcription call.
+  if (enforceRateLimit(res, { key: session.email || 'anon', route: 'ai-transcribe', max: 60, windowMs: 60_000 })) return;
 
   const key = process.env.OPENAI_API_KEY;
   if (!key) {
