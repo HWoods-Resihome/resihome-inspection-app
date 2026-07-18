@@ -8,7 +8,7 @@
  * must never block a sign-in. A per-instance throttle avoids re-writing on rapid
  * re-auth (e.g. the native app minting a session on every cold start).
  */
-import { readLoginActivityRaw, writeLoginActivityRaw } from '@/lib/hubspot';
+import { readLoginActivityRaw, mutateLoginActivityRaw } from '@/lib/hubspot';
 
 const norm = (e?: string | null) => String(e || '').trim().toLowerCase();
 const THROTTLE_MS = 15 * 60 * 1000;
@@ -23,14 +23,17 @@ export async function recordLogin(email?: string | null, name?: string | null): 
   recentWrites.set(e, now);
   if (recentWrites.size > 5000) recentWrites.clear(); // bound the map
   try {
-    const map = (await readLoginActivityRaw().catch(() => null)) || {};
-    const prev = map[e] || { lastAt: '', count: 0, name: '' };
-    map[e] = {
-      lastAt: new Date(now).toISOString(),
-      count: (prev.count || 0) + 1,
-      name: (name || prev.name || '').toString(),
-    };
-    await writeLoginActivityRaw(map);
+    // Concurrency-safe read-modify-write — hundreds of concurrent sign-ins otherwise
+    // clobber each other's stamps on this one shared blob.
+    await mutateLoginActivityRaw((map) => {
+      const prev = map[e] || { lastAt: '', count: 0, name: '' };
+      map[e] = {
+        lastAt: new Date(now).toISOString(),
+        count: (prev.count || 0) + 1,
+        name: (name || prev.name || '').toString(),
+      };
+      return map;
+    });
   } catch { /* never block sign-in on a telemetry write */ }
 }
 

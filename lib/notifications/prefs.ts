@@ -3,7 +3,7 @@
  * JSON blob: lowercased email → { [notificationKey]: boolean }. An absent value
  * defaults to ON (opt-out model).
  */
-import { readNotificationPrefsRaw, writeNotificationPrefsRaw } from '@/lib/hubspot';
+import { readNotificationPrefsRaw, mutateNotificationPrefsRaw } from '@/lib/hubspot';
 import { NOTIFICATION_KEYS, type NotificationKey } from './catalog';
 
 const norm = (email?: string | null) => String(email || '').trim().toLowerCase();
@@ -33,12 +33,14 @@ export async function getNotificationPrefs(email?: string | null): Promise<Recor
 export async function setNotificationPrefs(email: string | null | undefined, prefs: Partial<Record<NotificationKey, boolean>>): Promise<boolean> {
   const e = norm(email);
   if (!e) return false;
-  const all = (await readNotificationPrefsRaw().catch(() => null)) || {};
-  const clean: Record<string, boolean> = { ...(all[e] || {}) };
-  for (const k of NOTIFICATION_KEYS) if (k in prefs && typeof prefs[k] === 'boolean') clean[k] = prefs[k] as boolean;
-  all[e] = clean;
   _prefsCache = null;   // a write invalidates the cache
-  return writeNotificationPrefsRaw(all);
+  // Concurrency-safe: two users saving prefs at once must not clobber each other.
+  return mutateNotificationPrefsRaw((all) => {
+    const clean: Record<string, boolean> = { ...(all[e] || {}) };
+    for (const k of NOTIFICATION_KEYS) if (k in prefs && typeof prefs[k] === 'boolean') clean[k] = prefs[k] as boolean;
+    all[e] = clean;
+    return all;
+  });
 }
 
 /** True when `email` wants notification `key` (default ON). False on a blank email. */

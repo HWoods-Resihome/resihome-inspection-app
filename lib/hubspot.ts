@@ -5705,7 +5705,14 @@ export interface DeleteMigratedBatch {
   listed: number; appPhotos: number; skippedNonApp: number;
   orphaned: number; referencedKept: number; deleted: number; errors: number; errorSamples: string[];
   capped?: boolean;   // scan stopped early on a HubSpot list error (e.g. the ~10k scroll cap)
+  tooNew?: number;    // orphan-looking files skipped by the age guard (kept, not deleted)
 }
+
+// Never reclaim a file younger than this — a just-uploaded photo may be in flight
+// (its answer record not yet patched with the URL, or missing from a slightly
+// stale referenced snapshot). Deleting it was the shape of the prior FC-photo-loss
+// incident; the age guard closes that window regardless of cache/scan timing.
+const MIN_RECLAIM_AGE_MS = 48 * 60 * 60 * 1000;
 
 /**
  * List one page of files via the SEARCH endpoint (the bare collection path only
@@ -5756,8 +5763,12 @@ export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; a
   // Force dry-run while the kill-switch is on — never delete.
   const apply = opts.apply && !RECLAIM_DELETE_DISABLED;
   const rep: DeleteMigratedBatch = { after: opts.after ?? null, done: false, referencedCount: 0, listed: 0, appPhotos: 0, skippedNonApp: 0, orphaned: 0, referencedKept: 0, deleted: 0, errors: 0, errorSamples: [] };
-  const referenced = await referencedHubspotPhotoUrls();
+  // On the FIRST page of an apply run, force a FRESH referenced-set snapshot (don't
+  // trust the up-to-5-min cache) so a photo referenced since the last scan isn't
+  // treated as an orphan. Subsequent pages reuse it within the run.
+  const referenced = await referencedHubspotPhotoUrls(apply && !opts.after);
   rep.referencedCount = referenced.size;
+  const nowMs = Date.now();
 
   let results: any[];
   try {
@@ -5792,6 +5803,11 @@ export async function deleteMigratedHubspotPhotosBatch(opts: { apply: boolean; a
     if (!isAppPhoto) { rep.skippedNonApp++; continue; }
     rep.appPhotos++;
     if (referenced.has(normFileUrl(rawUrl))) { rep.referencedKept++; continue; } // still in use → keep
+    // Age guard: never delete a recently-uploaded file (or one whose createdAt we
+    // can't read) — it may be an in-flight photo not yet referenced. Kept, retried
+    // on a later run once it has aged past the window and (if still unused) is safe.
+    const createdMs = Date.parse(String(f.createdAt || '')) || 0;
+    if (!createdMs || (nowMs - createdMs) < MIN_RECLAIM_AGE_MS) { rep.tooNew = (rep.tooNew || 0) + 1; continue; }
     rep.orphaned++;
     if (!apply) continue;
     // Process the WHOLE page (≤100) before advancing the cursor — deleting mid-
@@ -6359,6 +6375,42 @@ async function writeAgentJson(prop: string, label: string, value: any): Promise<
   return true;
 }
 
+// Concurrency-safe read-modify-write for a single agent-record JSON property.
+// The plain read-then-write pattern lost-updates when two writers race (worst on
+// the every-sign-in login_activity blob). This SERIALIZES read-modify-write per
+// property on this instance (eliminates the same-instance interleave — the common
+// case) and re-reads just before the PATCH to detect a cross-instance change and
+// recompute (bounded retries). HubSpot has no conditional write, so a tiny
+// cross-instance window remains; a KV-backed lock would close it fully.
+const _agentWriteChains = new Map<string, Promise<unknown>>();
+async function mutateAgentJson<T>(prop: string, label: string, mutator: (cur: T | null) => T): Promise<boolean> {
+  const run = async (): Promise<boolean> => {
+    const recId = await ensureAgentProp(prop, label);
+    if (!recId) return false;
+    const base = `/crm/v3/objects/${agentTypeId()}/${recId}`;
+    const readVer = async (): Promise<{ cur: T | null; ver: string }> => {
+      const resp = await hubspotFetch(`${base}?properties=${prop}`);
+      const raw = resp?.properties?.[prop];
+      return { cur: raw ? (JSON.parse(String(raw)) as T) : null, ver: String(resp?.updatedAt || resp?.properties?.hs_lastmodifieddate || '') };
+    };
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { cur, ver } = await readVer();
+      const next = mutator(cur);
+      if (attempt < 3) {
+        const again = await readVer();          // did anyone write since we read?
+        if (again.ver && again.ver !== ver) continue;  // yes → recompute from fresh state
+      }
+      await hubspotFetch(base, { method: 'PATCH', body: JSON.stringify({ properties: { [prop]: JSON.stringify(next) } }) });
+      return true;
+    }
+    return false;
+  };
+  const prev = _agentWriteChains.get(prop) || Promise.resolve();
+  const p = prev.then(run, run);
+  _agentWriteChains.set(prop, p.catch(() => false));
+  return p as Promise<boolean>;
+}
+
 /** Service completion forms, keyed by `worktype:subtype` → question array. Null when unset/unreachable. */
 export function readServiceForms(): Promise<Record<string, any[]> | null> { return readAgentJson<Record<string, any[]>>(SERVICE_FORMS_PROP); }
 export function writeServiceForms(forms: Record<string, any[]>): Promise<boolean> { return writeAgentJson(SERVICE_FORMS_PROP, 'Service Forms (JSON)', forms); }
@@ -6379,6 +6431,10 @@ export function readNotificationPrefsRaw(): Promise<Record<string, Record<string
 export function writeNotificationPrefsRaw(map: Record<string, Record<string, boolean>>): Promise<boolean> {
   return writeAgentJson('notification_prefs_json', 'Notification Preferences (JSON)', map);
 }
+/** Concurrency-safe update of one user's notification prefs (no lost-update race). */
+export function mutateNotificationPrefsRaw(mutator: (cur: Record<string, Record<string, boolean>>) => Record<string, Record<string, boolean>>): Promise<boolean> {
+  return mutateAgentJson<Record<string, Record<string, boolean>>>('notification_prefs_json', 'Notification Preferences (JSON)', (cur) => mutator(cur || {}));
+}
 
 /** Login activity: lowercased email → { lastAt (ISO), count, name }. Stamped at
  *  every sign-in (see lib/loginActivity). Null when unset. */
@@ -6387,6 +6443,25 @@ export function readLoginActivityRaw(): Promise<Record<string, { lastAt: string;
 }
 export function writeLoginActivityRaw(map: Record<string, { lastAt: string; count?: number; name?: string }>): Promise<boolean> {
   return writeAgentJson('login_activity_json', 'Login Activity (JSON)', map);
+}
+// Cap the login-activity blob so it can't outgrow HubSpot's ~64KB property limit
+// at tens of thousands of users (keep the most recently active).
+const LOGIN_ACTIVITY_MAX = 8000;
+/** Concurrency-safe login-activity stamp (no lost-update on concurrent sign-ins),
+ *  with a size cap that prunes the oldest entries. */
+export function mutateLoginActivityRaw(mutator: (cur: Record<string, { lastAt: string; count?: number; name?: string }>) => Record<string, { lastAt: string; count?: number; name?: string }>): Promise<boolean> {
+  return mutateAgentJson<Record<string, { lastAt: string; count?: number; name?: string }>>('login_activity_json', 'Login Activity (JSON)', (cur) => {
+    const next = mutator(cur || {});
+    const keys = Object.keys(next);
+    if (keys.length > LOGIN_ACTIVITY_MAX) {
+      // Keep the most-recently-active LOGIN_ACTIVITY_MAX entries.
+      const sorted = keys.sort((a, b) => String(next[b]?.lastAt || '').localeCompare(String(next[a]?.lastAt || '')));
+      const pruned: typeof next = {};
+      for (const k of sorted.slice(0, LOGIN_ACTIVITY_MAX)) pruned[k] = next[k];
+      return pruned;
+    }
+    return next;
+  });
 }
 
 /** Background photo-migration job state (single shared record) — see
