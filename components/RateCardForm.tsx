@@ -5484,7 +5484,7 @@ function SectionHeader(p: SectionHeaderProps) {
               className="font-semibold text-gray-900 border border-brand rounded px-2 py-1 text-sm bg-white flex-1 min-w-0"
             />
           ) : (
-            <div className="font-heading font-bold text-gray-900 min-w-0 truncate text-lg">{p.heading}</div>
+            <div className="font-heading font-bold text-gray-900 min-w-0 flex-1 truncate text-lg">{p.heading}</div>
           )}
           {/* Photo status inline next to the room name. */}
           {!editingTitle && p.photosMissing && (
