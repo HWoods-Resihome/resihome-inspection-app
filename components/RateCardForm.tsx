@@ -5503,9 +5503,12 @@ function SectionHeader(p: SectionHeaderProps) {
                 : <span className="text-xs leading-none">{p.photosCount}</span>}
             </span>
           )}
-          {/* Edit / delete / collapse controls — right-aligned to the edge of
-              the name row (the X and chevron sit flush right). */}
-          <div className="flex items-center gap-2 ml-auto shrink-0">
+          {/* Edit / delete / collapse controls. No ml-auto — the title (flex-1)
+              fills the left, so the photo-status camera + these controls cluster
+              together on the right (camera sits just left of the pencil, not with a
+              big empty gap). The camera still aligns row-to-row: it's a fixed-width
+              slot immediately before these fixed-width controls. */}
+          <div className="flex items-center gap-2 shrink-0">
             {!p.readOnly && !editingTitle && (
               <>
                 <button
