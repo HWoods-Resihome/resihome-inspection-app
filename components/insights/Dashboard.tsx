@@ -198,11 +198,8 @@ export function InsightsDashboard() {
               <CardSlot id="passfail"><PassFailBars rows={filtered} /></CardSlot>
             </TwoCol>
 
-            {/* (3) Inspector performance + 1099 grass-condition fails */}
-            <TwoCol>
-              <CardSlot id="roster"><InspectorRoster rows={filtered} /></CardSlot>
-              <CardSlot id="grass"><GrassFails rows={filtered} /></CardSlot>
-            </TwoCol>
+            {/* (3) Inspector performance */}
+            <CardSlot id="roster"><InspectorRoster rows={filtered} /></CardSlot>
 
             {/* (3b) Scope Rate Card cost + approvals */}
             <TwoCol>
@@ -218,6 +215,9 @@ export function InsightsDashboard() {
 
             {/* (5) AI overrides — by account or category (toggle) */}
             <CardSlot id="overrides-ai"><AiOverrides overrides={filteredOverrides} /></CardSlot>
+
+            {/* (5b) 1099 grass-condition fails */}
+            <CardSlot id="grass"><GrassFails rows={filtered} /></CardSlot>
 
             {/* (6) Completed inspections (with CSV export) — last section */}
             <CardSlot id="completed"><CompletedTable rows={filtered} /></CardSlot>
