@@ -56,6 +56,8 @@ function parseCriteria(p: Record<string, any>): Criterion[] {
   return f ? [{ field: f, op: String(p.enroll_op || 'is'), vals: parseVals(p.enroll_value) }] : [];
 }
 interface EvalProp { rrqcPassDate: string; status: string; dealStages?: string[] }
+// A property's leasing deals + their current stage id (for per-deal enrollment).
+interface DealEntry { dealId: string; stage: string }
 // Negating operators — the value set is a membership test, and these invert it.
 // "is not" (single) and "is not any of" (multi) both exclude the listed values.
 function isNegatingOp(op: string): boolean {
@@ -90,7 +92,12 @@ function addDays(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-interface Target { id: string; scope: 'property' | 'community'; address: string; locality: string; region: string; community?: string; }
+interface Target { id: string; scope: 'property' | 'community'; address: string; locality: string; region: string; community?: string;
+  // Set only for a one-time, deal-triggered rule: the specific leasing deal whose
+  // stage triggered enrollment. Folded into the enrollment key so each new deal
+  // (new lease) re-triggers while the same deal sitting in the stage does not. */
+  dealId?: string;
+}
 
 /**
  * Resolve the concrete targets a rule applies to, against LIVE data:
@@ -144,18 +151,48 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
   const candidates = props.filter((prop) => !listMode || included.has(prop.id));
 
   // Deal Stage criteria (enroll or stop) → resolve each candidate's current
-  // leasing-deal stage(s) via Property→Listing→Deal (only when actually used).
+  // leasing deal(s) + stage via Property→Listing→Deal (only when actually used).
   const hasDealCrit = [...enrollCriteria, ...stopCriteria].some((c) => /deal/.test((c.field || '').toLowerCase()));
   const dealMap = hasDealCrit
-    ? await fetchPropertyLeasingDealStages(candidates.map((c) => c.id)).catch(() => new Map<string, Set<string>>())
-    : new Map<string, Set<string>>();
-  const enrich = (prop: typeof candidates[number]): EvalProp & typeof candidates[number] => ({ ...prop, dealStages: [...(dealMap.get(prop.id) || [])] });
+    ? await fetchPropertyLeasingDealStages(candidates.map((c) => c.id)).catch(() => new Map<string, Map<string, string>>())
+    : new Map<string, Map<string, string>>();
+  const enrich = (prop: typeof candidates[number]): EvalProp & typeof candidates[number] & { dealEntries: DealEntry[] } => {
+    const deals = dealMap.get(prop.id) || new Map<string, string>();
+    return { ...prop, dealStages: [...new Set(deals.values())], dealEntries: [...deals].map(([dealId, stage]) => ({ dealId, stage })) };
+  };
 
-  return candidates
+  // Per-deal enrollment: a ONE-TIME rule with a POSITIVE deal-stage ENROLL
+  // criterion enrolls once PER triggering DEAL (so a new lease re-triggers). The
+  // trigger stages are the positive deal criteria's values.
+  const oneTime = p.recurring === 'false';
+  const dealTriggerStages = new Set<string>(
+    enrollCriteria
+      .filter((c) => /deal/.test((c.field || '').toLowerCase()) && !isNegatingOp(c.op))
+      .flatMap((c) => c.vals.map((v) => v.trim()).filter(Boolean)),
+  );
+  const perDeal = oneTime && dealTriggerStages.size > 0;
+
+  const enrolled = candidates
     .map(enrich)
     .filter((prop) => enrollOk(prop))
-    .filter((prop) => !stopHit(prop))   // stop condition met → exclude
-    .map((prop) => ({ id: prop.id, scope: 'property' as const, address: prop.address, locality: prop.locality, region: prop.region }));
+    .filter((prop) => !stopHit(prop));   // stop condition met → exclude
+
+  const out: Target[] = [];
+  for (const prop of enrolled) {
+    const propBase = { id: prop.id, scope: 'property' as const, address: prop.address, locality: prop.locality, region: prop.region };
+    if (perDeal) {
+      // One target per deal currently sitting in a trigger stage. (enrollOk already
+      // guaranteed ≥1 matches unless the property enrolled via an OR of non-deal
+      // criteria — then fall back to a single property-level target.)
+      const triggering = prop.dealEntries.filter((d) => dealTriggerStages.has(d.stage));
+      if (triggering.length) {
+        for (const d of triggering) out.push({ ...propBase, dealId: d.dealId });
+        continue;
+      }
+    }
+    out.push(propBase);
+  }
+  return out;
 }
 
 // A criterion is evaluable at generation time only for the fields we can read on
@@ -311,7 +348,9 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
     const clientCost = Number.isFinite(vendorCost) ? Math.round(vendorCost * (1 + (Number.isFinite(markupPct) ? markupPct : 0) / 100) * 100) / 100 : null;
 
     for (const t of await targetsForRule(p)) {
-      const enrollmentKey = `gen:${ruleId}:${t.id}`;
+      // Per-deal key for one-time deal-triggered rules → a new lease's deal makes a
+      // new key (re-triggers); the same deal in-stage keeps the same key (no dupe).
+      const enrollmentKey = `gen:${ruleId}:${t.id}${t.dealId ? `:${t.dealId}` : ''}`;
       // Preview label on skips shows this address's sticky vendor (if any); the real
       // reserved assignment is picked once we commit to creating (below).
       const base: {

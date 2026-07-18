@@ -4708,12 +4708,16 @@ export async function fetchLeasingDealStages(): Promise<{ value: string; label: 
   }
 }
 
-// Per-property CURRENT leasing-deal stage ids, via Property → Listing → Deal.
-// Returns propertyId → Set<stageId>. Only called when a rule uses a Deal Stage
-// criterion; capped to keep the nightly run bounded (each property costs a
-// couple of association calls). Best-effort — a property that errors is skipped.
-export async function fetchPropertyLeasingDealStages(propertyIds: string[]): Promise<Map<string, Set<string>>> {
-  const out = new Map<string, Set<string>>();
+// Per-property CURRENT leasing deals + their stage, via Property → Listing → Deal.
+// Returns propertyId → Map<dealId, stageId> (LEASING pipeline deals only). The
+// per-deal granularity lets a one-time rule (e.g. a move-in clean) enroll ONCE
+// PER DEAL — a NEW lease's deal entering the trigger stage re-triggers it, while
+// the same deal sitting in the stage does not. Callers needing just the set of
+// stages can read the map's values. Only called when a rule uses a Deal Stage
+// criterion; capped to keep the nightly run bounded (each property costs a couple
+// of association calls). Best-effort — a property that errors is skipped.
+export async function fetchPropertyLeasingDealStages(propertyIds: string[]): Promise<Map<string, Map<string, string>>> {
+  const out = new Map<string, Map<string, string>>();
   const did = dealsTypeId();
   const lid = listingTypeId();
   const { property } = typeIds();
@@ -4730,7 +4734,7 @@ export async function fetchPropertyLeasingDealStages(propertyIds: string[]): Pro
         for (const r of da.results || []) { const id = r.toObjectId ?? r.id; if (id != null) dealIds.add(String(id)); }
       }
       if (!dealIds.size) continue;
-      const stages = new Set<string>();
+      const dealStage = new Map<string, string>();
       const arr = [...dealIds];
       for (let i = 0; i < arr.length; i += 100) {
         const resp = await hubspotFetch(`/crm/v3/objects/${did}/batch/read`, {
@@ -4738,10 +4742,10 @@ export async function fetchPropertyLeasingDealStages(propertyIds: string[]): Pro
         });
         for (const rec of resp.results || []) {
           const p = rec.properties || {};
-          if (String(p.pipeline ?? '') === LEASING_PIPELINE_ID && p.dealstage) stages.add(String(p.dealstage));
+          if (String(p.pipeline ?? '') === LEASING_PIPELINE_ID && p.dealstage) dealStage.set(String(rec.id), String(p.dealstage));
         }
       }
-      if (stages.size) out.set(propId, stages);
+      if (dealStage.size) out.set(propId, dealStage);
     } catch { /* skip this property */ }
   }
   if (propertyIds.length > CAP) console.warn(`[deal-stages] capped at ${CAP} of ${propertyIds.length} properties`);
