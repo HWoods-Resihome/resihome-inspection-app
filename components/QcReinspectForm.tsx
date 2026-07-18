@@ -1153,7 +1153,7 @@ export function QcReinspectForm(props: Props) {
             >
               <div className="flex items-center gap-2 min-w-0">
                 <span className={'text-gray-400 transition-transform ' + (isCollapsed ? '' : 'rotate-90')}>&#9654;</span>
-                <h2 className="font-bold text-sm text-gray-900 truncate">{s.displayName}</h2>
+                <h2 className="font-heading font-bold text-lg text-gray-900 truncate">{s.displayName}</h2>
                 {hasLines && (
                   <span className="text-xs text-gray-400">&middot; {s.lines.length} {s.lines.length === 1 ? 'line' : 'lines'}</span>
                 )}
