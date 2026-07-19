@@ -2748,6 +2748,22 @@ async function scanInspectionProps(q: InspectionQuery, properties: string[]): Pr
 const distinct = (vals: any[]): string[] =>
   Array.from(new Set(vals.map((v) => String(v || '').trim()).filter(Boolean)));
 
+// Distinct inspector emails (→ display name) seen on COMPLETED inspections —
+// the admin user roster's "has completed an inspection" set. One capped scan,
+// cached 10 min (roster views only).
+let _inspectorDirCache: { at: number; map: Record<string, string> } | null = null;
+export async function completedInspectorDirectory(): Promise<Record<string, string>> {
+  if (_inspectorDirCache && Date.now() - _inspectorDirCache.at < 10 * 60 * 1000) return _inspectorDirCache.map;
+  const rows = await scanInspectionProps({ status: 'completed' }, ['inspector_email', 'inspector_name']);
+  const map: Record<string, string> = {};
+  for (const p of rows) {
+    const e = String(p.inspector_email || '').trim().toLowerCase();
+    if (e && e.includes('@') && !map[e]) map[e] = String(p.inspector_name || '').trim();
+  }
+  _inspectorDirCache = { at: Date.now(), map };
+  return map;
+}
+
 // ---------------------------------------------------------------------------
 // External users' per-STATE view unlock.
 //

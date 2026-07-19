@@ -162,7 +162,7 @@ export function InternalUsersManager() {
         className="w-full flex items-center justify-between gap-3 p-4 text-left">
         <div>
           <h2 className="font-heading font-bold text-base text-ink">User Management</h2>
-          <p className="text-[12px] text-gray-500 mt-0.5">Everyone who can sign in — internal team and 1099 inspectors — with each person’s access to ResiWalk, Inspections, Services, Insights, and Admin. Vendor companies live under Vendor Management.</p>
+          <p className="text-[12px] text-gray-500 mt-0.5">Everyone who has signed in or completed an inspection — internal team and 1099 inspectors — with each person’s access to ResiWalk, Inspections, Services, Insights, and Admin. Vendor companies live under Vendor Management.</p>
         </div>
         <Chevron open={open} />
       </button>
