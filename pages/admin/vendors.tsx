@@ -379,7 +379,8 @@ export default function VendorManagement() {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
             className={`shrink-0 text-gray-500 transition-transform ${expanded ? 'rotate-90' : ''}`}><polyline points="9 18 15 12 9 6" /></svg>
           <div className="min-w-0 flex-1">
-            <span className="font-heading font-bold text-[15px] text-ink truncate block">{v.name}</span>
+            {/* Full company name always visible — wraps instead of truncating. */}
+            <span className="font-heading font-bold text-[15px] text-ink break-words block">{v.name}</span>
             <span className="text-[12px] text-gray-500 truncate block">{v.email}</span>
             {/* Own line so a long email can't truncate the date away. */}
             <span className="text-[11px] text-gray-400 block">Last active {fmtActive(v.lastActive)}</span>
