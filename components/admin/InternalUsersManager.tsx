@@ -262,7 +262,9 @@ export function InternalUsersManager() {
                             {!isInternalEmail(u.email) && <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5">1099</span>}
                             {dirty && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-brand" />}
                           </div>
-                          <div className="text-[12px] text-gray-500 truncate">{u.email} · last active {fmtLogin(u.lastLogin)}</div>
+                          <div className="text-[12px] text-gray-500 truncate">{u.email}</div>
+                          {/* Own line so a long email can't truncate the date away. */}
+                          <div className="text-[11px] text-gray-400">Last active {fmtLogin(u.lastLogin)}</div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {CAPS.map((c) => (
