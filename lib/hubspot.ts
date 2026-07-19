@@ -7856,18 +7856,26 @@ export interface VendorWritePatch {
 }
 
 // The Yes/No flags may be booleancheckbox ('true') OR a Yes/No enum ('Yes')
-// depending on how the portal defined them. Write the first candidate; on a
-// validation 400 retry with the alternate so both definitions work.
+// depending on how the portal defined EACH property — they can be MIXED (e.g.
+// resiwalk_access as a Yes/No enum but resiwalk_inspection_access as a bool), so
+// the encoding fallback is PER FIELD: start with 'Yes'/'No', and when HubSpot's
+// validation error names a specific property, flip just that one to 'true'/'false'.
+const VENDOR_FLAG_PROPS: { key: keyof VendorWritePatch; prop: string }[] = [
+  { key: 'resiwalkAccess', prop: 'resiwalk_access' },
+  { key: 'eligibleForRecurring', prop: 'eligible_for_recurring' },
+  { key: 'afterHoursService', prop: 'after_hours_service' },
+  { key: 'inspectionAccess', prop: 'resiwalk_inspection_access' },
+];
 function vendorFlagCandidates(v: boolean): [string, string] { return v ? ['Yes', 'true'] : ['No', 'false']; }
-function vendorPropsFor(patch: VendorWritePatch, pick: 0 | 1): Record<string, string> {
+function vendorPropsFor(patch: VendorWritePatch, picks: Record<string, 0 | 1>): Record<string, string> {
   const props: Record<string, string> = {};
   if (patch.name != null) props.name = patch.name.trim();
   if (patch.email != null) props.email = patch.email.trim();
   if (patch.regionsServiced != null) props.regions_serviced = patch.regionsServiced.trim();
-  if (patch.resiwalkAccess != null) props.resiwalk_access = vendorFlagCandidates(patch.resiwalkAccess)[pick];
-  if (patch.eligibleForRecurring != null) props.eligible_for_recurring = vendorFlagCandidates(patch.eligibleForRecurring)[pick];
-  if (patch.afterHoursService != null) props.after_hours_service = vendorFlagCandidates(patch.afterHoursService)[pick];
-  if (patch.inspectionAccess != null) props.resiwalk_inspection_access = vendorFlagCandidates(patch.inspectionAccess)[pick];
+  for (const { key, prop } of VENDOR_FLAG_PROPS) {
+    const v = patch[key];
+    if (typeof v === 'boolean') props[prop] = vendorFlagCandidates(v)[picks[prop] ?? 0];
+  }
   return props;
 }
 const isFlagFormatError = (e: any) => /not one of|invalid.*option|VALIDATION|was not valid|must be.*(true|false)/i.test(`${e?.message || ''} ${e?.detail || ''}`);
@@ -7880,32 +7888,47 @@ const isFlagFormatError = (e: any) => /not one of|invalid.*option|VALIDATION|was
 // DROPPED from the patch and the write retried without it.
 async function vendorWrite(url: string, method: 'POST' | 'PATCH', patch: VendorWritePatch): Promise<any> {
   let p: VendorWritePatch = { ...patch };
+  const picks: Record<string, 0 | 1> = {};
   let provisionTried = false;
   let dropReason = 'the ResiWalk Inspection Access property is not available in HubSpot';
   let lastErr: any = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    for (const pick of [0, 1] as const) {
-      try {
-        return await hubspotFetch(url, { method, body: JSON.stringify({ properties: vendorPropsFor(p, pick) }) });
-      } catch (e: any) {
-        lastErr = e;
-        if (p.inspectionAccess != null && isMissingPropertyError(e, 'resiwalk_inspection_access')) {
-          if (!provisionTried) {
-            provisionTried = true;
-            try { await ensureInspectionAccessProp(); break; }   // provisioned → retry full patch
-            catch (pe: any) { dropReason = String(pe?.message || pe); }
-          }
-          // Provisioning failed (or the property is archived and still unwritable):
-          // drop the field so the rest of the patch isn't blocked.
-          console.warn('[vendor-admin] writing without resiwalk_inspection_access:', dropReason.slice(0, 200));
-          const { inspectionAccess: _drop, ...rest } = p;
-          p = rest;
-          if (Object.keys(p).length === 0) throw new Error(dropReason);   // the toggle itself → real reason
-          break;   // restart with the reduced patch
-        }
-        if (pick === 0 && isFlagFormatError(e)) continue;   // retry alternate encoding
-        throw e;
+  // Attempts bound: worst case flips each of the 4 flags once + one provision pass.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      return await hubspotFetch(url, { method, body: JSON.stringify({ properties: vendorPropsFor(p, picks) }) });
+    } catch (e: any) {
+      lastErr = e;
+      const blob = `${String(e?.message || '')} ${String(e?.detail || '')}`;
+      // Wrong Yes/No encoding → flip ONLY the property the error names (portals
+      // can mix enum Yes/No and bool true/false definitions across the flags).
+      // Checked BEFORE missing-property logic so an invalid-option error is never
+      // misread as a missing property.
+      if (isFlagFormatError(e)) {
+        const named = VENDOR_FLAG_PROPS.find(({ key, prop }) => typeof p[key] === 'boolean' && blob.includes(prop) && (picks[prop] ?? 0) === 0);
+        if (named) { picks[named.prop] = 1; continue; }
+        // No specific property named → flip everything still on the default once.
+        const flippable = VENDOR_FLAG_PROPS.filter(({ key, prop }) => typeof p[key] === 'boolean' && (picks[prop] ?? 0) === 0);
+        if (flippable.length) { flippable.forEach(({ prop }) => { picks[prop] = 1; }); continue; }
+        throw e;   // every encoding tried — surface the real error
       }
+      const trulyMissing = p.inspectionAccess != null
+        && blob.includes('resiwalk_inspection_access')
+        && (/PROPERTY_DOESNT_EXIST/i.test(blob) || /property .{0,60}does(?:n.t| not) exist/i.test(blob));
+      if (trulyMissing) {
+        if (!provisionTried) {
+          provisionTried = true;
+          try { await ensureInspectionAccessProp(); continue; }   // provisioned → retry full patch
+          catch (pe: any) { dropReason = String(pe?.message || pe); }
+        }
+        // Provisioning failed (or the property is archived and still unwritable):
+        // drop the field so the rest of the patch isn't blocked.
+        console.warn('[vendor-admin] writing without resiwalk_inspection_access:', dropReason.slice(0, 200));
+        const { inspectionAccess: _drop, ...rest } = p;
+        p = rest;
+        if (Object.keys(p).length === 0) throw new Error(dropReason);   // the toggle itself → real reason
+        continue;   // restart with the reduced patch
+      }
+      throw e;
     }
   }
   throw new Error(`Vendor write failed: ${String(lastErr?.message || lastErr).slice(0, 160)} ${String(lastErr?.detail || '').slice(0, 160)}`.trim());
