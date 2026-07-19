@@ -142,7 +142,9 @@ function vendorPathAllowed(pathname: string): boolean {
     // Vendors upload service before/after photos through the shared uploader.
     pathname === '/api/upload' ||
     // Vendors manage their own (services-only) notification settings.
-    pathname === '/notifications' || pathname.startsWith('/api/notifications')
+    pathname === '/notifications' || pathname.startsWith('/api/notifications') ||
+    // The vendor services quick-start (guide appendix) is vendor-facing.
+    pathname === '/guide/vendor-services'
   );
 }
 
