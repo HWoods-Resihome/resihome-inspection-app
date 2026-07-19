@@ -16,7 +16,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { isInternalEmail } from '@/lib/userAccess';
 import { readLoginActivity } from '@/lib/loginActivity';
 import { readAppUsers, readAppAdmins, readInsightsUsers, fetchActiveUsers, fetchVendorAdminList, completedInspectorDirectory } from '@/lib/hubspot';
 import { applyUserPatches, isSeedUserEmail, type UserPatch } from '@/lib/userManagement';
@@ -69,7 +68,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const admin = seed ? true : (typeof ov.admin === 'boolean' ? ov.admin : adminSet.has(email));
         const services = typeof ov.services === 'boolean' ? ov.services : admin;
         const insights = typeof ov.insights === 'boolean' ? ov.insights : (admin || insightsSet.has(email));
-        const inspections = typeof ov.inspections === 'boolean' ? ov.inspections : isInternalEmail(email);
+        // Default TRUE for everyone (matches inspectionsEnabled): 1099s always
+        // had inspection access — it's just scoped hard by the external guards.
+        const inspections = typeof ov.inspections === 'boolean' ? ov.inspections : true;
         const active = seed ? true : ov.active !== false;
         return {
           email,

@@ -18,7 +18,6 @@
  */
 import { readAppUsers, mutateAppUsers, type AppUserRecord, type AppUsersMap } from '@/lib/hubspot';
 import { AI_KNOWLEDGE_ADMINS } from '@/lib/aiKnowledgeAccess';
-import { isInternalEmail } from '@/lib/userAccess';
 
 const SEED = new Set(AI_KNOWLEDGE_ADMINS.map((e) => e.trim().toLowerCase()));
 const isSeed = (email: string) => SEED.has(email);
@@ -58,13 +57,17 @@ export async function isResiwalkActive(email: string | null | undefined): Promis
 }
 
 /** Inspections access. Explicit override wins; otherwise the legacy default —
- *  every internal user has inspections (it was never gated before). */
+ *  TRUE for everyone who can sign in (inspections was never gated before).
+ *  NOTE this flag only gates app entry/creation for internal users; external
+ *  1099 users are constrained by the 1099 guards regardless (own-template
+ *  writes, own-inspection edits, region-unlocked completed views) — those
+ *  never consult this flag, so turning it on can't widen a 1099's access. */
 export async function inspectionsEnabled(email: string | null | undefined): Promise<boolean> {
   const e = norm(email);
   if (!e) return false;
   const ov = await getUserOverride(e);
   if (ov && typeof ov.inspections === 'boolean') return ov.inspections;
-  return isInternalEmail(e);
+  return true;
 }
 
 /** Persist a set of per-user overrides (bulk-safe, concurrency-safe). `updates`
