@@ -260,7 +260,6 @@ export function InternalUsersManager() {
                               instead of truncating (the header grows). */}
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-heading font-bold text-[14px] text-ink break-words">{u.name || u.email}</span>
-                            {u.seed && <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-white bg-gray-500 rounded px-1.5 py-0.5">Built-in</span>}
                             {!isInternalEmail(u.email) && <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5">1099</span>}
                             {dirty && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-brand" />}
                           </div>
