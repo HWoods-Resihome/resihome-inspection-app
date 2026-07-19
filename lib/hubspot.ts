@@ -7707,7 +7707,7 @@ export async function fetchApprovedVendorCompanies(force = false): Promise<Vendo
 
 /** Drop the vendor caches — call after ANY vendor company write so access
  *  changes (deactivate/delete) take effect immediately on this instance. */
-export function bustVendorCompaniesCache(): void { _vendorCompanies = null; _vendorAdminCache = null; _vendorAuthCache.clear(); }
+export function bustVendorCompaniesCache(): void { _vendorCompanies = null; _vendorAdminCache = null; _vendorAuthCache.clear(); _vendorFlagDefs = null; }
 
 // ── Vendor Management (admin) — full CRUD over vendor Companies ──────────────
 // The app is the primary UI for vendor onboarding/access (replacing hand-editing
@@ -7866,19 +7866,51 @@ const VENDOR_FLAG_PROPS: { key: keyof VendorWritePatch; prop: string }[] = [
   { key: 'afterHoursService', prop: 'after_hours_service' },
   { key: 'inspectionAccess', prop: 'resiwalk_inspection_access' },
 ];
-function vendorFlagCandidates(v: boolean): [string, string] { return v ? ['Yes', 'true'] : ['No', 'false']; }
-function vendorPropsFor(patch: VendorWritePatch, picks: Record<string, 0 | 1>): Record<string, string> {
+// DETERMINISTIC flag values: read each property's real definition from HubSpot
+// (bool vs enumeration + its option VALUES) and write exactly what it accepts —
+// no encoding guesswork. Cached ~10 min; busted with the other vendor caches and
+// on any validation failure (definition changed under us).
+let _vendorFlagDefs: { at: number; map: Record<string, { yes: string; no: string }> } | null = null;
+export function bustVendorFlagDefs(): void { _vendorFlagDefs = null; }
+async function vendorFlagValueMap(): Promise<Record<string, { yes: string; no: string }>> {
+  if (_vendorFlagDefs && Date.now() - _vendorFlagDefs.at < 10 * 60 * 1000) return _vendorFlagDefs.map;
+  const map: Record<string, { yes: string; no: string }> = {};
+  for (const { prop } of VENDOR_FLAG_PROPS) {
+    try {
+      const d = await hubspotFetch(`/crm/v3/properties/companies/${prop}`);
+      if (d?.type === 'enumeration' && Array.isArray(d.options) && d.options.length) {
+        const pickVal = (want: 'yes' | 'no') => {
+          const wanted = want === 'yes' ? ['yes', 'true', '1'] : ['no', 'false', '0'];
+          const o = d.options.find((x: any) =>
+            wanted.includes(String(x.value ?? '').toLowerCase()) || wanted.includes(String(x.label ?? '').toLowerCase()));
+          return o ? String(o.value) : (want === 'yes' ? 'true' : 'false');
+        };
+        map[prop] = { yes: pickVal('yes'), no: pickVal('no') };
+      } else {
+        // bool (or anything non-enum): HubSpot wants true/false.
+        map[prop] = { yes: 'true', no: 'false' };
+      }
+    } catch {
+      // Property unreadable (missing / no scope) — legacy default; writes to a
+      // truly missing property are handled by the missing-prop branch below.
+      map[prop] = { yes: 'Yes', no: 'No' };
+    }
+  }
+  _vendorFlagDefs = { at: Date.now(), map };
+  return map;
+}
+function vendorPropsFor(patch: VendorWritePatch, flagMap: Record<string, { yes: string; no: string }>): Record<string, string> {
   const props: Record<string, string> = {};
   if (patch.name != null) props.name = patch.name.trim();
   if (patch.email != null) props.email = patch.email.trim();
   if (patch.regionsServiced != null) props.regions_serviced = patch.regionsServiced.trim();
   for (const { key, prop } of VENDOR_FLAG_PROPS) {
     const v = patch[key];
-    if (typeof v === 'boolean') props[prop] = vendorFlagCandidates(v)[picks[prop] ?? 0];
+    if (typeof v === 'boolean') props[prop] = v ? (flagMap[prop]?.yes ?? 'true') : (flagMap[prop]?.no ?? 'false');
   }
   return props;
 }
-const isFlagFormatError = (e: any) => /not one of|invalid.*option|VALIDATION|was not valid|must be.*(true|false)/i.test(`${e?.message || ''} ${e?.detail || ''}`);
+const isFlagFormatError = (e: any) => /not one of|invalid.*option|VALIDATION|was not valid|were not valid|must be.*(true|false)/i.test(`${e?.message || ''} ${e?.detail || ''}`);
 
 // One write attempt with the two flag encodings + auto-provisioning of the
 // inspection-access property the first time it's needed. CRITICAL: the
@@ -7888,28 +7920,24 @@ const isFlagFormatError = (e: any) => /not one of|invalid.*option|VALIDATION|was
 // DROPPED from the patch and the write retried without it.
 async function vendorWrite(url: string, method: 'POST' | 'PATCH', patch: VendorWritePatch): Promise<any> {
   let p: VendorWritePatch = { ...patch };
-  const picks: Record<string, 0 | 1> = {};
   let provisionTried = false;
+  let defsRefreshed = false;
   let dropReason = 'the ResiWalk Inspection Access property is not available in HubSpot';
   let lastErr: any = null;
-  // Attempts bound: worst case flips each of the 4 flags once + one provision pass.
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const flagMap = await vendorFlagValueMap();
     try {
-      return await hubspotFetch(url, { method, body: JSON.stringify({ properties: vendorPropsFor(p, picks) }) });
+      return await hubspotFetch(url, { method, body: JSON.stringify({ properties: vendorPropsFor(p, flagMap) }) });
     } catch (e: any) {
       lastErr = e;
       const blob = `${String(e?.message || '')} ${String(e?.detail || '')}`;
-      // Wrong Yes/No encoding → flip ONLY the property the error names (portals
-      // can mix enum Yes/No and bool true/false definitions across the flags).
-      // Checked BEFORE missing-property logic so an invalid-option error is never
-      // misread as a missing property.
-      if (isFlagFormatError(e)) {
-        const named = VENDOR_FLAG_PROPS.find(({ key, prop }) => typeof p[key] === 'boolean' && blob.includes(prop) && (picks[prop] ?? 0) === 0);
-        if (named) { picks[named.prop] = 1; continue; }
-        // No specific property named → flip everything still on the default once.
-        const flippable = VENDOR_FLAG_PROPS.filter(({ key, prop }) => typeof p[key] === 'boolean' && (picks[prop] ?? 0) === 0);
-        if (flippable.length) { flippable.forEach(({ prop }) => { picks[prop] = 1; }); continue; }
-        throw e;   // every encoding tried — surface the real error
+      // Value rejected → our cached definitions are stale/wrong: re-read them
+      // once and retry. (Values are otherwise taken from each property's REAL
+      // definition, so this should be rare.)
+      if (isFlagFormatError(e) && !defsRefreshed) {
+        defsRefreshed = true;
+        bustVendorFlagDefs();
+        continue;
       }
       const trulyMissing = p.inspectionAccess != null
         && blob.includes('resiwalk_inspection_access')
@@ -7917,7 +7945,7 @@ async function vendorWrite(url: string, method: 'POST' | 'PATCH', patch: VendorW
       if (trulyMissing) {
         if (!provisionTried) {
           provisionTried = true;
-          try { await ensureInspectionAccessProp(); continue; }   // provisioned → retry full patch
+          try { await ensureInspectionAccessProp(); bustVendorFlagDefs(); continue; }   // provisioned → retry
           catch (pe: any) { dropReason = String(pe?.message || pe); }
         }
         // Provisioning failed (or the property is archived and still unwritable):
@@ -7928,10 +7956,11 @@ async function vendorWrite(url: string, method: 'POST' | 'PATCH', patch: VendorW
         if (Object.keys(p).length === 0) throw new Error(dropReason);   // the toggle itself → real reason
         continue;   // restart with the reduced patch
       }
-      throw e;
+      // Surface the REAL HubSpot reason (message alone is sanitized to a bare 400).
+      throw new Error(`${String(e?.message || e)} — ${String(e?.detail || '').slice(0, 260)}`.trim());
     }
   }
-  throw new Error(`Vendor write failed: ${String(lastErr?.message || lastErr).slice(0, 160)} ${String(lastErr?.detail || '').slice(0, 160)}`.trim());
+  throw new Error(`Vendor write failed: ${String(lastErr?.message || lastErr).slice(0, 160)} — ${String(lastErr?.detail || '').slice(0, 260)}`.trim());
 }
 
 /** Create a vendor Company in HubSpot (ResiWalk access ON unless specified). */
