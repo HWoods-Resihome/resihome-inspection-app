@@ -7731,23 +7731,55 @@ const VENDOR_ADMIN_PROPS = ['name', 'email', 'regions_serviced', 'resiwalk_acces
 // failing the whole list, mirroring the resiwalk_password fallback above.
 const VENDOR_ADMIN_OPTIONAL = ['regions_serviced', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_password'];
 
-/** Auto-provision the resiwalk_inspection_access Company property the first time
- *  a write needs it (bool checkbox, Yes/No — same shape the provisioner uses). */
-async function ensureInspectionAccessProp(): Promise<void> {
-  await hubspotFetch(`/crm/v3/properties/companies`, {
+/** Provision the resiwalk_inspection_access Company property (idempotent):
+ *  check-first, then create — trying the two checkbox encodings HubSpot accepts
+ *  (type bool, else enumeration). Throws a DESCRIPTIVE error on failure (e.g.
+ *  missing crm.schemas scope) so the admin UI shows the real cause. Runs at most
+ *  once per instance once it succeeds. */
+let _inspPropEnsured = false;
+export async function ensureInspectionAccessProp(): Promise<void> {
+  if (_inspPropEnsured) return;
+  // Already exists? Done.
+  try {
+    await hubspotFetch(`/crm/v3/properties/companies/resiwalk_inspection_access`);
+    _inspPropEnsured = true;
+    return;
+  } catch { /* 404 → check archived, then create below */ }
+  // Exists but ARCHIVED (deleted in HubSpot)? Creation 409s while writes still
+  // fail — the API can't restore it, so tell the admin exactly what to do.
+  try {
+    const arch = await hubspotFetch(`/crm/v3/properties/companies/resiwalk_inspection_access?archived=true`);
+    if (arch?.name) {
+      throw new Error('The resiwalk_inspection_access Company property exists but is ARCHIVED (deleted). Restore it in HubSpot: Settings → Properties → Companies → filter Archived → restore "ResiWalk Inspection Access" — then retry.');
+    }
+  } catch (e: any) {
+    if (/ARCHIVED \(deleted\)/.test(String(e?.message || ''))) throw e;
+    /* 404 = truly absent → create below */
+  }
+  const create = (type: string) => hubspotFetch(`/crm/v3/properties/companies`, {
     method: 'POST',
     body: JSON.stringify({
       name: 'resiwalk_inspection_access',
       label: 'ResiWalk Inspection Access',
-      type: 'bool',
-      fieldType: 'booleancheckbox',
+      type, fieldType: 'booleancheckbox',
       groupName: 'companyinformation',
       options: [{ label: 'Yes', value: 'true' }, { label: 'No', value: 'false' }],
     }),
-  }).catch((e: any) => {
-    // 409 = already exists (raced another instance) — fine.
-    if (!/409|already exists|PROPERTY_EXISTS/i.test(`${e?.message || ''} ${e?.detail || ''}`)) throw e;
   });
+  try {
+    try { await create('bool'); }
+    catch (e: any) {
+      const s = `${e?.message || ''} ${e?.detail || ''}`;
+      if (/409|already exists|PROPERTY_EXISTS/i.test(s)) { _inspPropEnsured = true; return; }
+      if (/VALIDATION|invalid|type/i.test(s)) await create('enumeration');   // portal wants the enum encoding
+      else throw e;
+    }
+    _inspPropEnsured = true;
+  } catch (e: any) {
+    const s = `${e?.message || ''} ${e?.detail || ''}`;
+    if (/409|already exists|PROPERTY_EXISTS/i.test(s)) { _inspPropEnsured = true; return; }
+    throw new Error(`Could not create the ResiWalk Inspection Access company property: ${s.slice(0, 200)} — if this mentions scopes, grant the HubSpot private app the crm.schemas.companies.write scope, or create a Yes/No checkbox property named resiwalk_inspection_access on Companies manually.`);
+  }
 }
 // Explicit "No" encodings — a company whose resiwalk_access is SET to a negative
 // value is a DEACTIVATED vendor (shown for reactivation). Companies with the
@@ -7841,23 +7873,42 @@ function vendorPropsFor(patch: VendorWritePatch, pick: 0 | 1): Record<string, st
 const isFlagFormatError = (e: any) => /not one of|invalid.*option|VALIDATION|was not valid|must be.*(true|false)/i.test(`${e?.message || ''} ${e?.detail || ''}`);
 
 // One write attempt with the two flag encodings + auto-provisioning of the
-// inspection-access property the first time it's needed.
+// inspection-access property the first time it's needed. CRITICAL: the
+// inspection-access field must never block the REST of a patch — a deactivation
+// (which bundles inspectionAccess:false via the dependency rule) has to land even
+// if that property is missing/archived, so on a provisioning failure the field is
+// DROPPED from the patch and the write retried without it.
 async function vendorWrite(url: string, method: 'POST' | 'PATCH', patch: VendorWritePatch): Promise<any> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let p: VendorWritePatch = { ...patch };
+  let provisionTried = false;
+  let dropReason = 'the ResiWalk Inspection Access property is not available in HubSpot';
+  let lastErr: any = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
     for (const pick of [0, 1] as const) {
       try {
-        return await hubspotFetch(url, { method, body: JSON.stringify({ properties: vendorPropsFor(patch, pick) }) });
+        return await hubspotFetch(url, { method, body: JSON.stringify({ properties: vendorPropsFor(p, pick) }) });
       } catch (e: any) {
-        if (patch.inspectionAccess != null && isMissingPropertyError(e, 'resiwalk_inspection_access')) {
-          await ensureInspectionAccessProp();
-          break;   // property now exists → restart the encoding attempts
+        lastErr = e;
+        if (p.inspectionAccess != null && isMissingPropertyError(e, 'resiwalk_inspection_access')) {
+          if (!provisionTried) {
+            provisionTried = true;
+            try { await ensureInspectionAccessProp(); break; }   // provisioned → retry full patch
+            catch (pe: any) { dropReason = String(pe?.message || pe); }
+          }
+          // Provisioning failed (or the property is archived and still unwritable):
+          // drop the field so the rest of the patch isn't blocked.
+          console.warn('[vendor-admin] writing without resiwalk_inspection_access:', dropReason.slice(0, 200));
+          const { inspectionAccess: _drop, ...rest } = p;
+          p = rest;
+          if (Object.keys(p).length === 0) throw new Error(dropReason);   // the toggle itself → real reason
+          break;   // restart with the reduced patch
         }
         if (pick === 0 && isFlagFormatError(e)) continue;   // retry alternate encoding
         throw e;
       }
     }
   }
-  throw new Error('vendor write failed after property provisioning retries');
+  throw new Error(`Vendor write failed: ${String(lastErr?.message || lastErr).slice(0, 160)} ${String(lastErr?.detail || '').slice(0, 160)}`.trim());
 }
 
 /** Create a vendor Company in HubSpot (ResiWalk access ON unless specified). */

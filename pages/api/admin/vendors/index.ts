@@ -14,7 +14,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchVendorAdminList, createVendorCompany, updateVendorCompany, fetchPropertyCoverage } from '@/lib/hubspot';
+import { fetchVendorAdminList, createVendorCompany, updateVendorCompany, fetchPropertyCoverage, ensureInspectionAccessProp } from '@/lib/hubspot';
 import { parseRegions, normalizeRegionsString } from '@/lib/vendorRegions';
 
 export const config = { maxDuration: 60 };
@@ -67,7 +67,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const optionSet = new Set<string>(coverageRegions.map((r) => parseRegions(r)[0] || r));
       for (const v of vendors) for (const r of parseRegions(v.regionsServiced)) optionSet.add(r);
       const regionOptions = Array.from(optionSet).sort();
-      return res.status(200).json({ vendors, regionOptions });
+      // Provision the Access To Inspections property as part of loading the page
+      // (idempotent, once per instance). A failure never blocks the list — the
+      // reason is returned so the UI can explain why that toggle won't stick.
+      let inspectionAccessError: string | null = null;
+      try { await ensureInspectionAccessProp(); }
+      catch (pe: any) { inspectionAccessError = String(pe?.message || pe).slice(0, 400); }
+      return res.status(200).json({ vendors, regionOptions, inspectionAccessError });
     } catch (e: any) {
       console.error('[admin/vendors] list failed:', e);
       return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });

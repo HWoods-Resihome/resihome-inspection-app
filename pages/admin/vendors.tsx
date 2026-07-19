@@ -53,6 +53,7 @@ export default function VendorManagement() {
   const [regionOptions, setRegionOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [inspPropError, setInspPropError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   // Search / filters / sort (mirrors the inspections home controls).
@@ -96,6 +97,7 @@ export default function VendorManagement() {
       const list: VendorRow[] = Array.isArray(d.vendors) ? d.vendors : [];
       setVendors(list);
       setRegionOptions(Array.isArray(d.regionOptions) ? d.regionOptions : []);
+      setInspPropError(d.inspectionAccessError || null);
       try { sessionStorage.setItem(SNAP_KEY, JSON.stringify({ vendors: list, regionOptions: d.regionOptions || [] })); } catch { /* quota */ }
     } catch (e: any) {
       setLoadError(String(e?.message || e));
@@ -342,6 +344,11 @@ export default function VendorManagement() {
       <main className="min-h-screen bg-gray-50 pb-16">
         <PageHeader title="Vendor Management" backHref="/" onBack={() => { window.location.href = '/'; }} />
         <div className="max-w-3xl mx-auto px-4 pt-4">
+          {inspPropError && (
+            <div className="mb-3 rounded-xl bg-amber-50 border border-amber-300 px-3 py-2.5 text-[13px] text-amber-900">
+              <span className="font-heading font-bold">Access To Inspections is unavailable: </span>{inspPropError}
+            </div>
+          )}
           {/* Search · Filters · Sort · Add — mirrors the inspections home row. */}
           <div className="flex items-center gap-2 mb-2">
             <div className="relative flex-1 min-w-0">
