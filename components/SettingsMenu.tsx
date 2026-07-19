@@ -3,7 +3,7 @@
 // identically — the unified experience.
 //
 // ADMINS see the options grouped under three collapsible categories (all
-// collapsed on open, tap a header to expand):
+// expanded on open, tap a header to collapse):
 //   • Configuration — Form Builder, Rules Engine, Vendor Management
 //   • Admin Tools   — Insights, AI Knowledge Base, Admin, View As
 //   • General       — Training Guide, Notification Settings, Sign Out
@@ -31,9 +31,10 @@ export function SettingsMenu({ isAdmin, isVendor, onOpen }: { isAdmin: boolean; 
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [viewAsOpen, setViewAsOpen] = useState(false);
-  // Which categories are expanded (admin menu). All start COLLAPSED each time
-  // the menu opens — state resets because the menu unmounts on close.
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Which categories are expanded (admin menu). All start EXPANDED each time
+  // the menu opens; tapping a header collapses just that category.
+  const ALL_EXPANDED: Record<string, boolean> = { config: true, tools: true, general: true };
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(ALL_EXPANDED);
   const toggleSection = (key: string) => setExpanded((s) => ({ ...s, [key]: !s[key] }));
 
   async function handleLogout() {
@@ -47,7 +48,7 @@ export function SettingsMenu({ isAdmin, isVendor, onOpen }: { isAdmin: boolean; 
   function openMenu() {
     setOpen((o) => {
       const next = !o;
-      if (next) { onOpen?.(); setExpanded({}); } // fresh open → everything collapsed
+      if (next) { onOpen?.(); setExpanded(ALL_EXPANDED); } // fresh open → everything expanded
       return next;
     });
   }
@@ -58,11 +59,11 @@ export function SettingsMenu({ isAdmin, isVendor, onOpen }: { isAdmin: boolean; 
       type="button"
       onClick={() => toggleSection(key)}
       aria-expanded={!!expanded[key]}
-      className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-[11px] font-heading font-bold uppercase tracking-wide text-brand bg-brand/5 hover:bg-brand/10 transition-colors border-t border-brand/20"
+      className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-[11px] font-heading font-bold uppercase tracking-wide text-gray-600 hover:bg-gray-50 transition-colors border-t border-gray-100"
     >
       {label}
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-        className={`shrink-0 text-brand/60 transition-transform ${expanded[key] ? 'rotate-180' : ''}`}>
+        className={`shrink-0 text-gray-400 transition-transform ${expanded[key] ? 'rotate-180' : ''}`}>
         <polyline points="6 9 12 15 18 9" />
       </svg>
     </button>
