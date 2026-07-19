@@ -25,13 +25,13 @@ import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   // App admins OR an approved vendor company (scoped to their own work orders).
-  const ok = await servicesViewerAllowed(session?.email).catch(() => false);
+  const ok = await servicesViewerAllowed(session?.vendor ? session?.email : (session?.realEmail || session?.email)).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   // Resolve the viewer FIRST so a vendor's fetch is scoped server-side to their
   // own orders — they always get their complete set (never truncated by a global
   // window) and never receive another vendor's data. Admins fetch the all view.
   const viewer = await resolveServiceViewerAsync(session, ctx.req);
-  const real = await searchServiceWorkOrders(viewer.canSeeAll ? {} : { vendorEmail: viewer.vendorEmail }).catch(() => null);
+  const real = await searchServiceWorkOrders(viewer.canSeeAll ? {} : { vendorEmail: viewer.vendorEmail, vendorName: viewer.vendorName }).catch(() => null);
   // Per-property billing lines split from a community grass-cut master roll UP
   // into the master — hide the children from the operational list (the master
   // drill-down and the billing view surface them). See RECURRING_SERVICES_PLAN.md.
@@ -46,6 +46,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       // email — the session's vendor flag is authoritative.
       canCreate: isInternalEmail(session?.email) && !session?.vendor,
       isVendor: !!session?.vendor,
+      // Vendors granted Inspections access get the app switcher too.
+      canSwitchApps: !session?.vendor || !!session?.vendorInspections,
       services,
       live: !!real,
       asVendor,
@@ -148,7 +150,7 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
   );
 }
 
-export default function ServicesHome({ userName, canCreate, services, live, asVendor, isVendor }: { userName: string; canCreate: boolean; services: ServiceRecord[]; live: boolean; asVendor: boolean; isVendor: boolean }) {
+export default function ServicesHome({ userName, canCreate, services, live, asVendor, isVendor, canSwitchApps }: { userName: string; canCreate: boolean; services: ServiceRecord[]; live: boolean; asVendor: boolean; isVendor: boolean; canSwitchApps?: boolean }) {
   const router = useRouter();
   // "View as Vendor" preview (cookie-persisted, whole-app): shows the external
   // vendor experience — no admin create/settings, and the vendor-visibility rule
@@ -371,7 +373,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
                 className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors">
                 <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
               </Link>
-              {!isVendor && (
+              {(canSwitchApps ?? !isVendor) && (
                 <div className="relative">
                   <button type="button" onClick={() => setMenuOpen((o) => !o)} aria-label="Switch app" aria-expanded={menuOpen}
                     className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors">

@@ -26,7 +26,7 @@ interface GalleryProps {
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
-  const ok = await servicesViewerAllowed(session?.email).catch(() => false);
+  const ok = await servicesViewerAllowed(session?.vendor ? session?.email : (session?.realEmail || session?.email)).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   const id = String(ctx.params?.id || '');
   if (!/^\d+$/.test(id)) return { redirect: { destination: `/services/${id}`, permanent: false } };

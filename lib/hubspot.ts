@@ -1413,9 +1413,11 @@ const SVC_LIST_TTL_MS = 30_000;
 export function bustServiceListCache(): void { _svcListCache.clear(); }
 
 export interface ServiceListOpts {
-  /** Restrict to one vendor's own orders (server-side vendor_email filter). Omit
-   *  for the admin/all view. */
+  /** Restrict to one vendor's own orders (server-side vendor_email OR
+   *  vendor_name filter — legacy rows may carry only the name, or a
+   *  differently-cased email). Omit for the admin/all view. */
   vendorEmail?: string | null;
+  vendorName?: string | null;
   /** Max records to pull. A vendor's own set is small; the admin/all view is
    *  capped and sorted newest-due-first so current/upcoming work stays in-window
    *  and only the oldest completed history is dropped past the cap. */
@@ -1424,12 +1426,24 @@ export interface ServiceListOpts {
 
 export async function searchServiceWorkOrders(opts: ServiceListOpts = {}): Promise<ServiceRecord[] | null> {
   const vendorEmail = String(opts.vendorEmail || '').trim().toLowerCase();
-  const limit = opts.limit ?? (vendorEmail ? 3000 : 3000);
-  const key = vendorEmail || 'all';
+  const vendorName = String(opts.vendorName || '').trim();
+  const limit = opts.limit ?? 3000;
+  const key = vendorEmail || vendorName ? `${vendorEmail}|${vendorName.toLowerCase()}` : 'all';
   const cur = _svcListCache.get(key);
   if (cur && cur.data && Date.now() - cur.at < SVC_LIST_TTL_MS) return cur.data;
   if (cur && cur.inflight) return cur.inflight;   // single-flight per scope
-  const inflight = searchServiceWorkOrdersLive(limit, vendorEmail || undefined)
+  const run = async (): Promise<ServiceRecord[] | null> => {
+    const scoped = await searchServiceWorkOrdersLive(limit, vendorEmail || undefined, vendorName || undefined);
+    // SAFETY NET for legacy stamping: if the scoped query matched nothing, pull
+    // the unscoped window — the caller ALWAYS re-scopes via scopeServices (which
+    // matches email case-insensitively AND falls back to the display name), so a
+    // vendor still only ever receives their own rows.
+    if ((vendorEmail || vendorName) && scoped && scoped.length === 0) {
+      return searchServiceWorkOrdersLive(limit);
+    }
+    return scoped;
+  };
+  const inflight = run()
     .then((items) => { _svcListCache.set(key, { data: items, at: Date.now(), inflight: null }); return items; })
     .catch((e) => { _svcListCache.set(key, { data: null, at: 0, inflight: null }); throw e; });
   _svcListCache.set(key, { data: cur?.data ?? null, at: cur?.at ?? 0, inflight });
@@ -1468,7 +1482,7 @@ export async function searchServicesForPicker(limit = 300): Promise<{ id: string
   return out;
 }
 
-async function searchServiceWorkOrdersLive(limit = 3000, vendorEmail?: string): Promise<ServiceRecord[] | null> {
+async function searchServiceWorkOrdersLive(limit = 3000, vendorEmail?: string, vendorName?: string): Promise<ServiceRecord[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
   try {
@@ -1477,12 +1491,15 @@ async function searchServiceWorkOrdersLive(limit = 3000, vendorEmail?: string): 
     let after: string | undefined;
     // Vendor scope: filter server-side to the vendor's own orders so a vendor
     // ALWAYS gets their complete set (never truncated by a global window) and
-    // never receives another vendor's data. Sort DESCENDING by due date so the
+    // never receives another vendor's data. Email OR display name (OR groups) —
+    // legacy rows can carry only vendor_name. Sort DESCENDING by due date so the
     // window holds current/upcoming work; only the oldest (completed) history is
     // dropped past the cap, not this week's jobs.
-    const filterGroups = vendorEmail
-      ? [{ filters: [{ propertyName: 'vendor_email', operator: 'EQ', value: vendorEmail }] }]
-      : undefined;
+    const scopeGroups = [
+      ...(vendorEmail ? [{ filters: [{ propertyName: 'vendor_email', operator: 'EQ', value: vendorEmail }] }] : []),
+      ...(vendorName ? [{ filters: [{ propertyName: 'vendor_name', operator: 'EQ', value: vendorName }] }] : []),
+    ];
+    const filterGroups = scopeGroups.length ? scopeGroups : undefined;
     do {
       const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
         method: 'POST',

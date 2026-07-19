@@ -68,7 +68,7 @@ const fmtMDY = (iso: string): string => {
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
-  const ok = await servicesViewerAllowed(session?.email).catch(() => false);
+  const ok = await servicesViewerAllowed(session?.vendor ? session?.email : (session?.realEmail || session?.email)).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   // "View as Vendor" (cookie) forces the external vendor experience app-wide, so
   // internal previewers see exactly what a vendor sees on the record too.
