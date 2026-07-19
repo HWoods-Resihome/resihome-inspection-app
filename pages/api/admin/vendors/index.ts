@@ -16,6 +16,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { fetchVendorAdminList, createVendorCompany, updateVendorCompany, fetchPropertyCoverage, fetchRegionEnumOptions, ensureInspectionAccessProp, ensureVendorFlagOptions } from '@/lib/hubspot';
 import { parseRegions, normalizeRegionsString } from '@/lib/vendorRegions';
+import { sendVendorWelcomeEmail } from '@/lib/notifications/vendorWelcome';
 
 export const config = { maxDuration: 60 };
 
@@ -133,13 +134,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (existing.some((v) => v.email.toLowerCase() === email)) {
         return res.status(409).json({ error: 'A vendor with this email already has ResiWalk access.' });
       }
+      const eligibleForRecurring = b.eligibleForRecurring !== false;   // default Yes
       const id = await createVendorCompany({
         name, email, regionsServiced,
-        eligibleForRecurring: b.eligibleForRecurring !== false,   // default Yes
+        eligibleForRecurring,
         afterHoursService: b.afterHoursService === true,
         inspectionAccess: b.inspectionAccess === true,            // default No
       });
-      return res.status(200).json({ ok: true, id });
+      // Welcome email — ONLY for newly created vendors with recurring on (never
+      // mass-sent to existing vendors; those get the per-card resend button).
+      // Best-effort: a mail failure must not fail the create.
+      let welcomeSent = false;
+      if (eligibleForRecurring) {
+        const w = await sendVendorWelcomeEmail({ name, email, regionsServiced }, req).catch(() => ({ sent: false }));
+        welcomeSent = w.sent;
+      }
+      return res.status(200).json({ ok: true, id, welcomeSent });
     } catch (e: any) {
       console.error('[admin/vendors] create failed:', e);
       return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });

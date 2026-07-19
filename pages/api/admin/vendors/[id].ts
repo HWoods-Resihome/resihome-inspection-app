@@ -12,8 +12,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { updateVendorCompany, archiveVendorCompany, type VendorWritePatch } from '@/lib/hubspot';
+import { updateVendorCompany, archiveVendorCompany, fetchVendorAdminList, type VendorWritePatch } from '@/lib/hubspot';
 import { normalizeRegionsString } from '@/lib/vendorRegions';
+import { sendVendorWelcomeEmail } from '@/lib/notifications/vendorWelcome';
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -66,6 +67,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
+  // POST { action: 'welcome' } → (re)send this vendor's welcome email. Admin-
+  // triggered per card — never bulk. Vendor data comes from the live roster;
+  // the body's fields are the fallback for a just-created record HubSpot's
+  // search index hasn't surfaced yet.
+  if (req.method === 'POST') {
+    if (String(req.body?.action || '') !== 'welcome') return res.status(400).json({ error: 'Unknown action.' });
+    try {
+      const list = await fetchVendorAdminList().catch(() => []);
+      const row = list.find((v) => v.id === id);
+      const name = row?.name || String(req.body?.name || '').trim();
+      const email = (row?.email || String(req.body?.email || '')).trim().toLowerCase();
+      const regionsServiced = row?.regionsServiced ?? String(req.body?.regionsServiced || '');
+      if (!name || !EMAIL_RE.test(email)) return res.status(400).json({ error: 'Vendor name/email not found.' });
+      const w = await sendVendorWelcomeEmail({ name, email, regionsServiced }, req);
+      if (!w.sent) return res.status(502).json({ error: w.error === 'system_email_not_configured' ? 'System email is not configured (SYSTEM_GMAIL_*).' : `Email failed: ${w.error || 'unknown'}` });
+      return res.status(200).json({ ok: true });
+    } catch (e: any) {
+      console.error('[admin/vendors] welcome send failed:', e);
+      return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
+    }
+  }
+
   if (req.method === 'DELETE') {
     try {
       await archiveVendorCompany(id);
@@ -76,6 +99,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  res.setHeader('Allow', 'PATCH, DELETE');
+  res.setHeader('Allow', 'PATCH, POST, DELETE');
   return res.status(405).json({ error: 'Method not allowed' });
 }

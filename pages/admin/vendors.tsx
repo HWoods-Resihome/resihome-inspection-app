@@ -21,6 +21,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { PageHeader } from '@/components/PageHeader';
 import { MultiFilter } from '@/components/MultiFilter';
+import { PullToRefresh } from '@/components/PullToRefresh';
 import { useAppDialog } from '@/components/AppDialog';
 import { parseRegions, joinRegions } from '@/lib/vendorRegions';
 
@@ -45,6 +46,22 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
 // server caches too — this removes the spinner on back-navigation AND on a
 // fresh app open; the background load() reconciles).
 const SNAP_KEY = 'resiwalk_vendor_admin_v1';
+
+// HubSpot's SEARCH index lags a fresh create by seconds-to-minutes, so a vendor
+// added moments ago is missing from the search-backed roster and looks like it
+// never saved. Remember recent creates locally and merge them into every load
+// until the index catches up (or the entry expires).
+const PENDING_KEY = 'resiwalk_vendor_pending_v1';
+const PENDING_TTL_MS = 15 * 60 * 1000;
+function readPendingCreates(): { row: VendorRow; at: number }[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
+    return (Array.isArray(list) ? list : []).filter((p: any) => p?.row?.id && Date.now() - (p.at || 0) < PENDING_TTL_MS);
+  } catch { return []; }
+}
+function writePendingCreates(list: { row: VendorRow; at: number }[]): void {
+  try { localStorage.setItem(PENDING_KEY, JSON.stringify(list)); } catch { /* quota */ }
+}
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -100,7 +117,14 @@ export default function VendorManagement() {
       const r = await fetch(`/api/admin/vendors${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      const list: VendorRow[] = Array.isArray(d.vendors) ? d.vendors : [];
+      let list: VendorRow[] = Array.isArray(d.vendors) ? d.vendors : [];
+      // Merge recent local creates the HubSpot search index hasn't surfaced yet;
+      // drop each pending entry the moment the server list includes it.
+      const pending = readPendingCreates();
+      const stillPending = pending.filter((p) =>
+        !list.some((v) => v.id === p.row.id || v.email.toLowerCase() === p.row.email.toLowerCase()));
+      if (stillPending.length !== pending.length) writePendingCreates(stillPending);
+      if (stillPending.length) list = [...list, ...stillPending.map((p) => p.row)];
       setVendors(list);
       setRegionOptions(Array.isArray(d.regionOptions) ? d.regionOptions : []);
       setInspPropError(d.inspectionAccessError || null);
@@ -250,10 +274,40 @@ export default function VendorManagement() {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      // Show the new vendor IMMEDIATELY (HubSpot's search index can lag the
+      // create by minutes) and remember it so background reloads keep it until
+      // the index catches up.
+      const row: VendorRow = {
+        id: String(d.id), name: newName.trim(), email: newEmail.trim().toLowerCase(),
+        regionsServiced: joinRegions(newRegions), resiwalkAccess: true,
+        eligibleForRecurring: newRecurring, afterHoursService: newAfterHours,
+        inspectionAccess: newInspAccess, hasPassword: false,
+      };
+      setVendors((cur) => [...cur.filter((x) => x.id !== row.id), row]);
+      writePendingCreates([...readPendingCreates(), { row, at: Date.now() }]);
       setAddOpen(false); setNewName(''); setNewEmail(''); setNewRegions([]); setNewRecurring(true); setNewAfterHours(false); setNewInspAccess(false);
+      void dialog.alert(`${row.name} created${d.welcomeSent ? ' — welcome email sent.' : '.'}`);
       await load(true);
     } catch (e: any) { void dialog.alert(`Could not add vendor: ${e?.message || e}`); }
     finally { setAdding(false); }
+  }
+
+  // Per-card welcome email (re)send — admin-triggered only, never bulk.
+  const [welcomeBusy, setWelcomeBusy] = useState<string | null>(null);
+  async function sendWelcome(v: VendorRow) {
+    setWelcomeBusy(v.id);
+    try {
+      const r = await fetch(`/api/admin/vendors/${v.id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        // Fields ride along as the fallback for a just-created record the
+        // HubSpot search index hasn't surfaced yet.
+        body: JSON.stringify({ action: 'welcome', name: v.name, email: v.email, regionsServiced: v.regionsServiced }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      void dialog.alert(`Welcome email sent to ${v.email}.`);
+    } catch (e: any) { void dialog.alert(`Could not send welcome email: ${e?.message || e}`); }
+    finally { setWelcomeBusy(null); }
   }
 
   function startEdit(v: VendorRow) { setEditId(v.id); setEditName(v.name); setEditEmail(v.email); }
@@ -371,8 +425,13 @@ export default function VendorManagement() {
               <button type="button" onClick={() => toggleFlag(v, 'afterHoursService')} className={toggleCls(v.afterHoursService)} aria-pressed={v.afterHoursService}><span className={knobCls(v.afterHoursService)} /></button>
             </div>
 
-            <div className="pt-2 border-t border-gray-100">
+            <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
               <button type="button" onClick={() => void deleteVendor(v)} className="text-sm font-heading font-semibold text-red-600 hover:underline">Delete Vendor</button>
+              <button type="button" onClick={() => void sendWelcome(v)} disabled={welcomeBusy === v.id}
+                title="Emails this vendor a welcome + sign-in link"
+                className="text-sm font-heading font-semibold text-brand hover:underline disabled:opacity-50">
+                {welcomeBusy === v.id ? 'Sending…' : 'Send Welcome Email'}
+              </button>
             </div>
           </div>
         )}
@@ -383,6 +442,8 @@ export default function VendorManagement() {
   return (
     <>
       <Head><title>Vendor Management — ResiWalk</title></Head>
+      {/* Swipe-down refresh, same as the inspections home. */}
+      <PullToRefresh onRefresh={() => load(true)} />
       <main className="min-h-screen bg-gray-50 pb-16">
         <PageHeader title="Vendor Management" backHref="/" onBack={() => { window.location.href = '/'; }} />
         <div className="max-w-3xl mx-auto px-4 pt-4">
