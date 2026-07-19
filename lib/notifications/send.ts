@@ -32,6 +32,9 @@ export interface NotificationEmail {
   subject: string;
   heading: string;           // pink header title
   intro: string;             // one-line lead paragraph
+  /** Optional highlighted block between the intro and the meta rows — e.g. the
+   *  service-note text itself. Rendered as a brand-tinted quote box. */
+  callout?: string;
   rows: Array<[string, string]>;   // meta label/value pairs
   linkUrl: string;
   linkLabel: string;
@@ -52,6 +55,7 @@ function buildHtml(e: NotificationEmail): string {
         <div style="font-size:18px;font-weight:bold;">${esc(e.heading)}</div>
       </td></tr>
       <tr><td style="padding:18px 24px 6px 24px;font-size:14px;color:#1a1a1a;">${esc(e.intro)}</td></tr>
+      ${e.callout ? `<tr><td style="padding:8px 24px 4px 24px;"><div style="background:#FFF0F5;border-left:4px solid ${BRAND};border-radius:8px;padding:12px 16px;font-size:15px;line-height:1.5;color:#1a1a1a;white-space:pre-wrap;">${esc(e.callout)}</div></td></tr>` : ''}
       ${rows ? `<tr><td style="padding:6px 24px 8px 24px;"><table cellpadding="0" cellspacing="0" border="0" width="100%">${rows}</table></td></tr>` : ''}
       <tr><td style="padding:12px 24px 20px 24px;">
         <a href="${esc(e.linkUrl)}" style="display:inline-block;background:${BRAND};color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px;padding:11px 20px;border-radius:8px;">${esc(e.linkLabel)}</a>
@@ -65,6 +69,7 @@ function buildHtml(e: NotificationEmail): string {
 
 function buildText(e: NotificationEmail): string {
   const lines = [e.heading, '', e.intro, ''];
+  if (e.callout) lines.push(`"${e.callout}"`, '');
   for (const [k, v] of e.rows) if (String(v || '').trim()) lines.push(`${k}: ${v}`);
   lines.push('', `${e.linkLabel}: ${e.linkUrl}`, '', '-- Sent from ResiWalk. Manage these emails under Settings → Notification Settings.');
   return lines.join('\n');

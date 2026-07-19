@@ -54,7 +54,9 @@ export async function notifyServiceNote(note: ServiceNote, ctx: ServiceNoteEmail
     alsoTo,
     subject: `New note on ${ctx.address || 'a service'} ${serviceNoteToken(ctx.serviceId)}`,
     heading: 'New Service Note',
-    intro: `${note.byName || note.byEmail} wrote: “${note.text.slice(0, 500)}${note.text.length > 500 ? '…' : ''}” — reply to this email and your reply is added to the note thread automatically.`,
+    intro: `${note.byName || note.byEmail} added a note — reply to this email and your reply is added to the note thread automatically.`,
+    // The note itself is the star — its own highlighted block under the intro.
+    callout: note.text.slice(0, 1500) + (note.text.length > 1500 ? '…' : ''),
     rows: [
       ['Service', ctx.serviceLabel],
       ['Property', ctx.address],

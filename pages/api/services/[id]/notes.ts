@@ -18,6 +18,16 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { fetchServiceWorkOrder } from '@/lib/hubspot';
 import { addServiceNote, readServiceNotes, clipNoteText } from '@/lib/services/serviceNotes';
 import { notifyServiceNote } from '@/lib/notifications/serviceNote';
+import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
+
+// "landscaping · cut" → "Landscaping · Grass Cut": catalog labels when known,
+// Title-Cased raw values as the fallback for retired/custom types.
+const tc = (s: string) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+export function serviceLabelFor(p: Record<string, any>): string {
+  const w = String(p.worktype || '').trim();
+  const s = String(p.subtype || '').trim();
+  return [w ? tc(worktypeLabel(w)) : '', s ? tc(subtypeLabel(w, s)) : ''].filter(Boolean).join(' · ');
+}
 
 export const config = { maxDuration: 30 };
 
@@ -62,7 +72,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
       const address = [String(p.address_snapshot || p.community_name || '').trim(), String(p.locality_snapshot || '').trim()]
         .filter(Boolean).join(', ');
-      const serviceLabel = [String(p.worktype || '').trim(), String(p.subtype || '').trim()].filter(Boolean).join(' · ');
+      const serviceLabel = serviceLabelFor(p);
       const notified = await notifyServiceNote(note, {
         serviceId: id,
         address,

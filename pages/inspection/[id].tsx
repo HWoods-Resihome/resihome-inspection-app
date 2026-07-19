@@ -23,6 +23,7 @@ import { reportError } from '@/lib/clientErrorReporter';
 import { isNetworkError } from '@/lib/netError';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 import { getPhotoWindow, clearPhotoWindow } from '@/lib/photoCaptureWindow';
+import { PullToRefresh } from '@/components/PullToRefresh';
 
 
 // The three inspection forms are heavy and MUTUALLY EXCLUSIVE — exactly one
@@ -653,6 +654,10 @@ export default function ExistingInspection() {
           element has no transform, so it isn't a containing block for
           position:fixed). RateCardForm scrolls this via #page-scroll. */}
       <div id="page-scroll" className="fixed inset-0 overflow-y-auto overscroll-none">
+      {/* Swipe-down refresh — re-pulls the record (fresh answers/status). Answers
+          autosave continuously, so a reload is safe. PullToRefresh reads the
+          gesture's own scroll container, so it works inside #page-scroll. */}
+      <PullToRefresh onRefresh={() => { window.location.reload(); }} />
       {externalViewOnly && (
         <div className="bg-sky-50 border-b border-sky-200 py-2">
           <div className="max-w-7xl mx-auto px-3 sm:px-6 text-xs sm:text-sm text-sky-900 font-heading font-semibold">

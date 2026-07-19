@@ -22,6 +22,7 @@ export function ServiceNotesThread({ serviceId, viewerRole }: {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(true);   // collapsible, like the other sections
   const endRef = useRef<HTMLDivElement>(null);
 
   async function load() {
@@ -53,11 +54,17 @@ export function ServiceNotesThread({ serviceId, viewerRole }: {
   }
 
   return (
-    <section className="rounded-xl shadow-md overflow-hidden bg-white border border-gray-200">
-      <div className="bg-brand/5 border-b border-brand/20 px-4 py-3 flex items-center justify-between gap-2">
-        <h2 className="font-heading font-bold text-lg text-ink truncate min-w-0">Notes</h2>
-        {notes.length > 0 && <span className="shrink-0 text-sm bg-brand text-white font-heading font-semibold px-2.5 py-0.5 rounded-full">{notes.length}</span>}
-      </div>
+    <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+      {/* Collapsible header — mirrors the page's other sections. */}
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        className="w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-brand/5 border-b border-brand/20 text-left">
+        <div className="font-heading font-bold text-lg text-ink truncate min-w-0">Notes</div>
+        <div className="flex items-center gap-2 shrink-0">
+          {notes.length > 0 && <span className="text-sm bg-brand text-white font-heading font-semibold px-2.5 py-0.5 rounded-full">{notes.length}</span>}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`text-gray-400 transition-transform ${open ? '' : '-rotate-90'}`}><polyline points="6 9 12 15 18 9" /></svg>
+        </div>
+      </button>
+      {open && (<>
       <div className="p-3 space-y-2 max-h-80 overflow-y-auto">
         {loading ? (
           <p className="text-sm text-gray-400 text-center py-3">Loading notes…</p>
@@ -96,6 +103,7 @@ export function ServiceNotesThread({ serviceId, viewerRole }: {
         </div>
         <p className="text-[11px] text-gray-400 mt-1.5">The other side is emailed each note — they can reply right from the email.</p>
       </div>
+      </>)}
     </section>
   );
 }

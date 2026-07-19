@@ -23,6 +23,7 @@ import ServicePager from '@/components/ServicePager';
 import { AiSparkle } from '@/components/AiSparkle';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { ServiceNotesThread } from '@/components/ServiceNotesThread';
+import { PullToRefresh } from '@/components/PullToRefresh';
 import { DatePicker } from '@/components/DatePicker';
 import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync, toDurableRef, rehydrateRef } from '@/lib/services/offlineServices';
 
@@ -1112,6 +1113,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Swipe-down refresh — re-pulls the record (fresh notes/status/photos).
+          Drafts are autosaved (flushDraft on nav), so a reload is safe. */}
+      <PullToRefresh onRefresh={() => { window.location.reload(); }} />
       <header className="bg-white border-b-2 border-brand sticky top-0 z-30 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
         {/* Tier 1 — top bar: worktype · subtype, status chip, lock (if any), back.
             Keeping the chip + lock up here means they never crowd the info rows. */}
@@ -1421,6 +1425,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
                 {editableCostDetail}
 
+                {/* Vendor ↔ ResiHome note thread — above the submit block. Each note
+                    is emailed to the other party; replying to the email posts back. */}
+                <ServiceNotesThread serviceId={svc.id} viewerRole={isInternal ? 'internal' : 'vendor'} />
+
                 <button type="button" disabled={!ready} onClick={submit}
                   className={`w-full rounded-2xl py-3.5 font-heading font-bold text-sm ${ready ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
                   {submitting ? "Submitting…" : "Submit Completion"}
@@ -1482,6 +1490,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
                 {costDetail}
 
+                {/* Note thread — above the review/completion decision sections. */}
+                <ServiceNotesThread serviceId={svc.id} viewerRole={isInternal ? 'internal' : 'vendor'} />
+
                 {canBidReview && (
                   <DecisionPanel kind="bid" orig={{ vendor: origCost, markup: markupPct, client: origClient }} busy={deciding} error={error} onSubmit={submitBid} />
                 )}
@@ -1513,10 +1524,6 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             )}
           </SectionCollapseCtx.Provider>
         )}
-
-        {/* Vendor ↔ ResiHome note thread — both sides, every status. Each note
-            is emailed to the other party; replying to the email posts back here. */}
-        <ServiceNotesThread serviceId={svc.id} viewerRole={isInternal ? 'internal' : 'vendor'} />
       </main>
 
       {lightbox && gallery.groups.length > 0 && (

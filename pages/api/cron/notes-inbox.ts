@@ -19,6 +19,7 @@ import { parseServiceNoteToken, notifyServiceNote } from '@/lib/notifications/se
 import { addServiceNote, clipNoteText } from '@/lib/services/serviceNotes';
 import { fetchServiceWorkOrder } from '@/lib/hubspot';
 import { isInternalEmail } from '@/lib/userAccess';
+import { serviceLabelFor } from '@/pages/api/services/[id]/notes';
 
 export const config = { maxDuration: 60 };
 
@@ -72,7 +73,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         await notifyServiceNote(note, {
           serviceId,
           address,
-          serviceLabel: [String(p.worktype || '').trim(), String(p.subtype || '').trim()].filter(Boolean).join(' · '),
+          serviceLabel: serviceLabelFor(p),
           vendorEmail: vendorEmail || null,
           vendorName: String(p.vendor_name || '').trim() || null,
         }, req);

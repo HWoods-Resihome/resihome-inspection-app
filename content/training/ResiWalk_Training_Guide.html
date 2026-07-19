@@ -294,6 +294,28 @@ ol.steps li{display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;}
 }
 
 </style>
+<style>
+/* ---- mobile fit: lock the page to the viewport width (no horizontal pan) ----
+   Wide widgets that NEED to scroll (e.g. .rlog tables) keep their own inner
+   overflow-x:auto; everything else is capped at 100%. */
+html,body{max-width:100%;overflow-x:hidden;}
+img,svg,video{max-width:100%;height:auto;}
+table{max-width:100%;}
+@media (max-width:680px){
+  /* Compact cover: the hero was a full screen of pink before any content. */
+  .hero{padding:30px 20px 28px;}
+  .hero-logo{width:48px;height:48px;margin-bottom:14px;}
+  .hero-eyebrow{letter-spacing:3px;font-size:11.5px;margin-bottom:8px;}
+  .hero-title{font-size:38px;margin-bottom:10px;}
+  .hero-sub{font-size:15.5px;line-height:1.4;}
+  .hero-rule{margin:16px 0 12px;width:72px;height:4px;}
+  .hero-meta{font-size:13px;line-height:1.7;}
+  .hero-conf{margin-top:14px;font-size:11px;}
+  .contents{padding:30px 0 10px;}
+  .figrow{gap:12px;}
+  .figitem{flex:1 1 150px;max-width:100%;}
+}
+</style>
 </head>
 <body>
 
