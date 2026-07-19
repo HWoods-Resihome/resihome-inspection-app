@@ -64,10 +64,8 @@ export function InternalUsersManager() {
   const [sectionsOpen, setSectionsOpen] = useState(false);
   const [sortKey, setSortKey] = useState<'name' | 'lastLogin'>('lastLogin');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-
-  // Bulk bar.
-  const [bulkCap, setBulkCap] = useState<CapKey>('services');
-  const [bulkVal, setBulkVal] = useState<'yes' | 'no'>('yes');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -115,21 +113,6 @@ export function InternalUsersManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [users, edits, q, fActive, fAdmin, fSections, sortKey, sortDir]);
 
-  const applyBulk = () => {
-    const val = bulkVal === 'yes';
-    setSaved(false);
-    setEdits((prev) => {
-      const next = { ...prev };
-      for (const u of visible) {
-        if (u.seed && (bulkCap === 'active' || bulkCap === 'admin')) continue;
-        const cur = { ...(next[u.email] || {}) };
-        if (val === u.access[bulkCap]) delete cur[bulkCap]; else cur[bulkCap] = val;
-        if (Object.keys(cur).length) next[u.email] = cur; else delete next[u.email];
-      }
-      return next;
-    });
-  };
-
   const save = async () => {
     if (!dirtyCount) return;
     setBusy(true); setError(null); setSaved(false);
@@ -170,63 +153,76 @@ export function InternalUsersManager() {
             <div className="text-sm text-gray-500">Loading…</div>
           ) : (
             <>
-              {/* Search */}
-              <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or email…"
-                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand mb-2" />
-
-              {/* Filters + sort — one row, ≤4 controls */}
-              <div className="flex flex-wrap items-center gap-2 mb-3">
-                <select aria-label="Filter by active" value={fActive} onChange={(e) => setFActive(e.target.value as Tri)} className={selCls}>
-                  <option value="any">Active: Any</option><option value="yes">Active: Yes</option><option value="no">Active: No</option>
-                </select>
-                <select aria-label="Filter by admin" value={fAdmin} onChange={(e) => setFAdmin(e.target.value as Tri)} className={selCls}>
-                  <option value="any">Admin: Any</option><option value="yes">Admin: Yes</option><option value="no">Admin: No</option>
-                </select>
-                <div className="relative">
-                  <button type="button" onClick={() => setSectionsOpen((o) => !o)} className={`${selCls} inline-flex items-center gap-1.5`}>
-                    Sections{fSections.length ? ` · ${fSections.length}` : ''}
-                    <Chevron open={sectionsOpen} />
-                  </button>
-                  {sectionsOpen && (<>
-                    <div className="fixed inset-0 z-30" onClick={() => setSectionsOpen(false)} />
-                    <div className="absolute left-0 mt-1 z-40 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
-                      {SECTION_CAPS.map((c) => {
-                        const on = fSections.includes(c);
-                        return (
-                          <button key={c} type="button"
-                            onClick={() => setFSections((s) => on ? s.filter((x) => x !== c) : [...s, c])}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-left hover:bg-gray-50">
-                            <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] font-bold ${on ? 'bg-brand border-brand text-white' : 'border-gray-300'}`}>{on ? '✓' : ''}</span>
-                            <span className="capitalize">Has {c}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>)}
+              {/* Search + filter toggle — one line, mirroring Vendor Management
+                  (search bar + funnel button; filters/sort drop to the next line). */}
+              <div className="flex items-center gap-2 mb-2">
+                <div className="relative flex-1 min-w-0">
+                  <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or email…"
+                    className="w-full text-sm border border-gray-300 rounded-lg pl-3 pr-9 py-2.5 bg-white focus:outline-none focus:border-brand" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
                 </div>
-                <button type="button"
-                  onClick={() => { if (sortKey === 'name') setSortDir((d) => d === 'asc' ? 'desc' : 'asc'); else { setSortKey('name'); setSortDir('asc'); } }}
-                  className={`${selCls} ${sortKey === 'name' ? 'border-brand text-brand' : ''}`}>Name {sortKey === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button>
-                <button type="button"
-                  onClick={() => { if (sortKey === 'lastLogin') setSortDir((d) => d === 'asc' ? 'desc' : 'asc'); else { setSortKey('lastLogin'); setSortDir('desc'); } }}
-                  className={`${selCls} ${sortKey === 'lastLogin' ? 'border-brand text-brand' : ''}`}>Last login {sortKey === 'lastLogin' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button>
-              </div>
-
-              {/* Bulk bar */}
-              <div className="flex flex-wrap items-center gap-2 mb-3 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Bulk</span>
-                <span className="text-[12px] text-gray-600">Set</span>
-                <select aria-label="Bulk capability" value={bulkCap} onChange={(e) => setBulkCap(e.target.value as CapKey)} className={selCls}>
-                  {CAPS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                </select>
-                <select aria-label="Bulk value" value={bulkVal} onChange={(e) => setBulkVal(e.target.value as 'yes' | 'no')} className={selCls}>
-                  <option value="yes">Yes</option><option value="no">No</option>
-                </select>
-                <button type="button" onClick={applyBulk}
-                  className="text-[12px] font-heading font-bold text-white bg-gray-800 hover:bg-black rounded-lg px-3 py-1.5">
-                  Apply to {visible.length} shown
+                <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen} aria-label="Filters"
+                  className={`shrink-0 inline-flex items-center justify-center gap-1 w-14 h-11 rounded-lg border bg-white transition-colors ${(fActive !== 'any' || fAdmin !== 'any' || fSections.length) ? 'border-brand text-brand' : 'border-gray-300 text-gray-600 hover:text-brand hover:border-brand/50'}`}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
                 </button>
               </div>
+
+              {/* Filter + sort chips row (collapsible, like Vendor Management). */}
+              {filtersOpen && (
+                <div className="grid grid-cols-4 gap-1.5 mb-3">
+                  <select aria-label="Filter by active" value={fActive} onChange={(e) => setFActive(e.target.value as Tri)}
+                    className={`w-full truncate ${selCls} ${fActive !== 'any' ? 'border-brand text-brand' : ''}`}>
+                    <option value="any">Active</option><option value="yes">Active: Yes</option><option value="no">Active: No</option>
+                  </select>
+                  <select aria-label="Filter by admin" value={fAdmin} onChange={(e) => setFAdmin(e.target.value as Tri)}
+                    className={`w-full truncate ${selCls} ${fAdmin !== 'any' ? 'border-brand text-brand' : ''}`}>
+                    <option value="any">Admin</option><option value="yes">Admin: Yes</option><option value="no">Admin: No</option>
+                  </select>
+                  <div className="relative">
+                    <button type="button" onClick={() => setSectionsOpen((o) => !o)}
+                      className={`w-full truncate ${selCls} inline-flex items-center justify-between gap-1 ${fSections.length ? 'border-brand text-brand' : ''}`}>
+                      <span className="truncate">Sections{fSections.length ? ` (${fSections.length})` : ''}</span>
+                      <Chevron open={sectionsOpen} />
+                    </button>
+                    {sectionsOpen && (<>
+                      <div className="fixed inset-0 z-30" onClick={() => setSectionsOpen(false)} />
+                      <div className="absolute left-0 mt-1 z-40 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+                        {SECTION_CAPS.map((c) => {
+                          const on = fSections.includes(c);
+                          return (
+                            <button key={c} type="button"
+                              onClick={() => setFSections((s) => on ? s.filter((x) => x !== c) : [...s, c])}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-left hover:bg-gray-50">
+                              <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] font-bold ${on ? 'bg-brand border-brand text-white' : 'border-gray-300'}`}>{on ? '✓' : ''}</span>
+                              <span className="capitalize">Has {c}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>)}
+                  </div>
+                  <div className="relative">
+                    <button type="button" onClick={() => setSortOpen((o) => !o)} aria-expanded={sortOpen}
+                      className={`w-full truncate ${selCls} inline-flex items-center justify-between gap-1`}>
+                      <span className="truncate">Sort: {sortKey === 'name' ? 'Name' : 'Login'} {sortDir === 'asc' ? '↑' : '↓'}</span>
+                      <Chevron open={sortOpen} />
+                    </button>
+                    {sortOpen && (<>
+                      <div className="fixed inset-0 z-30" onClick={() => setSortOpen(false)} />
+                      <div className="absolute right-0 mt-1 z-40 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+                        {([['name', 'Name'], ['lastLogin', 'Last Login']] as const).map(([k, label]) => (
+                          <button key={k} type="button"
+                            onClick={() => { if (sortKey === k) setSortDir((d) => d === 'asc' ? 'desc' : 'asc'); else { setSortKey(k); setSortDir(k === 'name' ? 'asc' : 'desc'); } }}
+                            className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-gray-50 ${sortKey === k ? 'text-brand font-heading font-semibold' : 'text-gray-700'}`}>
+                            {label} {sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                          </button>
+                        ))}
+                      </div>
+                    </>)}
+                  </div>
+                </div>
+              )}
 
               {/* User cards */}
               <div className="flex flex-col gap-2">
