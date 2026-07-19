@@ -59,11 +59,11 @@ export function SettingsMenu({ isAdmin, isVendor, onOpen }: { isAdmin: boolean; 
       type="button"
       onClick={() => toggleSection(key)}
       aria-expanded={!!expanded[key]}
-      className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-[11px] font-heading font-bold uppercase tracking-wide text-gray-600 hover:bg-gray-50 transition-colors border-t border-gray-100"
+      className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-[11px] font-heading font-bold uppercase tracking-wide text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors border-t border-gray-200"
     >
       {label}
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-        className={`shrink-0 text-gray-400 transition-transform ${expanded[key] ? 'rotate-180' : ''}`}>
+        className={`shrink-0 text-gray-500 transition-transform ${expanded[key] ? 'rotate-180' : ''}`}>
         <polyline points="6 9 12 15 18 9" />
       </svg>
     </button>
