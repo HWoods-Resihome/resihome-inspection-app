@@ -8,17 +8,18 @@
  *          inspections?, services?, insights?, admin? } } }. Supports one user or
  *          a bulk map. A flag of null clears the override (back to default).
  *
- * Source of the roster is the login-activity blob (everyone who has logged in),
- * filtered to internal emails and merged with the per-user override store.
+ * Roster = login activity ∪ saved overrides ∪ the HubSpot active-users list
+ * (the sign-in allowlist — catches people who signed in before activity
+ * tracking existed), INCLUDING external 1099 inspectors. Vendor COMPANIES are
+ * excluded — they're managed under Vendor Management, not here.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { canViewInsights } from '@/lib/insightsAccess';
-import { isInternalEmail } from '@/lib/userAccess';
 import { readLoginActivity } from '@/lib/loginActivity';
-import { readAppUsers } from '@/lib/hubspot';
+import { readAppUsers, fetchActiveUsers, fetchVendorAdminList } from '@/lib/hubspot';
 import { isResiwalkActive, inspectionsEnabled, applyUserPatches, isSeedUserEmail, type UserPatch } from '@/lib/userManagement';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -28,11 +29,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'GET') {
     try {
-      const [activity, overrides] = await Promise.all([readLoginActivity(), readAppUsers()]);
+      const [activity, overrides, hubspotUsers, vendors] = await Promise.all([
+        readLoginActivity(),
+        readAppUsers(),
+        fetchActiveUsers().catch(() => []),
+        fetchVendorAdminList().catch(() => []),
+      ]);
+      // Vendor COMPANY emails never belong in the people roster.
+      const vendorEmails = new Set(vendors.map((v) => v.email.trim().toLowerCase()).filter(Boolean));
+      // HubSpot names by email — the fallback for users with no activity record.
+      const hsName = new Map<string, string>();
+      for (const u of hubspotUsers) hsName.set(String(u.email || '').trim().toLowerCase(), String(u.fullName || ''));
       const emails = Array.from(new Set(
-        [...Object.keys(activity), ...Object.keys(overrides)]
+        [...Object.keys(activity), ...Object.keys(overrides), ...hsName.keys()]
           .map((e) => e.trim().toLowerCase())
-          .filter((e) => e && isInternalEmail(e)),
+          .filter((e) => e && e.includes('@') && !vendorEmails.has(e)),
       ));
       const users = await Promise.all(emails.map(async (email) => {
         const act = activity[email] || {};
@@ -42,7 +53,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ]);
         return {
           email,
-          name: (ov.name || act.name || '').toString(),
+          name: (ov.name || act.name || hsName.get(email) || '').toString(),
           lastLogin: act.lastAt || null,
           loginCount: act.count || 0,
           seed: isSeedUserEmail(email),

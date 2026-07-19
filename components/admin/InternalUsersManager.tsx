@@ -8,6 +8,7 @@
  * locally and save in one batch. Backed by /api/admin/users.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { isInternalEmail } from '@/lib/userAccess';
 
 type CapKey = 'active' | 'inspections' | 'services' | 'insights' | 'admin';
 const CAPS: { key: CapKey; label: string }[] = [
@@ -141,7 +142,7 @@ export function InternalUsersManager() {
         className="w-full flex items-center justify-between gap-3 p-4 text-left">
         <div>
           <h2 className="font-heading font-bold text-base text-ink">User Management</h2>
-          <p className="text-[12px] text-gray-500 mt-0.5">Internal users who’ve signed in — control each person’s access to ResiWalk, Inspections, Services, Insights, and Admin.</p>
+          <p className="text-[12px] text-gray-500 mt-0.5">Everyone who can sign in — internal team and 1099 inspectors — with each person’s access to ResiWalk, Inspections, Services, Insights, and Admin. Vendor companies live under Vendor Management.</p>
         </div>
         <Chevron open={open} />
       </button>
@@ -238,6 +239,7 @@ export function InternalUsersManager() {
                           <div className="flex items-center gap-2">
                             <span className="font-heading font-bold text-[14px] text-ink truncate">{u.name || u.email}</span>
                             {u.seed && <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-white bg-gray-500 rounded px-1.5 py-0.5">Built-in</span>}
+                            {!isInternalEmail(u.email) && <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5">1099</span>}
                             {dirty && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-brand" />}
                           </div>
                           <div className="text-[12px] text-gray-500 truncate">{u.email} · last active {fmtLogin(u.lastLogin)}</div>
