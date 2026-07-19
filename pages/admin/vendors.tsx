@@ -41,8 +41,9 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'name', label: 'Name' }, { value: 'email', label: 'Email' }, { value: 'regions', label: 'Regions' },
 ];
 
-// Instant repeat paint: snapshot the last-loaded roster per session (the server
-// caches too — this just removes the spinner on back-navigation).
+// Instant repeat paint: snapshot the last-loaded roster in localStorage (the
+// server caches too — this removes the spinner on back-navigation AND on a
+// fresh app open; the background load() reconciles).
 const SNAP_KEY = 'resiwalk_vendor_admin_v1';
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -81,6 +82,7 @@ export default function VendorManagement() {
   const [newRegions, setNewRegions] = useState<string[]>([]);
   const [newRecurring, setNewRecurring] = useState(true);
   const [newAfterHours, setNewAfterHours] = useState(false);
+  const [newInspAccess, setNewInspAccess] = useState(false);
   const [adding, setAdding] = useState(false);
 
   // Inline name/email edit (pencil).
@@ -102,15 +104,28 @@ export default function VendorManagement() {
       setVendors(list);
       setRegionOptions(Array.isArray(d.regionOptions) ? d.regionOptions : []);
       setInspPropError(d.inspectionAccessError || null);
-      try { sessionStorage.setItem(SNAP_KEY, JSON.stringify({ vendors: list, regionOptions: d.regionOptions || [] })); } catch { /* quota */ }
+      try { localStorage.setItem(SNAP_KEY, JSON.stringify({ vendors: list, regionOptions: d.regionOptions || [] })); } catch { /* quota */ }
+      // Server skipped the heavy region-catalog scan to answer fast — pull the
+      // full option list quietly now that the page has painted.
+      if (d.regionOptionsPending) {
+        void fetch('/api/admin/vendors?only=regions', { cache: 'no-store' })
+          .then((r2) => (r2.ok ? r2.json() : null))
+          .then((d2) => {
+            if (Array.isArray(d2?.regionOptions) && d2.regionOptions.length) {
+              setRegionOptions((prev) => Array.from(new Set([...prev, ...d2.regionOptions])).sort());
+            }
+          })
+          .catch(() => { /* options stay vendor-derived */ });
+      }
     } catch (e: any) {
       setLoadError(String(e?.message || e));
     } finally { setLoading(false); }
   }
   useEffect(() => {
-    // Paint the session snapshot instantly, then refresh in the background.
+    // Paint the last snapshot instantly (localStorage — survives app restarts,
+    // unlike the old per-session copy), then refresh in the background.
     try {
-      const snap = JSON.parse(sessionStorage.getItem(SNAP_KEY) || 'null');
+      const snap = JSON.parse(localStorage.getItem(SNAP_KEY) || 'null');
       if (snap?.vendors?.length) { setVendors(snap.vendors); setRegionOptions(snap.regionOptions || []); setLoading(false); }
     } catch { /* corrupt snapshot */ }
     void load();
@@ -218,7 +233,7 @@ export default function VendorManagement() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setVendors((cur) => cur.filter((x) => x.id !== v.id));
-      try { sessionStorage.removeItem(SNAP_KEY); } catch { /* noop */ }
+      try { localStorage.removeItem(SNAP_KEY); } catch { /* noop */ }
     } catch (e: any) { void dialog.alert(`Delete failed: ${e?.message || e}`); }
     finally { setBusyId(null); }
   }
@@ -231,11 +246,11 @@ export default function VendorManagement() {
     try {
       const r = await fetch('/api/admin/vendors', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim(), email: newEmail.trim(), regionsServiced: joinRegions(newRegions), eligibleForRecurring: newRecurring, afterHoursService: newAfterHours }),
+        body: JSON.stringify({ name: newName.trim(), email: newEmail.trim(), regionsServiced: joinRegions(newRegions), eligibleForRecurring: newRecurring, afterHoursService: newAfterHours, inspectionAccess: newInspAccess }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      setAddOpen(false); setNewName(''); setNewEmail(''); setNewRegions([]); setNewRecurring(true); setNewAfterHours(false);
+      setAddOpen(false); setNewName(''); setNewEmail(''); setNewRegions([]); setNewRecurring(true); setNewAfterHours(false); setNewInspAccess(false);
       await load(true);
     } catch (e: any) { void dialog.alert(`Could not add vendor: ${e?.message || e}`); }
     finally { setAdding(false); }
@@ -330,6 +345,7 @@ export default function VendorManagement() {
               <MultiFilter
                 label="Regions"
                 sheet
+                selectAll
                 options={allRegionOptions.map((r) => ({ value: r, label: r }))}
                 selected={parseRegions(v.regionsServiced)}
                 onChange={(next) => setVendorRegions(v, next)}
@@ -440,13 +456,17 @@ export default function VendorManagement() {
                 </div>
                 <div>
                   <label className="block text-sm font-heading font-semibold text-ink mb-1">Regions Serviced <span className="text-brand">*</span></label>
-                  <MultiFilter label="Regions" options={allRegionOptions.map((r) => ({ value: r, label: r }))} selected={newRegions} onChange={setNewRegions} sheet
+                  <MultiFilter label="Regions" options={allRegionOptions.map((r) => ({ value: r, label: r }))} selected={newRegions} onChange={setNewRegions} sheet selectAll
                     triggerLabel={newRegions.length ? joinRegions(newRegions) : 'Tap To Select Regions'}
                     className="w-full text-left text-[13px] text-gray-700 border border-gray-300 hover:border-brand/50 rounded-lg px-3 py-2.5 bg-white flex items-center justify-between gap-2" />
                 </div>
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm font-heading font-semibold text-ink">Eligible For Recurring</span>
                   <button type="button" onClick={() => setNewRecurring((v) => !v)} className={toggleCls(newRecurring)} aria-pressed={newRecurring}><span className={knobCls(newRecurring)} /></button>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-sm font-heading font-semibold text-ink">Access To Inspections</span>
+                  <button type="button" onClick={() => setNewInspAccess((v) => !v)} className={toggleCls(newInspAccess)} aria-pressed={newInspAccess}><span className={knobCls(newInspAccess)} /></button>
                 </div>
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm font-heading font-semibold text-ink">After-Hours Service</span>

@@ -856,6 +856,30 @@ export async function fetchPropertyCoverage(cap = 6000): Promise<CoverageCatalog
   return data;
 }
 
+// FAST region catalog: when the Property object's `region` property is an
+// enumeration, its option list IS the full region set — one API call instead of
+// the multi-page coverage scan. Returns null when region is a plain text
+// property (caller falls back to fetchPropertyCoverage). Cached per process.
+let _regionEnumCache: { at: number; regions: string[] | null } | null = null;
+export async function fetchRegionEnumOptions(): Promise<string[] | null> {
+  if (_regionEnumCache && Date.now() - _regionEnumCache.at < 60 * 60 * 1000) return _regionEnumCache.regions;
+  const { property: typeId } = typeIds();
+  let regions: string[] | null = null;
+  try {
+    const def = await hubspotFetch(`/crm/v3/properties/${typeId}/region`);
+    if (def?.type === 'enumeration' && Array.isArray(def.options) && def.options.length) {
+      regions = def.options
+        .filter((o: any) => !o.hidden)
+        .map((o: any) => String(o.value || '').trim())
+        .filter(Boolean)
+        .sort();
+      if (!regions || !regions.length) regions = null;
+    }
+  } catch { regions = null; }
+  _regionEnumCache = { at: Date.now(), regions };
+  return regions;
+}
+
 // Property `status` enum options (label + stored value) for the rules-engine
 // enrollment/stop value picker. Cached for the process lifetime (enum is stable).
 let _statusOptsCache: { label: string; value: string }[] | null = null;
@@ -7946,25 +7970,28 @@ async function vendorFlagValueMap(): Promise<Record<string, { yes: string; no: s
 let _flagOptionsEnsured = false;
 export async function ensureVendorFlagOptions(): Promise<void> {
   if (_flagOptionsEnsured) return;
-  const failures: string[] = [];
-  for (const { prop } of VENDOR_FLAG_PROPS) {
+  // All four flag definitions checked CONCURRENTLY — this runs on the admin page
+  // load, and four serial round-trips were a visible chunk of the cold path.
+  const results = await Promise.all(VENDOR_FLAG_PROPS.map(async ({ prop }) => {
     try {
       const d = await hubspotFetch(`/crm/v3/properties/companies/${prop}`).catch(() => null);
-      if (!d || d.type !== 'enumeration' || !Array.isArray(d.options)) continue;   // bool/missing → nothing to add
+      if (!d || d.type !== 'enumeration' || !Array.isArray(d.options)) return null;   // bool/missing → nothing to add
       const has = (fam: string[]) => d.options.some((o: any) =>
         fam.includes(String(o.value ?? '').toLowerCase()) || fam.includes(String(o.label ?? '').toLowerCase()));
       const hasYes = has(['yes', 'true', '1']);
       const hasNo = has(['no', 'false', '0']);
-      if (hasYes && hasNo) continue;
+      if (hasYes && hasNo) return null;
       const options = d.options.map((o: any) => ({ label: o.label, value: o.value, hidden: !!o.hidden, displayOrder: o.displayOrder }));
       if (!hasYes) options.push({ label: 'Yes', value: 'Yes', hidden: false, displayOrder: options.length });
       if (!hasNo) options.push({ label: 'No', value: 'No', hidden: false, displayOrder: options.length });
       await hubspotFetch(`/crm/v3/properties/companies/${prop}`, { method: 'PATCH', body: JSON.stringify({ options }) });
       console.log(`[vendor-admin] added missing Yes/No option(s) to companies.${prop}`);
+      return null;
     } catch (e: any) {
-      failures.push(`${prop}: ${String(e?.message || e)} ${String(e?.detail || '').slice(0, 160)}`);
+      return `${prop}: ${String(e?.message || e)} ${String(e?.detail || '').slice(0, 160)}`;
     }
-  }
+  }));
+  const failures = results.filter((f): f is string => !!f);
   bustVendorFlagDefs();
   if (failures.length) {
     throw new Error(`Could not add the missing No option to: ${failures.join(' · ')} — if this mentions scopes, grant the HubSpot private app crm.schemas.companies.write, or add a "No" option to those Company properties manually.`);

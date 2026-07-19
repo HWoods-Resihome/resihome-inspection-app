@@ -9,7 +9,7 @@ import { useRef, useState } from 'react';
  * CLAMPED to the viewport, so it never runs off-screen on right-side filters.
  * Long option labels scroll horizontally inside the (viewport-capped) menu.
  */
-export function MultiFilter({ label, options, selected, onChange, className, sheet, triggerLabel }: {
+export function MultiFilter({ label, options, selected, onChange, className, sheet, triggerLabel, selectAll }: {
   label: string;
   options: { value: string; label: string }[];
   selected: string[];
@@ -22,6 +22,9 @@ export function MultiFilter({ label, options, selected, onChange, className, she
   /** Override the trigger text (e.g. show the selected values themselves so the
    *  value line IS the tappable control). The sheet header still shows `label`. */
   triggerLabel?: string;
+  /** Show "Select All" / "Clear All" shortcuts above the options — for long
+   *  VALUE pickers (e.g. regions serviced) where bulk selection is common. */
+  selectAll?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
@@ -29,6 +32,15 @@ export function MultiFilter({ label, options, selected, onChange, className, she
   const active = selected.length > 0;
   const toggle = (v: string) => onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
   const summary = triggerLabel ?? (active ? `${label} (${selected.length})` : label);
+  // "Select All" / "Clear All" shortcut row (opt-in via `selectAll`).
+  const bulkRow = (pad: string, text: string) => (
+    <div className={`flex items-center gap-4 ${pad} border-b border-gray-100 shrink-0`}>
+      <button type="button" onClick={() => onChange(options.map((o) => o.value))}
+        className={`${text} font-heading font-semibold text-brand`}>Select All</button>
+      <button type="button" onClick={() => onChange([])} disabled={!active}
+        className={`${text} font-heading font-semibold ${active ? 'text-gray-600' : 'text-gray-300'}`}>Clear All</button>
+    </div>
+  );
   const base = className ??
     `w-full truncate text-[11px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-md bg-white flex items-center justify-between ${active ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`;
 
@@ -46,6 +58,7 @@ export function MultiFilter({ label, options, selected, onChange, className, she
                 <span className="font-heading font-bold text-[14px] text-ink">{label}{active ? ` · ${selected.length}` : ''}</span>
                 <button type="button" onClick={() => setOpen(false)} className="text-sm text-brand font-heading font-semibold px-2 py-1">Done</button>
               </div>
+              {selectAll && options.length > 0 && bulkRow('px-3 py-2', 'text-[13px]')}
               <div className="flex-1 min-h-0 overflow-y-auto py-1">
                 {options.map((o) => {
                   const on = selected.includes(o.value);
@@ -88,6 +101,7 @@ export function MultiFilter({ label, options, selected, onChange, className, she
       {open && (<>
         <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
         <div style={menuStyle} className="z-50 bg-white border border-gray-200 rounded-lg shadow-lg overflow-auto py-1">
+          {selectAll && options.length > 0 && bulkRow('px-3 py-1.5', 'text-[11px]')}
           {options.map((o) => {
             const on = selected.includes(o.value);
             return (

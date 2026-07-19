@@ -14,21 +14,49 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchVendorAdminList, createVendorCompany, updateVendorCompany, fetchPropertyCoverage, ensureInspectionAccessProp, ensureVendorFlagOptions } from '@/lib/hubspot';
+import { fetchVendorAdminList, createVendorCompany, updateVendorCompany, fetchPropertyCoverage, fetchRegionEnumOptions, ensureInspectionAccessProp, ensureVendorFlagOptions } from '@/lib/hubspot';
 import { parseRegions, normalizeRegionsString } from '@/lib/vendorRegions';
 
 export const config = { maxDuration: 60 };
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-// The coverage scan (region options) is heavy and near-static — cache ~15 min.
+// Region OPTION list for the multi-select. Two paths:
+//  • FAST (never blocks the page): the cached list, or the `region` enum
+//    property's option set (a single API call).
+//  • FULL (only via ?only=regions, fetched by the client in the background):
+//    falls back to the multi-page property coverage scan when region isn't an
+//    enum. That scan was what made the page hang on a spinner for 10s+ cold.
 let _regionOptsCache: { at: number; regions: string[] } | null = null;
-async function regionOptionList(): Promise<string[]> {
+async function regionOptionsFast(): Promise<string[] | null> {
   if (_regionOptsCache && Date.now() - _regionOptsCache.at < 15 * 60 * 1000) return _regionOptsCache.regions;
+  const enumOpts = await fetchRegionEnumOptions().catch(() => null);
+  if (enumOpts?.length) { _regionOptsCache = { at: Date.now(), regions: enumOpts }; return enumOpts; }
+  return null;
+}
+async function regionOptionsFull(): Promise<string[]> {
+  const fast = await regionOptionsFast();
+  if (fast) return fast;
   const coverage = await fetchPropertyCoverage().catch(() => null);
   const regions = (coverage?.regions || []).map((r: any) => (typeof r === 'string' ? r : r.key)).filter(Boolean);
   _regionOptsCache = { at: Date.now(), regions };
   return regions;
+}
+
+// Field provisioning (Access To Inspections property + missing Yes/No options on
+// the enum flags) is idempotent but costs HubSpot round-trips — memoize the
+// OUTCOME (success or the error string) for 10 min so repeat page loads don't
+// re-pay it, while a fixed scope still gets noticed within minutes.
+let _provisionMemo: { at: number; error: string | null } | null = null;
+async function ensureProvisioned(): Promise<string | null> {
+  if (_provisionMemo && Date.now() - _provisionMemo.at < 10 * 60 * 1000) return _provisionMemo.error;
+  const [a, b] = await Promise.allSettled([ensureInspectionAccessProp(), ensureVendorFlagOptions()]);
+  const errs: string[] = [];
+  if (a.status === 'rejected') errs.push(String((a.reason as any)?.message || a.reason).slice(0, 400));
+  if (b.status === 'rejected') errs.push(String((b.reason as any)?.message || b.reason).slice(0, 400));
+  const error = errs.length ? errs.join(' · ').slice(0, 600) : null;
+  _provisionMemo = { at: Date.now(), error };
+  return error;
 }
 
 // Lazy DATA REPAIR: any vendor whose stored regions_serviced isn't in canonical
@@ -54,30 +82,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'GET') {
     try {
+      // Background fill for the option list when the fast path had nothing:
+      // the client calls ?only=regions AFTER the page has painted, so the heavy
+      // coverage scan never sits between the admin and their vendor list.
+      if (String(req.query.only || '') === 'regions') {
+        const regions = await regionOptionsFull();
+        return res.status(200).json({ regionOptions: regions.map((r) => parseRegions(r)[0] || r).sort() });
+      }
       const force = String(req.query.refresh || '') === '1';
-      const [rawVendors, coverageRegions] = await Promise.all([
+      // Everything in flight AT ONCE — the list, the fast region options, and
+      // the provisioning checks (which used to run serially after the fetch).
+      const provisionP = ensureProvisioned();
+      const [rawVendors, fastRegions] = await Promise.all([
         fetchVendorAdminList(force),
-        regionOptionList(),
+        regionOptionsFast(),
       ]);
       // Serve NORMALIZED regions (display + option list are clean even before the
       // background repair lands in HubSpot), and kick the repair for any rows
       // whose stored string differs from canonical.
       repairMalformedRegions(rawVendors);
       const vendors = rawVendors.map((v) => ({ ...v, regionsServiced: normalizeRegionsString(v.regionsServiced) }));
-      const optionSet = new Set<string>(coverageRegions.map((r) => parseRegions(r)[0] || r));
+      const optionSet = new Set<string>((fastRegions || []).map((r) => parseRegions(r)[0] || r));
       for (const v of vendors) for (const r of parseRegions(v.regionsServiced)) optionSet.add(r);
       const regionOptions = Array.from(optionSet).sort();
-      // Provision as part of loading the page (idempotent, once per instance):
-      // the Access To Inspections property AND any missing Yes/No options on the
-      // enum flag properties (resiwalk_access shipped with only a "Yes" option,
-      // which made deactivation unwritable). Failures never block the list — the
-      // reason is returned so the UI can explain why a toggle won't stick.
-      let inspectionAccessError: string | null = null;
-      try { await ensureInspectionAccessProp(); }
-      catch (pe: any) { inspectionAccessError = String(pe?.message || pe).slice(0, 400); }
-      try { await ensureVendorFlagOptions(); }
-      catch (pe: any) { inspectionAccessError = `${inspectionAccessError ? `${inspectionAccessError} · ` : ''}${String(pe?.message || pe)}`.slice(0, 600); }
-      return res.status(200).json({ vendors, regionOptions, inspectionAccessError });
+      // Provisioning failures never block the list — the reason is returned so
+      // the UI can explain why a toggle won't stick.
+      const inspectionAccessError = await provisionP;
+      return res.status(200).json({
+        vendors, regionOptions, inspectionAccessError,
+        // No full catalog yet → the client should fetch ?only=regions quietly.
+        regionOptionsPending: fastRegions == null,
+      });
     } catch (e: any) {
       console.error('[admin/vendors] list failed:', e);
       return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
