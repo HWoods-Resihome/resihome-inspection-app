@@ -92,16 +92,29 @@ export async function markMessageRead(token: string, id: string): Promise<void> 
   } catch (e: any) { console.warn('[gmail-read] mark-read failed:', String(e?.message || e).slice(0, 120)); }
 }
 
-/** Strip quoted history from a plain-text email reply, keeping the fresh text. */
+/** Strip quoted history AND the sender's signature from a plain-text email
+ *  reply, keeping only the fresh message text. */
 export function stripQuotedReply(body: string): string {
   const lines = String(body || '').replace(/\r\n/g, '\n').split('\n');
   const out: string[] = [];
+  const hasContent = () => out.some((l) => l.trim());
   for (const line of lines) {
     // Common reply-history markers — everything after them is quoted.
     if (/^\s*On .{5,200} wrote:\s*$/.test(line)) break;
     if (/^\s*-{2,}\s*Original Message\s*-{2,}/i.test(line)) break;
-    if (/^\s*From:\s.+@.+/i.test(line) && out.length > 0) break;
+    if (/^\s*From:\s.+@.+/i.test(line) && hasContent()) break;
     if (/^\s*>/.test(line)) continue;                 // inline-quoted line
+    // Signature markers — everything after them is the sig block.
+    if (/^\s*--\s*$/.test(line)) break;                        // RFC sig delimiter
+    if (/^\s*_{3,}\s*$/.test(line)) break;                     // Outlook-style rule
+    if (/^\s*(Sent from|Sent via|Get Outlook)/i.test(line)) break;   // mobile-client sigs
+    if (hasContent()) {
+      // A bare sign-off line ("Thanks," / "Best regards") — the sig follows.
+      if (/^\s*(thanks|thank you|many thanks|best|best regards|kind regards|regards|sincerely|cheers)\s*[,.!]?\s*$/i.test(line)) break;
+      // Gmail plain-text renders a bold signature name as "*Hayden Woods, CFA*"
+      // — a full line wrapped in asterisks starts the sig block.
+      if (/^\s*\*[^*].{0,80}\*+\s*$/.test(line)) break;
+    }
     out.push(line);
   }
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();

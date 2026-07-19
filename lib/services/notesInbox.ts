@@ -12,7 +12,7 @@
 import { listUnreadInbox, getInboundMessage, markMessageRead, stripQuotedReply } from '@/lib/gmailRead';
 import { parseServiceNoteToken, notifyServiceNote } from '@/lib/notifications/serviceNote';
 import { addServiceNote, clipNoteText, serviceLabelFor } from '@/lib/services/serviceNotes';
-import { fetchServiceWorkOrder } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, fetchActiveUsers } from '@/lib/hubspot';
 import { isInternalEmail } from '@/lib/userAccess';
 
 export interface SweepResult { ok: boolean; ingested: number; skipped: number; reason?: string }
@@ -55,12 +55,20 @@ export async function sweepNotesInbox(opts: { serviceId?: string; max?: number; 
         vendorEmail && msg.fromEmail === vendorEmail ? 'vendor'
           : isInternalEmail(msg.fromEmail) ? 'internal'
             : 'other';
+      // Display name: vendor → company name; internal → their user record's
+      // full name (cached lookup); anyone else → the bare email address.
+      let byName = msg.fromEmail;
+      if (role === 'vendor') byName = String(p.vendor_name || '').trim() || msg.fromEmail;
+      else if (role === 'internal') {
+        const u = (await fetchActiveUsers().catch(() => [])).find((x: any) => String(x.email || '').toLowerCase() === msg.fromEmail);
+        if (u?.fullName) byName = u.fullName;
+      }
 
       try {
         const note = await addServiceNote({
           serviceId,
           byEmail: msg.fromEmail,
-          byName: role === 'vendor' ? (String(p.vendor_name || '').trim() || msg.fromEmail) : msg.fromEmail,
+          byName,
           role,
           source: 'email',
           text,

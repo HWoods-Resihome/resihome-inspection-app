@@ -147,7 +147,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       }
     }
   }
-  return { props: { svc, form, isInternal, unlock, propMeta, asVendor, isVendor: !!session?.vendor } };
+  return { props: { svc, form, isInternal, unlock, propMeta, asVendor, isVendor: !!session?.vendor, viewerEmail: session?.email || '' } };
 };
 
 const money = (n: number | null | undefined) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -643,7 +643,7 @@ const GRASS_TIER_FILL: Record<'emerald' | 'amber' | 'rose', string> = {
 const photoGuidance = (_worktype: string, _subtype: string): string =>
   'Show photo evidence of the full service performed.';
 
-export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta, asVendor, isVendor }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null; asVendor: boolean; isVendor: boolean }) {
+export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta, asVendor, isVendor, viewerEmail }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null; asVendor: boolean; isVendor: boolean; viewerEmail?: string }) {
   const router = useRouter();
   // Bid items are never crew-completed here — they go straight to internal bid review.
   const editable = EDITABLE.has(svc.status) && !svc.isBidItem;
@@ -1427,7 +1427,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
                 {/* Vendor ↔ ResiHome note thread — above the submit block. Each note
                     is emailed to the other party; replying to the email posts back. */}
-                <ServiceNotesThread serviceId={svc.id} viewerRole={isInternal ? 'internal' : 'vendor'} />
+                <ServiceNotesThread serviceId={svc.id} viewerRole={isInternal ? 'internal' : 'vendor'} viewerEmail={viewerEmail} />
 
                 <button type="button" disabled={!ready} onClick={submit}
                   className={`w-full rounded-2xl py-3.5 font-heading font-bold text-sm ${ready ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
@@ -1491,7 +1491,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 {costDetail}
 
                 {/* Note thread — above the review/completion decision sections. */}
-                <ServiceNotesThread serviceId={svc.id} viewerRole={isInternal ? 'internal' : 'vendor'} />
+                <ServiceNotesThread serviceId={svc.id} viewerRole={isInternal ? 'internal' : 'vendor'} viewerEmail={viewerEmail} />
 
                 {canBidReview && (
                   <DecisionPanel kind="bid" orig={{ vendor: origCost, markup: markupPct, client: origClient }} busy={deciding} error={error} onSubmit={submitBid} />

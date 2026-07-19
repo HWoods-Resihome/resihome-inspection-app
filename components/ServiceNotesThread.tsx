@@ -12,10 +12,29 @@ function fmtWhen(iso: string): string {
   return `${d.getMonth() + 1}-${d.getDate()}-${String(d.getFullYear()).slice(-2)} ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
 
-export function ServiceNotesThread({ serviceId, viewerRole }: {
+// Stable per-person bubble color for OTHER participants (own notes are always
+// brand pink on the right). Hash of the sender email picks from light hues so
+// each voice in the thread reads distinctly.
+const SENDER_PALETTE = [
+  'bg-sky-50 border-sky-200',
+  'bg-emerald-50 border-emerald-200',
+  'bg-amber-50 border-amber-200',
+  'bg-violet-50 border-violet-200',
+  'bg-teal-50 border-teal-200',
+  'bg-orange-50 border-orange-200',
+];
+function senderColor(email: string): string {
+  let h = 0;
+  for (const c of email) h = ((h * 31) + c.charCodeAt(0)) >>> 0;
+  return SENDER_PALETTE[h % SENDER_PALETTE.length];
+}
+
+export function ServiceNotesThread({ serviceId, viewerRole, viewerEmail }: {
   serviceId: string;
   /** Which side the CURRENT viewer is on — their bubbles right-align. */
   viewerRole: 'vendor' | 'internal';
+  /** The viewer's email — "my" bubbles are the ones I wrote (not just my side). */
+  viewerEmail?: string;
 }) {
   const [notes, setNotes] = useState<ServiceNote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,10 +102,13 @@ export function ServiceNotesThread({ serviceId, viewerRole }: {
         ) : notes.length === 0 ? (
           <p className="text-sm text-gray-400 text-center py-3">No notes yet — start the conversation below.</p>
         ) : notes.map((n) => {
-          const mine = n.role === viewerRole;
+          // MY notes (the exact address I write from) go right in brand pink;
+          // every other participant goes left, each with their own stable hue.
+          const me = (viewerEmail || '').trim().toLowerCase();
+          const mine = me ? n.byEmail === me : n.role === viewerRole;
           return (
             <div key={n.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] rounded-2xl px-3 py-2 ${mine ? 'bg-brand/10 border border-brand/20' : 'bg-gray-100 border border-gray-200'}`}>
+              <div className={`max-w-[85%] rounded-2xl px-3 py-2 border ${mine ? 'bg-brand/10 border-brand/20' : senderColor(n.byEmail)}`}>
                 <div className="text-[11px] text-gray-500 mb-0.5">
                   <span className="font-heading font-semibold text-gray-700">{n.byName}</span>
                   {' · '}{fmtWhen(n.at)}{n.source === 'email' ? ' · via email' : ''}
