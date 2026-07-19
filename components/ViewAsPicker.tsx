@@ -45,7 +45,9 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
   const pick = async (r: Row) => {
     setBusy(`${r.kind}:${r.email || r.name}`);
     if (r.kind === 'vendor') {
-      setViewAsVendor(true);
+      // Carry the PICKED vendor's email so the preview scopes to that company's
+      // services (not just the first approved vendor).
+      setViewAsVendor(true, r.email);
       window.location.href = '/services';
       return;
     }

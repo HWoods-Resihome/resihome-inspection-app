@@ -5,7 +5,7 @@
  * helpers (serviceVisibleTo / scopeServices / ServiceViewer) stay in scope.ts.
  */
 import { isInternalEmail } from '@/lib/userAccess';
-import { isViewingAsVendor } from '@/lib/services/viewAs';
+import { isViewingAsVendor, viewAsVendorEmail } from '@/lib/services/viewAs';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { findVendorForAuth, fetchApprovedVendorCompanies } from '@/lib/hubspot';
 import type { ServiceViewer } from '@/lib/services/scope';
@@ -33,9 +33,15 @@ export async function resolveServiceViewerAsync(session: { email?: string | null
   if (internal && !previewing) return { canSeeAll: true, vendorEmail: null, vendorName: null };
   const vendor = await findVendorForAuth(email).catch(() => null);
   if (vendor) return { canSeeAll: false, vendorEmail: vendor.email, vendorName: vendor.name };
-  // Internal user previewing "as vendor" with no real vendor identity → scope to
-  // the first approved company so the preview is concrete and correctly limited.
+  // Internal user previewing "as vendor": scope to the vendor they PICKED in the
+  // View As picker (cookie carries the email); fall back to the first approved
+  // company only when no specific pick exists (legacy boolean-only cookie).
   if (previewing) {
+    const picked = viewAsVendorEmail(req);
+    if (picked) {
+      const pv = await findVendorForAuth(picked).catch(() => null);
+      if (pv) return { canSeeAll: false, vendorEmail: pv.email, vendorName: pv.name };
+    }
     const list = await fetchApprovedVendorCompanies().catch(() => []);
     const v = list[0];
     return { canSeeAll: false, vendorEmail: v?.email || null, vendorName: v?.name || null };
