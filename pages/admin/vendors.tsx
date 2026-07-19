@@ -69,6 +69,10 @@ export default function VendorManagement() {
   // Section + card expansion.
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ recurring: true, maintenance: true, deactivated: false });
   const [openCards, setOpenCards] = useState<Set<string>>(new Set());
+  // While a card is EXPANDED it stays PINNED to the section it was in when opened
+  // — toggling status/recurring must not yank it into another section mid-edit.
+  // Collapsing the card (or reloading the page) releases the pin and it regroups.
+  const [pinnedSection, setPinnedSection] = useState<Record<string, string>>({});
 
   // Add form.
   const [addOpen, setAddOpen] = useState(false);
@@ -134,11 +138,17 @@ export default function VendorManagement() {
     });
   }, [vendors, search, regionFilter, recurringFilter, statusFilter, sortField, sortDir]);
 
-  const sections = useMemo(() => ([
-    { key: 'recurring', title: 'Recurring Vendors', rows: visible.filter((v) => v.resiwalkAccess && v.eligibleForRecurring) },
-    { key: 'maintenance', title: 'Maintenance Vendors', rows: visible.filter((v) => v.resiwalkAccess && !v.eligibleForRecurring) },
-    { key: 'deactivated', title: 'Deactivated Vendors', rows: visible.filter((v) => !v.resiwalkAccess) },
-  ]), [visible]);
+  const sectionKeyOf = (v: VendorRow) => (!v.resiwalkAccess ? 'deactivated' : v.eligibleForRecurring ? 'recurring' : 'maintenance');
+  const sections = useMemo(() => {
+    // An expanded (pinned) card stays where it was opened, even if its flags
+    // changed — it regroups when collapsed.
+    const groupOf = (v: VendorRow) => pinnedSection[v.id] || sectionKeyOf(v);
+    return [
+      { key: 'recurring', title: 'Recurring Vendors', rows: visible.filter((v) => groupOf(v) === 'recurring') },
+      { key: 'maintenance', title: 'Maintenance Vendors', rows: visible.filter((v) => groupOf(v) === 'maintenance') },
+      { key: 'deactivated', title: 'Deactivated Vendors', rows: visible.filter((v) => groupOf(v) === 'deactivated') },
+    ];
+  }, [visible, pinnedSection]);
 
   const activeFilterCount = regionFilter.length + recurringFilter.length + statusFilter.length;
 
@@ -243,7 +253,23 @@ export default function VendorManagement() {
     if (ok) setEditId(null);
   }
 
-  const toggleCard = (id: string) => setOpenCards((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleCard = (id: string) => {
+    setOpenCards((cur) => {
+      const n = new Set(cur);
+      if (n.has(id)) {
+        n.delete(id);
+        // Collapsing releases the pin → the card regroups into its true section.
+        setPinnedSection((p) => { const { [id]: _gone, ...rest } = p; return rest; });
+      } else {
+        n.add(id);
+        // Expanding pins the card to its CURRENT section so mid-edit flag changes
+        // don't yank it away while you're still working on it.
+        const v = vendors.find((x) => x.id === id);
+        if (v) setPinnedSection((p) => ({ ...p, [id]: sectionKeyOf(v) }));
+      }
+      return n;
+    });
+  };
 
   const inputCls = 'focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white';
   const toggleCls = (on: boolean) => `relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-brand' : 'bg-gray-300'}`;
@@ -346,7 +372,7 @@ export default function VendorManagement() {
         <div className="max-w-3xl mx-auto px-4 pt-4">
           {inspPropError && (
             <div className="mb-3 rounded-xl bg-amber-50 border border-amber-300 px-3 py-2.5 text-[13px] text-amber-900">
-              <span className="font-heading font-bold">Access To Inspections is unavailable: </span>{inspPropError}
+              <span className="font-heading font-bold">Vendor field provisioning: </span>{inspPropError}
             </div>
           )}
           {/* Search · Filters · Sort · Add — mirrors the inspections home row. */}

@@ -7899,6 +7899,40 @@ async function vendorFlagValueMap(): Promise<Record<string, { yes: string; no: s
   _vendorFlagDefs = { at: Date.now(), map };
   return map;
 }
+/** Provision missing Yes/No OPTIONS on the enumeration flag properties. The
+ *  portal's resiwalk_access (and friends) were created with a single "Yes"
+ *  option, so "No" was unwritable — deactivation could never land. Appends the
+ *  missing option(s) to each enum flag's definition (preserving existing
+ *  options), once per instance. Throws a descriptive error on failure. */
+let _flagOptionsEnsured = false;
+export async function ensureVendorFlagOptions(): Promise<void> {
+  if (_flagOptionsEnsured) return;
+  const failures: string[] = [];
+  for (const { prop } of VENDOR_FLAG_PROPS) {
+    try {
+      const d = await hubspotFetch(`/crm/v3/properties/companies/${prop}`).catch(() => null);
+      if (!d || d.type !== 'enumeration' || !Array.isArray(d.options)) continue;   // bool/missing → nothing to add
+      const has = (fam: string[]) => d.options.some((o: any) =>
+        fam.includes(String(o.value ?? '').toLowerCase()) || fam.includes(String(o.label ?? '').toLowerCase()));
+      const hasYes = has(['yes', 'true', '1']);
+      const hasNo = has(['no', 'false', '0']);
+      if (hasYes && hasNo) continue;
+      const options = d.options.map((o: any) => ({ label: o.label, value: o.value, hidden: !!o.hidden, displayOrder: o.displayOrder }));
+      if (!hasYes) options.push({ label: 'Yes', value: 'Yes', hidden: false, displayOrder: options.length });
+      if (!hasNo) options.push({ label: 'No', value: 'No', hidden: false, displayOrder: options.length });
+      await hubspotFetch(`/crm/v3/properties/companies/${prop}`, { method: 'PATCH', body: JSON.stringify({ options }) });
+      console.log(`[vendor-admin] added missing Yes/No option(s) to companies.${prop}`);
+    } catch (e: any) {
+      failures.push(`${prop}: ${String(e?.message || e)} ${String(e?.detail || '').slice(0, 160)}`);
+    }
+  }
+  bustVendorFlagDefs();
+  if (failures.length) {
+    throw new Error(`Could not add the missing No option to: ${failures.join(' · ')} — if this mentions scopes, grant the HubSpot private app crm.schemas.companies.write, or add a "No" option to those Company properties manually.`);
+  }
+  _flagOptionsEnsured = true;
+}
+
 function vendorPropsFor(patch: VendorWritePatch, flagMap: Record<string, { yes: string; no: string }>): Record<string, string> {
   const props: Record<string, string> = {};
   if (patch.name != null) props.name = patch.name.trim();
