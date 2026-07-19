@@ -7,14 +7,13 @@
 import { sendNotificationEmail, appBaseUrl } from '@/lib/notifications/send';
 
 export async function sendVendorWelcomeEmail(
-  v: { name: string; email: string; regionsServiced?: string | null },
+  v: { name: string; email: string },
   req?: { headers: Record<string, any> } | null,
 ): Promise<{ sent: boolean; error?: string }> {
   const rows: Array<[string, string]> = [
     ['Company', v.name],
     ['Sign-in Email', v.email],
   ];
-  if (v.regionsServiced) rows.push(['Regions Serviced', v.regionsServiced]);
   return sendNotificationEmail({
     to: v.email,
     subject: 'Welcome to ResiWalk — your vendor account is ready',

@@ -78,9 +78,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const row = list.find((v) => v.id === id);
       const name = row?.name || String(req.body?.name || '').trim();
       const email = (row?.email || String(req.body?.email || '')).trim().toLowerCase();
-      const regionsServiced = row?.regionsServiced ?? String(req.body?.regionsServiced || '');
       if (!name || !EMAIL_RE.test(email)) return res.status(400).json({ error: 'Vendor name/email not found.' });
-      const w = await sendVendorWelcomeEmail({ name, email, regionsServiced }, req);
+      const w = await sendVendorWelcomeEmail({ name, email }, req);
       if (!w.sent) return res.status(502).json({ error: w.error === 'system_email_not_configured' ? 'System email is not configured (SYSTEM_GMAIL_*).' : `Email failed: ${w.error || 'unknown'}` });
       return res.status(200).json({ ok: true });
     } catch (e: any) {

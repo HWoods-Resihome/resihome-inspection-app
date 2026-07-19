@@ -146,7 +146,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Best-effort: a mail failure must not fail the create.
       let welcomeSent = false;
       if (eligibleForRecurring) {
-        const w = await sendVendorWelcomeEmail({ name, email, regionsServiced }, req).catch(() => ({ sent: false }));
+        const w = await sendVendorWelcomeEmail({ name, email }, req).catch(() => ({ sent: false }));
         welcomeSent = w.sent;
       }
       return res.status(200).json({ ok: true, id, welcomeSent });
