@@ -25,6 +25,9 @@ import { parse, serialize } from 'cookie';
 
 const LOGIN_STATE_COOKIE = 'resihome_login_oauth_state';
 const CONNECT_STATE_COOKIE = 'resihome_gmail_oauth_state';
+// (C) SYSTEM-MAILBOX MINT flow — admin re-minting SYSTEM_GMAIL_REFRESH_TOKEN
+// with send+modify scopes (see /api/admin/system-gmail-connect).
+const SYSTEM_STATE_COOKIE = 'resihome_sysgmail_oauth_state';
 
 function clearCookie(name: string): string {
   return serialize(name, '', {
@@ -48,6 +51,50 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const code = typeof req.query.code === 'string' ? req.query.code : '';
   const state = typeof req.query.state === 'string' ? req.query.state : '';
+
+  // ---------------------------------------------------------------
+  // (C) SYSTEM-MAILBOX MINT flow — matched FIRST by exact state match with its
+  // own cookie (so a stale login/connect cookie can't misroute it). Shows the
+  // fresh refresh token to the app admin who started the flow; stores nothing.
+  // ---------------------------------------------------------------
+  if (cookies[SYSTEM_STATE_COOKIE] && state && state === cookies[SYSTEM_STATE_COOKIE]) {
+    res.setHeader('Set-Cookie', clearCookie(SYSTEM_STATE_COOKIE));
+    const { getSessionFromRequest: getSess } = await import('@/lib/auth');
+    const { isAppAdmin } = await import('@/lib/adminAccess');
+    const sess = await getSess(req).catch(() => null);
+    if (!sess?.email || !(await isAppAdmin(sess.realEmail || sess.email).catch(() => false))) {
+      return res.status(403).send('Admin only.');
+    }
+    if (req.query.error) return res.status(400).send(`Google returned: ${String(req.query.error)}`);
+    if (!code) return res.status(400).send('Missing authorization code.');
+    try {
+      const r = await exchangeCodeForRefreshToken(cfg, code);
+      const grantedEmail = r.idToken ? emailFromIdToken(r.idToken) : null;
+      if (!r.refreshToken) return res.status(400).send('Google did not return a refresh token — retry the flow (it forces prompt=consent, so this is usually a mid-flow cancel).');
+      const sysFrom = (process.env.SYSTEM_GMAIL_FROM || '').toLowerCase();
+      const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const mismatch = sysFrom && grantedEmail && grantedEmail !== sysFrom
+        ? `<p style="color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;"><b>Heads up:</b> you authorized <b>${esc(grantedEmail)}</b>, but SYSTEM_GMAIL_FROM is <b>${esc(sysFrom)}</b>. Either redo this signed into ${esc(sysFrom)}, or also update SYSTEM_GMAIL_FROM to ${esc(grantedEmail)}.</p>`
+        : '';
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.status(200).send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<body style="font-family:system-ui;max-width:640px;margin:32px auto;padding:0 16px;color:#1a1a1a;">
+  <h2 style="color:#ff0060;">System mailbox reconnected</h2>
+  <p>Google granted <b>send + read (gmail.modify)</b> for <b>${esc(grantedEmail || 'the authorized account')}</b>. Finish with two steps:</p>
+  <ol style="line-height:1.7;">
+    <li>In <b>Vercel → Project → Settings → Environment Variables</b>, replace <code>SYSTEM_GMAIL_REFRESH_TOKEN</code> with the value below.</li>
+    <li><b>Redeploy</b> (or push any commit) so the new value takes effect.</li>
+  </ol>
+  ${mismatch}
+  <p style="margin-top:14px;"><b>New refresh token</b> (shown once — treat it like a password):</p>
+  <textarea readonly onclick="this.select()" style="width:100%;height:90px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d1d5db;border-radius:8px;">${esc(r.refreshToken)}</textarea>
+  <p style="color:#6b7280;font-size:13px;">Reply-by-email sync starts working on the next deploy after the env var is updated. This page stored nothing.</p>
+</body>`);
+    } catch (e: any) {
+      console.error('[sysgmail callback] exchange failed:', e);
+      return res.status(500).send('Token exchange failed — check the server logs and retry.');
+    }
+  }
 
   // ---------------------------------------------------------------
   // (A) LOGIN flow — the auth gate

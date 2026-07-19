@@ -115,7 +115,10 @@ export function ServiceNotesThread({ serviceId, viewerRole }: {
         </div>
         <p className="text-[11px] text-gray-400 mt-1.5">The other side is emailed each note — they can reply right from the email.</p>
         {viewerRole === 'internal' && inboxError && (
-          <p className="text-[11px] text-amber-600 mt-1">Reply-by-email sync is paused: {inboxError}</p>
+          <p className="text-[11px] text-amber-600 mt-1">
+            Reply-by-email sync is paused: {inboxError}{' '}
+            <a href="/api/admin/system-gmail-connect" className="underline font-heading font-semibold">Reconnect the system mailbox</a>
+          </p>
         )}
       </div>
       </>)}
