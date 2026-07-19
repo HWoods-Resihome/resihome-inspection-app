@@ -8,7 +8,8 @@ export type NotificationKey =
   | 'inspection_completed'
   | 'service_assigned'
   | 'service_completed'
-  | 'service_past_due';
+  | 'service_past_due'
+  | 'service_note';
 
 export interface NotificationDef {
   key: NotificationKey;
@@ -26,6 +27,8 @@ export const NOTIFICATIONS: NotificationDef[] = [
     description: 'Email me the completion report (PDF attached) when one of my services is completed.' },
   { key: 'service_past_due', object: 'services', label: 'Service Past Due',
     description: 'Email me when one of my assigned services is past due and still needs completion.' },
+  { key: 'service_note', object: 'services', label: 'Service Notes',
+    description: 'Email me when a note is added to a service work order I\'m involved with — reply to the email to answer in the thread.' },
 ];
 
 export const NOTIFICATION_KEYS: NotificationKey[] = NOTIFICATIONS.map((n) => n.key);

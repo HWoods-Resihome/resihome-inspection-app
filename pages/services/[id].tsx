@@ -22,6 +22,7 @@ import { FitText } from '@/components/FitText';
 import ServicePager from '@/components/ServicePager';
 import { AiSparkle } from '@/components/AiSparkle';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
+import { ServiceNotesThread } from '@/components/ServiceNotesThread';
 import { DatePicker } from '@/components/DatePicker';
 import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync, toDurableRef, rehydrateRef } from '@/lib/services/offlineServices';
 
@@ -1512,6 +1513,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             )}
           </SectionCollapseCtx.Provider>
         )}
+
+        {/* Vendor ↔ ResiHome note thread — both sides, every status. Each note
+            is emailed to the other party; replying to the email posts back here. */}
+        <ServiceNotesThread serviceId={svc.id} viewerRole={isInternal ? 'internal' : 'vendor'} />
       </main>
 
       {lightbox && gallery.groups.length > 0 && (
