@@ -7,7 +7,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createSessionCookie, verifyOtp, readOtpToken, clearOtpCookie, readReturnTo, clearReturnToCookie, isSafeReturnPath, type SessionUser } from '@/lib/auth';
-import { findApprovedVendorByEmail, setVendorPasswordHash } from '@/lib/hubspot';
+import { findVendorForAuth, setVendorPasswordHash } from '@/lib/hubspot';
 import { hashVendorPassword, vendorPasswordError } from '@/lib/vendorPassword';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -19,7 +19,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!email || !code) return res.status(400).json({ error: 'Email and code are required.' });
 
   let vendor;
-  try { vendor = await findApprovedVendorByEmail(email); }
+  try { vendor = await findVendorForAuth(email); }
   catch { return res.status(500).json({ error: 'Reset is temporarily unavailable. Please try again.' }); }
   if (!vendor) return res.status(401).json({ error: 'This email is not set up for ResiWalk access.' });
 
@@ -36,7 +36,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try { await setVendorPasswordHash(vendor.id, hashVendorPassword(password)); }
   catch { return res.status(500).json({ error: 'Could not save your new password. Please try again.' }); }
 
-  const user: SessionUser = { userId: `vendor:${vendor.id}`, email: vendor.email, name: vendor.name, vendor: true };
+  const user: SessionUser = { userId: `vendor:${vendor.id}`, email: vendor.email, name: vendor.name, vendor: true, vendorInspections: vendor.inspectionAccess };
   const rawReturn = readReturnTo(req);
   const redirect = isSafeReturnPath(rawReturn) && rawReturn.startsWith('/services') ? rawReturn : '/services';
   res.setHeader('Set-Cookie', [await createSessionCookie(user), clearOtpCookie(), clearReturnToCookie()]);

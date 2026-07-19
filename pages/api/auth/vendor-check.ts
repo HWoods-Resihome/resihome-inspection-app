@@ -7,7 +7,7 @@
  * Reveals nothing sensitive; a generic {approved:false} for anything else.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { findApprovedVendorByEmail } from '@/lib/hubspot';
+import { findVendorForAuth } from '@/lib/hubspot';
 import { enforceRateLimit } from '@/lib/rateLimit';
 
 function clientIp(req: NextApiRequest): string {
@@ -22,7 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const email = String(req.body?.email || '').trim().toLowerCase();
   if (!email) return res.status(400).json({ error: 'Email required' });
   try {
-    const vendor = await findApprovedVendorByEmail(email);
+    const vendor = await findVendorForAuth(email);
     if (!vendor) return res.status(200).json({ approved: false });
     return res.status(200).json({ approved: true, hasPassword: vendor.hasPassword, name: vendor.name });
   } catch (e: any) {

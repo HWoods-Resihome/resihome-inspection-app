@@ -92,6 +92,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         name, email, regionsServiced,
         eligibleForRecurring: b.eligibleForRecurring !== false,   // default Yes
         afterHoursService: b.afterHoursService === true,
+        inspectionAccess: b.inspectionAccess === true,            // default No
       });
       return res.status(200).json({ ok: true, id });
     } catch (e: any) {

@@ -14,7 +14,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createSessionCookie, readReturnTo, clearReturnToCookie, isSafeReturnPath, type SessionUser } from '@/lib/auth';
-import { findApprovedVendorByEmail } from '@/lib/hubspot';
+import { findVendorForAuth } from '@/lib/hubspot';
 import { verifyVendorPassword } from '@/lib/vendorPassword';
 import { enforceRateLimit } from '@/lib/rateLimit';
 
@@ -40,7 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (enforceRateLimit(res, { key: email, route: 'vendor-login-email', max: 10, windowMs: 15 * 60_000 })) return;
 
   let vendor;
-  try { vendor = await findApprovedVendorByEmail(email); }
+  try { vendor = await findVendorForAuth(email); }
   catch { return res.status(500).json({ error: 'Sign-in is temporarily unavailable. Please try again.' }); }
   // Same generic failure whether the email is unknown or not approved — don't
   // reveal which companies have access.
@@ -58,6 +58,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     email: vendor.email,     // the company's notification email = the vendor identity
     name: vendor.name,
     vendor: true,
+    vendorInspections: vendor.inspectionAccess,
   };
   const rawReturn = readReturnTo(req);
   // A vendor may only land inside /services.

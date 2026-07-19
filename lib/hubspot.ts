@@ -7707,7 +7707,7 @@ export async function fetchApprovedVendorCompanies(force = false): Promise<Vendo
 
 /** Drop the vendor caches — call after ANY vendor company write so access
  *  changes (deactivate/delete) take effect immediately on this instance. */
-export function bustVendorCompaniesCache(): void { _vendorCompanies = null; _vendorAdminCache = null; }
+export function bustVendorCompaniesCache(): void { _vendorCompanies = null; _vendorAdminCache = null; _vendorAuthCache.clear(); }
 
 // ── Vendor Management (admin) — full CRUD over vendor Companies ──────────────
 // The app is the primary UI for vendor onboarding/access (replacing hand-editing
@@ -7722,13 +7722,33 @@ export interface VendorAdminRow {
   resiwalkAccess: boolean;
   eligibleForRecurring: boolean;
   afterHoursService: boolean;
+  inspectionAccess: boolean;        // may sign in to the Inspections app (all types, own work)
   hasPassword: boolean;             // has set their ResiWalk login password
 }
 
-const VENDOR_ADMIN_PROPS = ['name', 'email', 'regions_serviced', 'resiwalk_access', 'eligible_for_recurring', 'after_hours_service', 'resiwalk_password'];
+const VENDOR_ADMIN_PROPS = ['name', 'email', 'regions_serviced', 'resiwalk_access', 'eligible_for_recurring', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_password'];
 // Properties that may not exist in a portal — dropped (with a warning) instead of
 // failing the whole list, mirroring the resiwalk_password fallback above.
-const VENDOR_ADMIN_OPTIONAL = ['regions_serviced', 'after_hours_service', 'resiwalk_password'];
+const VENDOR_ADMIN_OPTIONAL = ['regions_serviced', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_password'];
+
+/** Auto-provision the resiwalk_inspection_access Company property the first time
+ *  a write needs it (bool checkbox, Yes/No — same shape the provisioner uses). */
+async function ensureInspectionAccessProp(): Promise<void> {
+  await hubspotFetch(`/crm/v3/properties/companies`, {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'resiwalk_inspection_access',
+      label: 'ResiWalk Inspection Access',
+      type: 'bool',
+      fieldType: 'booleancheckbox',
+      groupName: 'companyinformation',
+      options: [{ label: 'Yes', value: 'true' }, { label: 'No', value: 'false' }],
+    }),
+  }).catch((e: any) => {
+    // 409 = already exists (raced another instance) — fine.
+    if (!/409|already exists|PROPERTY_EXISTS/i.test(`${e?.message || ''} ${e?.detail || ''}`)) throw e;
+  });
+}
 // Explicit "No" encodings — a company whose resiwalk_access is SET to a negative
 // value is a DEACTIVATED vendor (shown for reactivation). Companies with the
 // property unset are ordinary companies and never appear here.
@@ -7783,6 +7803,7 @@ export async function fetchVendorAdminList(force = false): Promise<VendorAdminRo
         resiwalkAccess: vendorTruthy(raw),
         eligibleForRecurring: vendorTruthy(p.eligible_for_recurring),
         afterHoursService: vendorTruthy(p.after_hours_service),
+        inspectionAccess: vendorTruthy(p.resiwalk_inspection_access),
         hasPassword: isVendorPasswordSet(p.resiwalk_password),
       });
     }
@@ -7799,6 +7820,7 @@ export interface VendorWritePatch {
   resiwalkAccess?: boolean;
   eligibleForRecurring?: boolean;
   afterHoursService?: boolean;
+  inspectionAccess?: boolean;
 }
 
 // The Yes/No flags may be booleancheckbox ('true') OR a Yes/No enum ('Yes')
@@ -7813,30 +7835,41 @@ function vendorPropsFor(patch: VendorWritePatch, pick: 0 | 1): Record<string, st
   if (patch.resiwalkAccess != null) props.resiwalk_access = vendorFlagCandidates(patch.resiwalkAccess)[pick];
   if (patch.eligibleForRecurring != null) props.eligible_for_recurring = vendorFlagCandidates(patch.eligibleForRecurring)[pick];
   if (patch.afterHoursService != null) props.after_hours_service = vendorFlagCandidates(patch.afterHoursService)[pick];
+  if (patch.inspectionAccess != null) props.resiwalk_inspection_access = vendorFlagCandidates(patch.inspectionAccess)[pick];
   return props;
 }
 const isFlagFormatError = (e: any) => /not one of|invalid.*option|VALIDATION|was not valid|must be.*(true|false)/i.test(`${e?.message || ''} ${e?.detail || ''}`);
 
+// One write attempt with the two flag encodings + auto-provisioning of the
+// inspection-access property the first time it's needed.
+async function vendorWrite(url: string, method: 'POST' | 'PATCH', patch: VendorWritePatch): Promise<any> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    for (const pick of [0, 1] as const) {
+      try {
+        return await hubspotFetch(url, { method, body: JSON.stringify({ properties: vendorPropsFor(patch, pick) }) });
+      } catch (e: any) {
+        if (patch.inspectionAccess != null && isMissingPropertyError(e, 'resiwalk_inspection_access')) {
+          await ensureInspectionAccessProp();
+          break;   // property now exists → restart the encoding attempts
+        }
+        if (pick === 0 && isFlagFormatError(e)) continue;   // retry alternate encoding
+        throw e;
+      }
+    }
+  }
+  throw new Error('vendor write failed after property provisioning retries');
+}
+
 /** Create a vendor Company in HubSpot (ResiWalk access ON unless specified). */
 export async function createVendorCompany(patch: VendorWritePatch): Promise<string> {
-  const full: VendorWritePatch = { resiwalkAccess: true, ...patch };
-  let resp;
-  try { resp = await hubspotFetch(`/crm/v3/objects/companies`, { method: 'POST', body: JSON.stringify({ properties: vendorPropsFor(full, 0) }) }); }
-  catch (e: any) {
-    if (!isFlagFormatError(e)) throw e;
-    resp = await hubspotFetch(`/crm/v3/objects/companies`, { method: 'POST', body: JSON.stringify({ properties: vendorPropsFor(full, 1) }) });
-  }
+  const resp = await vendorWrite(`/crm/v3/objects/companies`, 'POST', { resiwalkAccess: true, ...patch });
   bustVendorCompaniesCache();
   return String(resp?.id || '');
 }
 
 /** Patch a vendor Company (name/email/regions/flags). Access-off = revoke. */
 export async function updateVendorCompany(id: string, patch: VendorWritePatch): Promise<void> {
-  try { await hubspotFetch(`/crm/v3/objects/companies/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: vendorPropsFor(patch, 0) }) }); }
-  catch (e: any) {
-    if (!isFlagFormatError(e)) throw e;
-    await hubspotFetch(`/crm/v3/objects/companies/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: vendorPropsFor(patch, 1) }) });
-  }
+  await vendorWrite(`/crm/v3/objects/companies/${id}`, 'PATCH', patch);
   bustVendorCompaniesCache();
 }
 
@@ -7853,6 +7886,60 @@ export async function findApprovedVendorByEmail(email: string | null | undefined
   if (!e) return null;
   const list = await fetchApprovedVendorCompanies();
   return list.find((v) => v.email.trim().toLowerCase() === e) || null;
+}
+
+/** A vendor company for AUTH purposes: ResiWalk Access = Yes, ANY recurring
+ *  state (a maintenance-only vendor can still sign in — they just have no
+ *  recurring assignments), plus the inspection-access flag for the session
+ *  claim. Falls back to the recurring-approved list when the direct search
+ *  fails. Tiny per-email cache to keep per-request gating cheap. */
+export interface VendorAuthCompany extends VendorCompany { inspectionAccess: boolean }
+const _vendorAuthCache = new Map<string, { at: number; v: VendorAuthCompany | null }>();
+export async function findVendorForAuth(email: string | null | undefined): Promise<VendorAuthCompany | null> {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return null;
+  const hit = _vendorAuthCache.get(e);
+  if (hit && Date.now() - hit.at < 60_000) return hit.v;
+  let out: VendorAuthCompany | null = null;
+  let properties = ['name', 'email', 'resiwalk_access', 'eligible_for_recurring', 'resiwalk_inspection_access', 'resiwalk_password'];
+  const run = () => hubspotFetch(`/crm/v3/objects/companies/search`, {
+    method: 'POST',
+    body: JSON.stringify({
+      limit: 5, properties,
+      filterGroups: [{ filters: [
+        { propertyName: 'email', operator: 'EQ', value: e },
+        { propertyName: 'resiwalk_access', operator: 'IN', values: VENDOR_APPROVED_VALUES },
+      ] }],
+    }),
+  });
+  try {
+    let resp;
+    try { resp = await run(); }
+    catch (err: any) {
+      const missing = ['resiwalk_inspection_access', 'resiwalk_password'].find((p) => properties.includes(p) && isMissingPropertyError(err, p));
+      if (!missing) throw err;
+      properties = properties.filter((p) => p !== missing);
+      resp = await run();
+    }
+    const r = (resp.results || [])[0];
+    if (r) {
+      const p = r.properties || {};
+      if (vendorTruthy(p.resiwalk_access) && String(p.email || '').trim() && String(p.name || '').trim()) {
+        out = {
+          id: String(r.id), name: String(p.name).trim(), email: String(p.email).trim(),
+          passwordHash: String(p.resiwalk_password || ''), hasPassword: isVendorPasswordSet(p.resiwalk_password),
+          inspectionAccess: vendorTruthy(p.resiwalk_inspection_access),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[vendor-auth] direct lookup failed — falling back to the approved list:', String((err as any)?.message || err).slice(0, 160));
+    const v = await findApprovedVendorByEmail(e);
+    out = v ? { ...v, inspectionAccess: false } : null;
+  }
+  _vendorAuthCache.set(e, { at: Date.now(), v: out });
+  if (_vendorAuthCache.size > 2000) _vendorAuthCache.clear();
+  return out;
 }
 
 /** Store the vendor's password hash on the company object; busts the cache. */

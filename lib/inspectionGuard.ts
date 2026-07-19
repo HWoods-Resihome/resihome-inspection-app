@@ -6,9 +6,19 @@
 // and applies the single rule in lib/userAccess (1099 only, no editing once
 // completed). Returns a 403 message, or null when allowed.
 
-import { fetchInspectionById, externalUnlockedView } from '@/lib/hubspot';
+import { fetchInspectionById, externalUnlockedView, findVendorForAuth } from '@/lib/hubspot';
 import { isExternalEmail, externalAccessDenial, externalCanEditTemplate, ownsInspection } from '@/lib/userAccess';
 import { recordErrorEvent } from '@/lib/errorLog';
+
+/** True when this email is an ACTIVE vendor company granted Inspections access
+ *  (admin toggle in Vendor Management). Such a vendor may work EVERY template
+ *  type — but only inspections assigned to them (ownership below). Backed by the
+ *  60s-cached auth lookup, so per-request gating stays cheap. */
+export async function vendorInspectionAccess(email: string | null | undefined): Promise<boolean> {
+  if (!isExternalEmail(email)) return false;   // internal users don't need it
+  const v = await findVendorForAuth(email).catch(() => null);
+  return !!(v && v.inspectionAccess);
+}
 
 export async function externalWriteDenial(
   email: string | null | undefined,
@@ -17,6 +27,14 @@ export async function externalWriteDenial(
   if (!isExternalEmail(email)) return null; // internal users: unrestricted, no fetch
   const insp = await fetchInspectionById(inspectionId);
   if (!insp) return null; // not found → let the endpoint return its own 404
+  // Vendor with Inspections access: every template type is editable, but ONLY
+  // their own assigned work — fail closed on a blank inspector.
+  if (await vendorInspectionAccess(email)) {
+    if (!(insp.inspectorEmail || '').trim() || !ownsInspection(email, insp.inspectorEmail)) {
+      return 'You can only edit inspections assigned to you.';
+    }
+    return null;
+  }
   const denial = externalAccessDenial(email, insp.templateType, { write: true, status: insp.status, ownerEmail: insp.inspectorEmail });
   if (denial) {
     // Capture the exact mismatch for the Admin Error Log — this is what turns an
@@ -51,6 +69,10 @@ export async function externalViewDenial(
   if (!isExternalEmail(email)) return null; // internal users: unrestricted, no fetch
   const insp = await fetchInspectionById(inspectionId);
   if (!insp) return null; // not found → let the endpoint return its own 404
+  // Vendor with Inspections access: may view any template type of THEIR OWN work.
+  if (await vendorInspectionAccess(email)) {
+    return ownsInspection(email, insp.inspectorEmail) ? null : 'You can only view inspections assigned to you.';
+  }
   const { states } = await externalUnlockedView(email);
   return externalAccessDenial(email, insp.templateType, {
     status: insp.status,
@@ -76,7 +98,8 @@ export async function externalOwnedWriteDenial(
   if (!isExternalEmail(email)) return null;
   const insp = await fetchInspectionById(inspectionId);
   if (!insp) return null; // not found → let the endpoint return its own 404
-  if (!externalCanEditTemplate(insp.templateType)) {
+  // Vendor with Inspections access: all template types (ownership still applies below).
+  if (!(await vendorInspectionAccess(email)) && !externalCanEditTemplate(insp.templateType)) {
     return 'Your account has view-only access to this inspection type.';
   }
   if (!(insp.inspectorEmail || '').trim() || !ownsInspection(email, insp.inspectorEmail)) {

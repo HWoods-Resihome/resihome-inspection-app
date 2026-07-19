@@ -46,7 +46,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     if (typeof b.eligibleForRecurring === 'boolean') patch.eligibleForRecurring = b.eligibleForRecurring;
     if (typeof b.afterHoursService === 'boolean') patch.afterHoursService = b.afterHoursService;
+    if (typeof b.inspectionAccess === 'boolean') patch.inspectionAccess = b.inspectionAccess;
     if (typeof b.resiwalkAccess === 'boolean') patch.resiwalkAccess = b.resiwalkAccess;
+    // Dependency rule: only an ACTIVE vendor can be recurring-eligible or hold
+    // Inspections access. Deactivating force-clears both (in the same HubSpot
+    // patch), so a deactivated vendor can never keep assignment eligibility or a
+    // live inspections session claim on next sign-in.
+    if (patch.resiwalkAccess === false) {
+      patch.eligibleForRecurring = false;
+      patch.inspectionAccess = false;
+    }
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
     try {
       await updateVendorCompany(id, patch);

@@ -11,7 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import crypto from 'crypto';
 import { createOtpCookie } from '@/lib/auth';
-import { findApprovedVendorByEmail } from '@/lib/hubspot';
+import { findVendorForAuth } from '@/lib/hubspot';
 import { sendSystemEmail } from '@/lib/gmail';
 import { enforceRateLimit } from '@/lib/rateLimit';
 
@@ -30,7 +30,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (enforceRateLimit(res, { key: email, route: 'vendor-reset-email', max: 5, windowMs: 15 * 60_000 })) return;
 
   let vendor;
-  try { vendor = await findApprovedVendorByEmail(email); }
+  try { vendor = await findVendorForAuth(email); }
   catch { return res.status(500).json({ error: 'Could not send a code right now. Please try again.' }); }
   // Not an approved vendor → generic OK (no enumeration) but send nothing.
   if (!vendor) return res.status(200).json({ ok: true });

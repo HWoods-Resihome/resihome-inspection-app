@@ -7,14 +7,14 @@
 import { isInternalEmail } from '@/lib/userAccess';
 import { isViewingAsVendor } from '@/lib/services/viewAs';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { findApprovedVendorByEmail, fetchApprovedVendorCompanies } from '@/lib/hubspot';
+import { findVendorForAuth, fetchApprovedVendorCompanies } from '@/lib/hubspot';
 import type { ServiceViewer } from '@/lib/services/scope';
 
 /** May this user load the vendor-facing Services pages? App admins (everything)
  *  or an approved vendor company (their own work orders). */
 export async function servicesViewerAllowed(email: string | null | undefined): Promise<boolean> {
   if (await isAppAdmin(email).catch(() => false)) return true;
-  return !!(await findApprovedVendorByEmail(email).catch(() => null));
+  return !!(await findVendorForAuth(email).catch(() => null));
 }
 
 /** Resolve the viewer's service scope, consulting the live approved-vendor list
@@ -31,7 +31,7 @@ export async function resolveServiceViewerAsync(session: { email?: string | null
   const internal = isInternalEmail(email) && !isVendorSession;
   const previewing = isViewingAsVendor(req);
   if (internal && !previewing) return { canSeeAll: true, vendorEmail: null, vendorName: null };
-  const vendor = await findApprovedVendorByEmail(email).catch(() => null);
+  const vendor = await findVendorForAuth(email).catch(() => null);
   if (vendor) return { canSeeAll: false, vendorEmail: vendor.email, vendorName: vendor.name };
   // Internal user previewing "as vendor" with no real vendor identity → scope to
   // the first approved company so the preview is concrete and correctly limited.

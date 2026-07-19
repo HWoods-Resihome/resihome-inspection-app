@@ -33,7 +33,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 
 interface VendorRow {
   id: string; name: string; email: string; regionsServiced: string;
-  resiwalkAccess: boolean; eligibleForRecurring: boolean; afterHoursService: boolean; hasPassword: boolean;
+  resiwalkAccess: boolean; eligibleForRecurring: boolean; afterHoursService: boolean; inspectionAccess: boolean; hasPassword: boolean;
 }
 
 type SortField = 'name' | 'email' | 'regions';
@@ -158,7 +158,12 @@ export default function VendorManagement() {
   const mutateLocal = (id: string, patch: Partial<VendorRow>) =>
     setVendors((cur) => cur.map((x) => (x.id === id ? { ...x, ...patch } : x)));
 
-  function toggleFlag(v: VendorRow, key: 'eligibleForRecurring' | 'afterHoursService') {
+  function toggleFlag(v: VendorRow, key: 'eligibleForRecurring' | 'afterHoursService' | 'inspectionAccess') {
+    // Recurring + Inspections require an ACTIVE vendor (dependency rule).
+    if (!v.resiwalkAccess && (key === 'eligibleForRecurring' || key === 'inspectionAccess')) {
+      void dialog.alert('Reactivate this vendor first — a deactivated vendor can’t be recurring-eligible or access Inspections.');
+      return;
+    }
     const next = !v[key];
     mutateLocal(v.id, { [key]: next } as Partial<VendorRow>);
     void patchVendor(v.id, { [key]: next });
@@ -168,11 +173,13 @@ export default function VendorManagement() {
     const next = !v.resiwalkAccess;
     if (!next) {
       const ok = await dialog.confirm(
-        `Deactivate ${v.name}?\n\nResiWalk Access flips to No in HubSpot — they can no longer sign in and drop out of every vendor picker. Flip the toggle back any time to reactivate.`,
+        `Deactivate ${v.name}?\n\nResiWalk Access flips to No in HubSpot — they can no longer sign in and drop out of every vendor picker. Recurring eligibility and Inspections access switch off too. Flip the toggle back any time to reactivate.`,
         { confirmLabel: 'Deactivate' });
       if (!ok) return;
     }
-    mutateLocal(v.id, { resiwalkAccess: next });
+    // Dependency rule: deactivating force-clears recurring + inspections (the
+    // server enforces the same in one HubSpot patch).
+    mutateLocal(v.id, next ? { resiwalkAccess: true } : { resiwalkAccess: false, eligibleForRecurring: false, inspectionAccess: false });
     void patchVendor(v.id, { resiwalkAccess: next });
   }
 
@@ -304,16 +311,20 @@ export default function VendorManagement() {
             </div>
 
             <div className="flex items-center justify-between">
+              <span className="text-[13px] text-gray-700">Vendor Status <span className={`ml-1 text-[11px] font-heading font-bold ${v.resiwalkAccess ? 'text-emerald-600' : 'text-gray-400'}`}>{v.resiwalkAccess ? 'Active' : 'Deactivated'}</span></span>
+              <button type="button" onClick={() => void toggleStatus(v)} className={toggleCls(v.resiwalkAccess)} aria-pressed={v.resiwalkAccess} title={v.resiwalkAccess ? 'Deactivate — revokes ResiWalk access' : 'Reactivate — restores ResiWalk access'}><span className={knobCls(v.resiwalkAccess)} /></button>
+            </div>
+            <div className={`flex items-center justify-between ${v.resiwalkAccess ? '' : 'opacity-50'}`}>
               <span className="text-[13px] text-gray-700">Eligible For Recurring</span>
-              <button type="button" onClick={() => toggleFlag(v, 'eligibleForRecurring')} className={toggleCls(v.eligibleForRecurring)} aria-pressed={v.eligibleForRecurring}><span className={knobCls(v.eligibleForRecurring)} /></button>
+              <button type="button" onClick={() => toggleFlag(v, 'eligibleForRecurring')} className={toggleCls(v.eligibleForRecurring)} aria-pressed={v.eligibleForRecurring} title={v.resiwalkAccess ? 'Can be assigned recurring services' : 'Reactivate the vendor first'}><span className={knobCls(v.eligibleForRecurring)} /></button>
+            </div>
+            <div className={`flex items-center justify-between ${v.resiwalkAccess ? '' : 'opacity-50'}`}>
+              <span className="text-[13px] text-gray-700">Access To Inspections</span>
+              <button type="button" onClick={() => toggleFlag(v, 'inspectionAccess')} className={toggleCls(v.inspectionAccess)} aria-pressed={v.inspectionAccess} title={v.resiwalkAccess ? 'On sign-in they also get the Inspections app — every inspection type, scoped to work assigned to them' : 'Reactivate the vendor first'}><span className={knobCls(v.inspectionAccess)} /></button>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-700">After-Hours Service</span>
               <button type="button" onClick={() => toggleFlag(v, 'afterHoursService')} className={toggleCls(v.afterHoursService)} aria-pressed={v.afterHoursService}><span className={knobCls(v.afterHoursService)} /></button>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-gray-700">Vendor Status <span className={`ml-1 text-[11px] font-heading font-bold ${v.resiwalkAccess ? 'text-emerald-600' : 'text-gray-400'}`}>{v.resiwalkAccess ? 'Active' : 'Deactivated'}</span></span>
-              <button type="button" onClick={() => void toggleStatus(v)} className={toggleCls(v.resiwalkAccess)} aria-pressed={v.resiwalkAccess} title={v.resiwalkAccess ? 'Deactivate — revokes ResiWalk access' : 'Reactivate — restores ResiWalk access'}><span className={knobCls(v.resiwalkAccess)} /></button>
             </div>
 
             <div className="pt-2 border-t border-gray-100">
@@ -351,7 +362,7 @@ export default function VendorManagement() {
 
           {/* Filter + sort row (collapsible, like the inspections page). */}
           {filtersOpen && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-3">
+            <div className="grid grid-cols-4 gap-1.5 mb-3">
               <MultiFilter label="Region" sheet options={allRegionOptions.map((r) => ({ value: r, label: r }))} selected={regionFilter} onChange={setRegionFilter} />
               <MultiFilter label="Recurring" options={[{ value: 'Yes', label: 'Yes' }, { value: 'No', label: 'No' }]} selected={recurringFilter} onChange={setRecurringFilter} />
               <MultiFilter label="Status" options={[{ value: 'Active', label: 'Active' }, { value: 'Deactivated', label: 'Deactivated' }]} selected={statusFilter} onChange={setStatusFilter} />

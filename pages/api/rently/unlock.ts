@@ -10,7 +10,8 @@
 // status codes), so callers MUST branch on the JSON `status` field, not res.status.
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { isExternalEmail, externalAccessDenial } from '@/lib/userAccess';
+import { isExternalEmail, externalAccessDenial, ownsInspection } from '@/lib/userAccess';
+import { vendorInspectionAccess } from '@/lib/inspectionGuard';
 import { fetchInspectionById } from '@/lib/hubspot';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -61,10 +62,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Must be the user's OWN 1099 walk, and not yet completed. externalAccessDenial
     // with write:true fails CLOSED on a blank owner — an unassigned inspection is
     // not unlockable by any external user who merely has view access to it.
-    const denial = externalAccessDenial(session.email, insp.templateType, {
-      write: true, status: insp.status, ownerEmail: insp.inspectorEmail,
-    });
-    if (denial) { denied(); return; }
+    // Vendors granted Inspections access may unlock for ANY template type they're
+    // assigned to (same fail-closed ownership rule) — they need door access to
+    // work e.g. an assigned Scope.
+    if (await vendorInspectionAccess(session.email)) {
+      if (!(insp.inspectorEmail || '').trim() || !ownsInspection(session.email, insp.inspectorEmail)) { denied(); return; }
+    } else {
+      const denial = externalAccessDenial(session.email, insp.templateType, {
+        write: true, status: insp.status, ownerEmail: insp.inspectorEmail,
+      });
+      if (denial) { denied(); return; }
+    }
     // The requested property must match the inspection's linked property, and we
     // forward the SERVER-verified property id/address — never raw client input.
     const inspPropId = (insp.propertyRecordId || '').trim();

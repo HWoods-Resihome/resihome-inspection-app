@@ -31,6 +31,10 @@ export interface SessionUser {
    *  their own assigned work orders. Carried as a `vnd` claim in the session JWT
    *  so middleware can gate them to /services without a HubSpot lookup. */
   vendor?: boolean;
+  /** Vendor with Inspections access (admin-granted per company): may also use
+   *  the Inspections app — every template type, scoped to their own assigned
+   *  work. Carried as a `vin` claim so middleware can widen the vendor gate. */
+  vendorInspections?: boolean;
 }
 
 // Admin "view as / login as" — a separate signed cookie holding the impersonated
@@ -97,6 +101,7 @@ export async function createSessionCookie(user: SessionUser): Promise<string> {
     email: user.email,
     name: user.name,
     ...(user.vendor ? { vnd: 1 } : {}),
+    ...(user.vendor && user.vendorInspections ? { vin: 1 } : {}),
   } as JWTPayload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -187,6 +192,7 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
       email: String(payload.email),
       name: String(payload.name),
       ...((payload as { vnd?: unknown }).vnd ? { vendor: true } : {}),
+      ...((payload as { vin?: unknown }).vin ? { vendorInspections: true } : {}),
     };
   } catch {
     return null;

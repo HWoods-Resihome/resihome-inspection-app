@@ -110,7 +110,7 @@ async function verifySession(token: string, secret: Uint8Array): Promise<boolean
 
 // Returns the minimal session claims (or null if invalid). `vendor` gates a
 // services-only vendor account to /services (see below).
-async function verifySessionClaims(token: string, secret: Uint8Array): Promise<{ vendor: boolean } | null> {
+async function verifySessionClaims(token: string, secret: Uint8Array): Promise<{ vendor: boolean; vendorInspections: boolean } | null> {
   try {
     const { payload } = await jwtVerify(token, secret);
     // Reject typed tokens (e.g. the short-lived `oauth_exchange` token) just like
@@ -119,7 +119,10 @@ async function verifySessionClaims(token: string, secret: Uint8Array): Promise<{
     // and API data-fetches already reject it, but mirror the check here too.
     if ((payload as { typ?: unknown }).typ) return null;
     if (!(payload.userId && payload.email)) return null;
-    return { vendor: Boolean((payload as { vnd?: unknown }).vnd) };
+    return {
+      vendor: Boolean((payload as { vnd?: unknown }).vnd),
+      vendorInspections: Boolean((payload as { vin?: unknown }).vin),
+    };
   } catch {
     return null;
   }
@@ -190,8 +193,11 @@ export async function middleware(req: NextRequest) {
   if (!claims) return redirectToLogin(req);
 
   // Vendor accounts are services-only: keep them inside /services. A page nav
-  // elsewhere → /services; a disallowed API → 403.
-  if (claims.vendor && !vendorPathAllowed(pathname)) {
+  // elsewhere → /services; a disallowed API → 403. EXCEPTION: a vendor granted
+  // Inspections access (vin claim) may use the whole app like a 1099 — admin
+  // surfaces still self-gate (isAppAdmin in gSSP/APIs) and the inspection
+  // guards scope them to their own assigned work.
+  if (claims.vendor && !claims.vendorInspections && !vendorPathAllowed(pathname)) {
     if (pathname.startsWith('/api/')) {
       return new NextResponse(JSON.stringify({ error: 'Vendor accounts are limited to Services.' }), {
         status: 403, headers: { 'Content-Type': 'application/json' },
