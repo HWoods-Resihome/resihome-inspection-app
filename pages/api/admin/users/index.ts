@@ -21,6 +21,11 @@ import { readLoginActivity } from '@/lib/loginActivity';
 import { readAppUsers, readAppAdmins, readInsightsUsers, fetchActiveUsers, fetchVendorAdminList } from '@/lib/hubspot';
 import { applyUserPatches, isSeedUserEmail, type UserPatch } from '@/lib/userManagement';
 
+// The roster fans out ~6 HubSpot reads (login activity, overrides, the active-
+// users allowlist, vendor list, admins, insights). Give it real headroom so a
+// cold instance never trips the default timeout and returns a non-JSON error.
+export const config = { maxDuration: 60 };
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req).catch(() => null);
   if (!session?.email) return res.status(401).json({ error: 'Not authenticated' });

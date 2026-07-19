@@ -75,8 +75,13 @@ export function InternalUsersManager() {
     setError(null);
     try {
       const r = await fetch('/api/admin/users', { cache: 'no-store' });
-      const d = await r.json();
-      if (!r.ok) { setError(d.error || 'Failed to load'); return; }
+      const text = await r.text();
+      let d: any = null;
+      try { d = text ? JSON.parse(text) : {}; } catch { /* non-JSON (timeout/error page) */ }
+      if (!r.ok || d === null) {
+        setError((d && d.error) || (r.status >= 500 ? 'The server took too long loading users. Try again in a moment.' : `Failed to load (HTTP ${r.status}).`));
+        return;
+      }
       const list: UserRow[] = Array.isArray(d.users) ? d.users : [];
       setUsers(list); setEdits({});
       try { localStorage.setItem(SNAP_KEY, JSON.stringify(list)); } catch { /* quota */ }
@@ -136,8 +141,13 @@ export function InternalUsersManager() {
       const r = await fetch('/api/admin/users', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updates }),
       });
-      const d = await r.json();
-      if (!r.ok) { setError(d.error || 'Save failed'); return; }
+      const text = await r.text();
+      let d: any = null;
+      try { d = text ? JSON.parse(text) : {}; } catch { /* non-JSON (timeout/error page) */ }
+      if (!r.ok || d === null) {
+        setError((d && d.error) || (r.status >= 500 ? 'The server took too long saving. Your changes are still staged — try Save again.' : `Save failed (HTTP ${r.status}).`));
+        return;
+      }
       await load();
       setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (e: any) { setError(String(e?.message || e)); }
