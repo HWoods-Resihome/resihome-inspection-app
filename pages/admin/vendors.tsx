@@ -292,6 +292,20 @@ export default function VendorManagement() {
     finally { setAdding(false); }
   }
 
+  // Vendor scorecards — service performance per vendor (open / past-due /
+  // completed-90d / on-time %). Loaded once in the background after the roster;
+  // matched by email first, display name as the legacy fallback.
+  type VendorScore = { open: number; pastDue: number; completed90: number; onTimePct: number | null; lastCompletedAt: string | null };
+  const [scores, setScores] = useState<{ byEmail: Record<string, VendorScore>; byName: Record<string, VendorScore> } | null>(null);
+  useEffect(() => {
+    void fetch('/api/admin/vendors/scorecards', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.byEmail || d?.byName) setScores({ byEmail: d.byEmail || {}, byName: d.byName || {} }); })
+      .catch(() => { /* scorecards are additive — cards render without them */ });
+  }, []);
+  const scoreFor = (v: VendorRow): VendorScore | null =>
+    scores?.byEmail[v.email.toLowerCase()] || scores?.byName[v.name.trim().toLowerCase()] || null;
+
   // Per-card welcome email (re)send — admin-triggered only, never bulk.
   const [welcomeBusy, setWelcomeBusy] = useState<string | null>(null);
   async function sendWelcome(v: VendorRow) {
@@ -347,6 +361,7 @@ export default function VendorManagement() {
   function VendorCard({ v }: { v: VendorRow }) {
     const expanded = openCards.has(v.id);
     const editing = editId === v.id;
+    const score = scoreFor(v);
     return (
       <section className={`bg-white border rounded-xl shadow-sm overflow-hidden ${busyId === v.id ? 'opacity-60 pointer-events-none' : 'border-gray-200'}`}>
         {/* Collapsible card header — tap to expand settings. */}
@@ -367,6 +382,22 @@ export default function VendorManagement() {
 
         {expanded && (
           <div className="px-4 py-3 space-y-3">
+            {/* Scorecard strip — service performance (trailing 90 days). */}
+            {score && (
+              <div className="grid grid-cols-4 gap-1.5 text-center">
+                {[
+                  { label: 'Open', value: String(score.open), alert: false },
+                  { label: 'Past Due', value: String(score.pastDue), alert: score.pastDue > 0 },
+                  { label: 'Done 90d', value: String(score.completed90), alert: false },
+                  { label: 'On-Time', value: score.onTimePct == null ? '—' : `${score.onTimePct}%`, alert: score.onTimePct != null && score.onTimePct < 80 },
+                ].map((s) => (
+                  <div key={s.label} className={`rounded-lg border px-1 py-1.5 ${s.alert ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+                    <div className={`font-heading font-bold text-[15px] tabular-nums ${s.alert ? 'text-red-600' : 'text-ink'}`}>{s.value}</div>
+                    <div className="text-[10px] font-heading font-semibold uppercase tracking-wide text-gray-500">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
             {editing ? (
               <div className="space-y-2.5">
                 <div>
