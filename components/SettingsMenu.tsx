@@ -58,7 +58,7 @@ export function SettingsMenu({ isAdmin, isVendor, onOpen }: { isAdmin: boolean; 
       type="button"
       onClick={() => toggleSection(key)}
       aria-expanded={!!expanded[key]}
-      className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-[11px] font-heading font-bold uppercase tracking-wide text-gray-500 hover:bg-gray-50 transition-colors border-t border-gray-100"
+      className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-[11px] font-heading font-bold uppercase tracking-wide text-gray-800 hover:bg-gray-50 transition-colors border-t border-gray-100"
     >
       {label}
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -79,7 +79,7 @@ export function SettingsMenu({ isAdmin, isVendor, onOpen }: { isAdmin: boolean; 
   const notificationsRow = (cls: string): ReactNode => (
     <Link href="/notifications" onClick={() => setOpen(false)} className={cls}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>
-      Notification Settings
+      Notifications
     </Link>
   );
   const signOutRow = (cls: string): ReactNode => (
@@ -130,19 +130,19 @@ export function SettingsMenu({ isAdmin, isVendor, onOpen }: { isAdmin: boolean; 
                 {sectionHeader('tools', 'Admin Tools')}
                 {expanded['tools'] && (
                   <>
-                    {/* From the Services app, Insights opens directly on its
-                        Services tab; from Inspections, the Inspections tab. */}
-                    <Link href={router.pathname.startsWith('/services') ? '/insights?tab=services' : '/insights'} onClick={() => setOpen(false)} className={groupRowCls}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
-                      Insights
+                    <Link href="/admin/flows" onClick={() => setOpen(false)} className={groupRowCls}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
+                      Admin
                     </Link>
                     <Link href="/ai-knowledge" onClick={() => setOpen(false)} className={groupRowCls}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>
                       AI Knowledge Base
                     </Link>
-                    <Link href="/admin/flows" onClick={() => setOpen(false)} className={groupRowCls}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
-                      Admin
+                    {/* From the Services app, Insights opens directly on its
+                        Services tab; from Inspections, the Inspections tab. */}
+                    <Link href={router.pathname.startsWith('/services') ? '/insights?tab=services' : '/insights'} onClick={() => setOpen(false)} className={groupRowCls}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
+                      Insights
                     </Link>
                     <button type="button" onClick={() => { setOpen(false); setViewAsOpen(true); }} className={groupRowCls}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M1 1l22 22" /></svg>
@@ -155,8 +155,8 @@ export function SettingsMenu({ isAdmin, isVendor, onOpen }: { isAdmin: boolean; 
                 {sectionHeader('general', 'General')}
                 {expanded['general'] && (
                   <>
-                    {trainingRow(groupRowCls)}
                     {notificationsRow(groupRowCls)}
+                    {trainingRow(groupRowCls)}
                     {signOutRow(groupRowCls)}
                   </>
                 )}
