@@ -105,6 +105,12 @@ export async function applyUserPatches(updates: Record<string, UserPatch>, byEma
       setFlag('services', patch.services);
       setFlag('insights', patch.insights);
       setFlag('admin', patch.admin);
+      // Inactive cascades: a user set to ResiWalk Active = No has no access
+      // anywhere — force every other section off. Applied last so it wins over any
+      // other flags in the same patch. Seed admins can never be inactive.
+      if (rec.active === false && !seed) {
+        rec.inspections = false; rec.services = false; rec.insights = false; rec.admin = false;
+      }
       rec.updatedAt = nowIso;
       if (by) rec.updatedByEmail = by;
       next[e] = rec;
