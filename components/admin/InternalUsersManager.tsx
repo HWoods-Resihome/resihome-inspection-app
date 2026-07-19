@@ -2,7 +2,7 @@
  * Internal User Management (admin · /admin/flows). Replaces the old Admins list.
  *
  * Lists every internal user who has signed in at least once (name · email · last
- * login) as a collapsible card with five access toggles — ResiWALK Active,
+ * login) as a collapsible card with five access toggles — ResiWalk Active,
  * Inspections, Services, Insights, Admin. Search, a single row of filters + sort,
  * and a bulk bar to apply one toggle across all currently-shown users. Edits stage
  * locally and save in one batch. Backed by /api/admin/users.
@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type CapKey = 'active' | 'inspections' | 'services' | 'insights' | 'admin';
 const CAPS: { key: CapKey; label: string }[] = [
-  { key: 'active', label: 'ResiWALK Active' },
+  { key: 'active', label: 'ResiWalk Active' },
   { key: 'inspections', label: 'Inspections' },
   { key: 'services', label: 'Services' },
   { key: 'insights', label: 'Insights' },
@@ -158,7 +158,7 @@ export function InternalUsersManager() {
         className="w-full flex items-center justify-between gap-3 p-4 text-left">
         <div>
           <h2 className="font-heading font-bold text-base text-ink">User Management</h2>
-          <p className="text-[12px] text-gray-500 mt-0.5">Internal users who’ve signed in — control each person’s access to ResiWALK, Inspections, Services, Insights, and Admin.</p>
+          <p className="text-[12px] text-gray-500 mt-0.5">Internal users who’ve signed in — control each person’s access to ResiWalk, Inspections, Services, Insights, and Admin.</p>
         </div>
         <Chevron open={open} />
       </button>

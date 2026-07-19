@@ -19,7 +19,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
   const user = await getSessionFromRequest(req);
   if (!user) return res.status(401).json({ authenticated: false });
-  // ResiWALK Active gate: a user an admin has switched OFF is treated as signed
+  // ResiWalk Active gate: a user an admin has switched OFF is treated as signed
   // out (vendors are never gated here). Seed admins are always active. Effective
   // within the ~60s override cache. Skipped for the impersonation target so
   // "view as" still works.

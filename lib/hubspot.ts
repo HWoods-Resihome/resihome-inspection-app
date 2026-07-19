@@ -6486,7 +6486,7 @@ async function mutateAgentJson<T>(prop: string, label: string, mutator: (cur: T 
 // behavior" (so a user the admin hasn't configured keeps exactly today's access).
 export interface AppUserRecord {
   name?: string;
-  active?: boolean;        // ResiWALK Active (login/app access)
+  active?: boolean;        // ResiWalk Active (login/app access)
   inspections?: boolean;
   services?: boolean;
   insights?: boolean;
@@ -7110,7 +7110,7 @@ async function ensureApprovalRoutingProperty(): Promise<void> {
       body: JSON.stringify({
         name: APP_APPROVAL_ROUTING_PROP, label: 'Approval routing config (JSON)', type: 'string', fieldType: 'textarea',
         groupName: 'ai_knowledge',
-        description: 'ResiWALK approval routing — PODs/Regions/RM/Directors for Slack approval tagging (managed by the app).',
+        description: 'ResiWalk approval routing — PODs/Regions/RM/Directors for Slack approval tagging (managed by the app).',
       }),
     });
   } catch (e: any) {

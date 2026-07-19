@@ -2,7 +2,7 @@
  * /api/admin/users — internal user management (admin only).
  *
  *   GET  → the roster of internal users who have signed in at least once, each
- *          with name, email, last-login, and resolved access flags (ResiWALK
+ *          with name, email, last-login, and resolved access flags (ResiWalk
  *          Active, Inspections, Services, Insights, Admin).
  *   POST → apply per-user access patches. Body: { updates: { email: { active?,
  *          inspections?, services?, insights?, admin? } } }. Supports one user or

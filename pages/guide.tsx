@@ -1,4 +1,4 @@
-// In-app Training Guide — the ResiWALK guide shown inside the app (a full,
+// In-app Training Guide — the ResiWalk guide shown inside the app (a full,
 // scrollable, clickable page) instead of bouncing out to a separate browser
 // tab. Wears the standard app header (back chevron + centered logo + title).
 
@@ -26,7 +26,7 @@ export default function TrainingGuide() {
         </Link>
         <iframe
           src={GUIDE_SRC}
-          title="ResiWALK Training Guide"
+          title="ResiWalk Training Guide"
           className="flex-1 w-full border-0"
         />
       </div>

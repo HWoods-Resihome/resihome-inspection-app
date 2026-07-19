@@ -1,5 +1,5 @@
 /**
- * GET /api/guide-proxy?url=… — same-origin proxy for the ResiWALK training guide.
+ * GET /api/guide-proxy?url=… — same-origin proxy for the ResiWalk training guide.
  *
  * resihome.com sends X-Frame-Options / CSP frame-ancestors, so it can't be
  * iframed directly. This fetches the guide HTML server-side and re-serves it

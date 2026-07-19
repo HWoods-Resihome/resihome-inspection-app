@@ -2,7 +2,7 @@
  * Internal user management — per-user access overrides.
  *
  * A single JSON blob on the Agent record (app_users_json) keyed by lowercased
- * email holds each internal user's access toggles: ResiWALK Active, Inspections,
+ * email holds each internal user's access toggles: ResiWalk Active, Inspections,
  * Services, Insights, Admin. Each toggle is TRI-STATE — an explicit boolean is an
  * override; `undefined` means "no override", so the app falls back to the legacy
  * behavior (admins-only for services, admin-or-listed for insights, all-internal
@@ -47,7 +47,7 @@ export async function getUserOverride(email: string | null | undefined): Promise
   return (await overridesMap())[e];
 }
 
-/** ResiWALK Active — may this user use the app at all? Seed admins are always
+/** ResiWalk Active — may this user use the app at all? Seed admins are always
  *  active; everyone else is active unless explicitly disabled. */
 export async function isResiwalkActive(email: string | null | undefined): Promise<boolean> {
   const e = norm(email);

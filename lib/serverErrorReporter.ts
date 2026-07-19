@@ -103,7 +103,7 @@ export function reportServerError(error: unknown, context: ServerErrorContext = 
       // `text` is what a Slack incoming-webhook renders; the full record rides
       // alongside for richer collectors that read JSON.
       body: JSON.stringify({
-        text: `🚨 ResiWALK server error: ${record.route || 'unknown route'} — ${message}`,
+        text: `🚨 ResiWalk server error: ${record.route || 'unknown route'} — ${message}`,
         ...record,
       }),
     }).catch(() => { /* collector down — the structured log still has it */ });
