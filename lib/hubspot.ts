@@ -6480,6 +6480,30 @@ async function mutateAgentJson<T>(prop: string, label: string, mutator: (cur: T 
   return p as Promise<boolean>;
 }
 
+// ── App Users: per-internal-user access overrides (User Management) ──────────
+// Keyed by lowercased email. Each flag is a tri-state: a boolean is an explicit
+// admin override; UNDEFINED means "no override → fall back to legacy/default
+// behavior" (so a user the admin hasn't configured keeps exactly today's access).
+export interface AppUserRecord {
+  name?: string;
+  active?: boolean;        // ResiWALK Active (login/app access)
+  inspections?: boolean;
+  services?: boolean;
+  insights?: boolean;
+  admin?: boolean;
+  updatedAt?: string;
+  updatedByEmail?: string;
+}
+export type AppUsersMap = Record<string, AppUserRecord>;
+const APP_USERS_PROP = 'app_users_json';
+
+export async function readAppUsers(): Promise<AppUsersMap> {
+  return (await readAgentJson<AppUsersMap>(APP_USERS_PROP)) || {};
+}
+export async function mutateAppUsers(mutator: (cur: AppUsersMap) => AppUsersMap): Promise<boolean> {
+  return mutateAgentJson<AppUsersMap>(APP_USERS_PROP, 'App Users (JSON)', (cur) => mutator(cur || {}));
+}
+
 /** Service completion forms, keyed by `worktype:subtype` → question array. Null when unset/unreachable. */
 export function readServiceForms(): Promise<Record<string, any[]> | null> { return readAgentJson<Record<string, any[]>>(SERVICE_FORMS_PROP); }
 export function writeServiceForms(forms: Record<string, any[]>): Promise<boolean> { return writeAgentJson(SERVICE_FORMS_PROP, 'Service Forms (JSON)', forms); }

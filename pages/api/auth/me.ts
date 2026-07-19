@@ -3,6 +3,9 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { isFinalizeAdmin } from '@/lib/finalizeAccess';
 import { isExternalEmail, EXTERNAL_TEMPLATE } from '@/lib/userAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
+import { servicesEnabled } from '@/lib/servicesAccess';
+import { canViewInsights } from '@/lib/insightsAccess';
+import { isResiwalkActive, inspectionsEnabled } from '@/lib/userManagement';
 import { warnOnBootIfMisconfigured } from '@/lib/configValidation';
 
 // Cheap, env-only, once-per-cold-instance: log a warning if a required env var
@@ -16,12 +19,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
   const user = await getSessionFromRequest(req);
   if (!user) return res.status(401).json({ authenticated: false });
+  // ResiWALK Active gate: a user an admin has switched OFF is treated as signed
+  // out (vendors are never gated here). Seed admins are always active. Effective
+  // within the ~60s override cache. Skipped for the impersonation target so
+  // "view as" still works.
+  if (!user.vendor && !user.impersonating && !(await isResiwalkActive(user.email).catch(() => true))) {
+    return res.status(200).json({ authenticated: false, deactivated: true });
+  }
   const external = isExternalEmail(user.email);
+  const isAdmin = await isAppAdmin(user.email);
   return res.status(200).json({
     authenticated: true,
     user,
     // App admin: AI Knowledge curation, the form builder, and admin management.
-    isAdmin: await isAppAdmin(user.email),
+    isAdmin,
+    // Per-section access (from User Management, backward-compatible defaults) so
+    // the app can show/hide sections to match each user's toggles.
+    access: {
+      inspections: await inspectionsEnabled(user.email).catch(() => true),
+      services: await servicesEnabled(user.email).catch(() => false),
+      insights: await canViewInsights(user.email).catch(() => false),
+      admin: isAdmin,
+    },
     // Whether this user may finalize their OWN submitted inspection (bypass the
     // dual-approval lock). Everyone else must hand off to a second reviewer.
     isFinalizeAdmin: isFinalizeAdmin(user.email),

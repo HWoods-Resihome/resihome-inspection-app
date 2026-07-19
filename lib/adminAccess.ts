@@ -16,6 +16,7 @@
  */
 import { AI_KNOWLEDGE_ADMINS } from '@/lib/aiKnowledgeAccess';
 import { readAppAdmins, writeAppAdmins, type AppAdminRecord } from '@/lib/hubspot';
+import { getUserOverride } from '@/lib/userManagement';
 
 // Permanent bootstrap admins (always admin; cannot be removed via the UI).
 export const SEED_ADMINS: string[] = Array.from(new Set(AI_KNOWLEDGE_ADMINS.map((e) => e.toLowerCase())));
@@ -41,11 +42,15 @@ async function dynamicAdminEmails(): Promise<Set<string>> {
 
 function bustCache() { _cache = null; }
 
-/** Is this user an app admin (seed OR dynamic list)? Async — reads the store. */
+/** Is this user an app admin? Seed admins always; then an explicit per-user Admin
+ *  override (from User Management) wins; otherwise the legacy dynamic list. The
+ *  fallback keeps every current admin an admin until someone toggles them off. */
 export async function isAppAdmin(email: string | null | undefined): Promise<boolean> {
   const e = (email || '').trim().toLowerCase();
   if (!e) return false;
   if (SEED_ADMINS.includes(e)) return true;
+  const ov = await getUserOverride(e).catch(() => undefined);
+  if (ov && typeof ov.admin === 'boolean') return ov.admin;
   return (await dynamicAdminEmails()).has(e);
 }
 

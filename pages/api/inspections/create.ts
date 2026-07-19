@@ -4,6 +4,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
 import { externalAccessDenial, isExternalEmail, EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
+import { inspectionsEnabled } from '@/lib/userManagement';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { recordErrorEvent } from '@/lib/errorLog';
@@ -100,6 +101,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (denial) {
       void recordErrorEvent({ kind: 'inspection_start', message: denial, email: session.email, template: body.templateType, source: 'server' });
       return res.status(403).json({ error: denial });
+    }
+    // Internal Inspections access (User Management). External 1099 users keep their
+    // own path above; internal users default to enabled unless an admin toggled it
+    // off — so this only blocks someone explicitly set to Inspections = No.
+    if (!isExternalEmail(session.email) && !(await inspectionsEnabled(session.email).catch(() => true))) {
+      return res.status(403).json({ error: 'Your access to Inspections has been turned off. Contact an admin.' });
     }
 
     // External 1099 walks are only allowed once the property is in a leasing

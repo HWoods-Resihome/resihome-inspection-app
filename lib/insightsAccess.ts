@@ -16,6 +16,7 @@
  */
 import { isAppAdmin } from '@/lib/adminAccess';
 import { readInsightsUsers, writeInsightsUsers, type InsightsUserRecord } from '@/lib/hubspot';
+import { getUserOverride } from '@/lib/userManagement';
 
 // Short cache so gating doesn't hit HubSpot on every request (mirrors adminAccess).
 let _cache: { emails: Set<string>; at: number } | null = null;
@@ -41,10 +42,14 @@ export async function isInsightsUser(email: string | null | undefined): Promise<
   return (await insightsUserEmails()).has(e);
 }
 
-/** THE gate for /insights: admins always qualify; Insights-Only users also qualify. */
+/** THE gate for /insights. An explicit per-user Insights override (from User
+ *  Management) wins; otherwise the legacy behavior — admins always qualify, and
+ *  Insights-Only listed users also qualify. */
 export async function canViewInsights(email: string | null | undefined): Promise<boolean> {
   const e = (email || '').trim().toLowerCase();
   if (!e) return false;
+  const ov = await getUserOverride(e).catch(() => undefined);
+  if (ov && typeof ov.insights === 'boolean') return ov.insights;
   if (await isAppAdmin(e)) return true;
   return (await insightsUserEmails()).has(e);
 }

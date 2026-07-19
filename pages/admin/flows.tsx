@@ -17,6 +17,7 @@ import { RegenPdfPicker } from '@/components/admin/RegenPdfPicker';
 import { ApprovalRoutingManager } from '@/components/admin/ApprovalRoutingManager';
 import { SlackNotificationsManager } from '@/components/admin/SlackNotificationsManager';
 import { ErrorLogManager } from '@/components/admin/ErrorLogManager';
+import { InternalUsersManager } from '@/components/admin/InternalUsersManager';
 
 const SETUP_LABELS: Record<string, string> = {
   app_admins_json: 'Admins storage (Agent)',
@@ -92,14 +93,8 @@ export default function AdminFlowsPage() {
       <PageHeader title="Admin" onBack={() => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push('/'))} backHref="/" maxW="max-w-2xl" />
 
       <main className="max-w-2xl mx-auto px-4 py-6">
-        {/* ---- Admins ---- */}
-        <Section title="Admins" desc="Manage who has admin access to ResiWalk (insights, form builder, these flows, and view-as).">
-          <Link href="/admin/admins"
-            className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-brand text-white font-heading font-bold text-sm hover:opacity-90">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-            Manage Admins
-          </Link>
-        </Section>
+        {/* ---- User Management (internal users + per-section access) ---- */}
+        <InternalUsersManager />
 
         {/* ---- Approval Routing (PODs / Regions) — self-contained collapsible card ---- */}
         <ApprovalRoutingManager />

@@ -10,13 +10,16 @@
  */
 
 import { isAppAdmin } from '@/lib/adminAccess';
+import { getUserOverride } from '@/lib/userManagement';
 
 /**
- * Authorize an internal Services request: the caller must be an app admin.
- * Services is live on production for admins only — access is gated purely on the
- * app-admin check (no build flag), so no other users can reach it. Call at the
- * top of every internal Services endpoint.
+ * Authorize an internal Services request. An explicit per-user Services override
+ * (from User Management) wins; otherwise it falls back to the legacy behavior —
+ * Services access == admin access — so every current admin keeps Services until
+ * an admin toggles it off. Call at the top of every internal Services endpoint.
  */
 export async function servicesEnabled(email: string | null | undefined): Promise<boolean> {
+  const ov = await getUserOverride(email).catch(() => undefined);
+  if (ov && typeof ov.services === 'boolean') return ov.services;
   return isAppAdmin(email);
 }
