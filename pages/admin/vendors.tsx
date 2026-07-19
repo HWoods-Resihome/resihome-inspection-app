@@ -35,7 +35,16 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 interface VendorRow {
   id: string; name: string; email: string; regionsServiced: string;
   resiwalkAccess: boolean; eligibleForRecurring: boolean; afterHoursService: boolean; inspectionAccess: boolean; hasPassword: boolean;
+  lastActive?: string | null;   // most recent sign-in (ISO), null if never
 }
+
+// Last-active date, M-D-YY (e.g. 7-9-26). "Never" until the vendor first logs in.
+const fmtActive = (iso?: string | null): string => {
+  if (!iso) return 'Never';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return `${d.getMonth() + 1}-${d.getDate()}-${String(d.getFullYear()).slice(-2)}`;
+};
 
 type SortField = 'name' | 'email' | 'regions';
 const SORT_OPTIONS: { value: SortField; label: string }[] = [
@@ -371,7 +380,7 @@ export default function VendorManagement() {
             className={`shrink-0 text-gray-500 transition-transform ${expanded ? 'rotate-90' : ''}`}><polyline points="9 18 15 12 9 6" /></svg>
           <div className="min-w-0 flex-1">
             <span className="font-heading font-bold text-[15px] text-ink truncate block">{v.name}</span>
-            <span className="text-[12px] text-gray-500 truncate block">{v.email}</span>
+            <span className="text-[12px] text-gray-500 truncate block">{v.email} · last active {fmtActive(v.lastActive)}</span>
           </div>
           <span className="shrink-0">
             {v.hasPassword

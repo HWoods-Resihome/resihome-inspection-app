@@ -17,6 +17,7 @@ import { isAppAdmin } from '@/lib/adminAccess';
 import { fetchVendorAdminList, createVendorCompany, updateVendorCompany, fetchPropertyCoverage, fetchRegionEnumOptions, ensureInspectionAccessProp, ensureVendorFlagOptions } from '@/lib/hubspot';
 import { parseRegions, normalizeRegionsString } from '@/lib/vendorRegions';
 import { sendVendorWelcomeEmail } from '@/lib/notifications/vendorWelcome';
+import { readLoginActivity } from '@/lib/loginActivity';
 
 export const config = { maxDuration: 60 };
 
@@ -94,15 +95,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Everything in flight AT ONCE — the list, the fast region options, and
       // the provisioning checks (which used to run serially after the fetch).
       const provisionP = ensureProvisioned();
-      const [rawVendors, fastRegions] = await Promise.all([
+      const [rawVendors, fastRegions, activity] = await Promise.all([
         fetchVendorAdminList(force),
         regionOptionsFast(),
+        readLoginActivity().catch(() => ({} as Record<string, { lastAt: string }>)),
       ]);
       // Serve NORMALIZED regions (display + option list are clean even before the
       // background repair lands in HubSpot), and kick the repair for any rows
       // whose stored string differs from canonical.
       repairMalformedRegions(rawVendors);
-      const vendors = rawVendors.map((v) => ({ ...v, regionsServiced: normalizeRegionsString(v.regionsServiced) }));
+      // Last active = the vendor's most recent sign-in (login activity, keyed by
+      // email). Null until they've logged in at least once.
+      const vendors = rawVendors.map((v) => ({
+        ...v,
+        regionsServiced: normalizeRegionsString(v.regionsServiced),
+        lastActive: activity[v.email.trim().toLowerCase()]?.lastAt || null,
+      }));
       const optionSet = new Set<string>((fastRegions || []).map((r) => parseRegions(r)[0] || r));
       for (const v of vendors) for (const r of parseRegions(v.regionsServiced)) optionSet.add(r);
       const regionOptions = Array.from(optionSet).sort();

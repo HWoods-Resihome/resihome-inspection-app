@@ -40,7 +40,7 @@ const fmtLogin = (iso: string | null): string => {
   if (!iso) return 'Never';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '—';
-  return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(-2)}`;
+  return `${d.getMonth() + 1}-${d.getDate()}-${String(d.getFullYear()).slice(-2)}`;
 };
 
 type Tri = 'any' | 'yes' | 'no';
@@ -244,7 +244,7 @@ export function InternalUsersManager() {
                             {u.seed && <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-white bg-gray-500 rounded px-1.5 py-0.5">Built-in</span>}
                             {dirty && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-brand" />}
                           </div>
-                          <div className="text-[12px] text-gray-500 truncate">{u.email} · last login {fmtLogin(u.lastLogin)}</div>
+                          <div className="text-[12px] text-gray-500 truncate">{u.email} · last active {fmtLogin(u.lastLogin)}</div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {CAPS.map((c) => (
