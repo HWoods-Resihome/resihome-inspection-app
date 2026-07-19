@@ -23,17 +23,29 @@ export function ServiceNotesThread({ serviceId, viewerRole }: {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(true);   // collapsible, like the other sections
+  // A hard reply-ingestion blocker reported by the server (e.g. the system
+  // mailbox token lacks Gmail read scope) — shown to internal users only.
+  const [inboxError, setInboxError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   async function load() {
     try {
       const r = await fetch(`/api/services/${serviceId}/notes`, { cache: 'no-store' });
       const d = await r.json().catch(() => ({}));
-      if (r.ok && Array.isArray(d.notes)) setNotes(d.notes);
+      if (r.ok && Array.isArray(d.notes)) { setNotes(d.notes); setInboxError(d.inboxError || null); }
     } catch { /* keep whatever we have */ }
     finally { setLoading(false); }
   }
-  useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [serviceId]);
+  // Initial load + a light poll while the section is expanded: each GET also
+  // sweeps the mailbox for THIS service's replies (throttled server-side), so
+  // an email reply lands in the thread within ~30s while someone's looking.
+  useEffect(() => {
+    void load();
+    if (!open) return;
+    const iv = window.setInterval(() => { void load(); }, 30_000);
+    return () => window.clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceId, open]);
 
   async function send() {
     const t = text.trim();
@@ -102,6 +114,9 @@ export function ServiceNotesThread({ serviceId, viewerRole }: {
           </button>
         </div>
         <p className="text-[11px] text-gray-400 mt-1.5">The other side is emailed each note — they can reply right from the email.</p>
+        {viewerRole === 'internal' && inboxError && (
+          <p className="text-[11px] text-amber-600 mt-1">Reply-by-email sync is paused: {inboxError}</p>
+        )}
       </div>
       </>)}
     </section>

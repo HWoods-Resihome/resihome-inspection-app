@@ -82,7 +82,7 @@
     },
     {
       "path": "/api/cron/notes-inbox",
-      "schedule": "*/2 * * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/cron/services-generate",

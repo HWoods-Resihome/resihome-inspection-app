@@ -11,6 +11,7 @@
  * posting flow (the API surfaces failures to the user, but reads fail soft).
  */
 import { put, list } from '@vercel/blob';
+import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 
 export interface ServiceNote {
   id: string;                    // blob-derived, stable
@@ -18,9 +19,21 @@ export interface ServiceNote {
   at: string;                    // ISO timestamp
   byEmail: string;
   byName: string;
-  role: 'vendor' | 'internal';
+  // 'other' = an email reply from an address that maps to neither the assigned
+  // vendor nor an internal domain — still shown in the thread, attributed to
+  // the bare email address.
+  role: 'vendor' | 'internal' | 'other';
   source: 'app' | 'email';       // posted in-app vs ingested from an email reply
   text: string;
+}
+
+// "landscaping · cut" → "Landscaping · Grass Cut": catalog labels when known,
+// Title-Cased raw values as the fallback for retired/custom types.
+const tc = (s: string) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+export function serviceLabelFor(p: Record<string, any>): string {
+  const w = String(p.worktype || '').trim();
+  const s = String(p.subtype || '').trim();
+  return [w ? tc(worktypeLabel(w)) : '', s ? tc(subtypeLabel(w, s)) : ''].filter(Boolean).join(' · ');
 }
 
 const MAX_NOTE_CHARS = 4000;
@@ -34,7 +47,7 @@ export async function addServiceNote(n: {
   serviceId: string;
   byEmail: string;
   byName: string;
-  role: 'vendor' | 'internal';
+  role: 'vendor' | 'internal' | 'other';
   source: 'app' | 'email';
   text: string;
 }): Promise<ServiceNote> {

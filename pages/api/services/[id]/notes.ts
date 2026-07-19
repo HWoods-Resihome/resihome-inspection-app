@@ -16,18 +16,9 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isInternalEmail } from '@/lib/userAccess';
 import { fetchServiceWorkOrder } from '@/lib/hubspot';
-import { addServiceNote, readServiceNotes, clipNoteText } from '@/lib/services/serviceNotes';
+import { addServiceNote, readServiceNotes, clipNoteText, serviceLabelFor } from '@/lib/services/serviceNotes';
 import { notifyServiceNote } from '@/lib/notifications/serviceNote';
-import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
-
-// "landscaping · cut" → "Landscaping · Grass Cut": catalog labels when known,
-// Title-Cased raw values as the fallback for retired/custom types.
-const tc = (s: string) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
-export function serviceLabelFor(p: Record<string, any>): string {
-  const w = String(p.worktype || '').trim();
-  const s = String(p.subtype || '').trim();
-  return [w ? tc(worktypeLabel(w)) : '', s ? tc(subtypeLabel(w, s)) : ''].filter(Boolean).join(' · ');
-}
+import { sweepNotesInbox } from '@/lib/services/notesInbox';
 
 export const config = { maxDuration: 30 };
 
@@ -54,8 +45,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!internal && !isAssignedVendor) return res.status(403).json({ error: 'Not your work order.' });
 
   if (req.method === 'GET') {
+    // On-demand ingestion: pull any unread email replies for THIS service in
+    // before reading the thread, so opening (or pull-refreshing) a service
+    // shows replies near-real-time instead of waiting for the cron tick.
+    // Throttled per service; failures degrade to the plain read.
+    const sweep = await sweepNotesInbox({ serviceId: id, max: 10, minIntervalMs: 15_000 }).catch(() => null);
     const notes = await readServiceNotes(id);
-    return res.status(200).json({ notes });
+    // Surface a hard ingestion blocker (missing Gmail read scope / not
+    // configured) so the UI can tell an internal user why replies won't sync.
+    const inboxError = sweep && !sweep.ok ? sweep.reason || 'unknown' : null;
+    return res.status(200).json({ notes, ...(inboxError ? { inboxError } : {}) });
   }
 
   if (req.method === 'POST') {
