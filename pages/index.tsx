@@ -19,6 +19,7 @@ import { templateLabel } from '@/lib/templateLabels';
 import { listPendingInspections, removePendingInspection, type PendingInspection } from '@/lib/pendingInspections';
 import { drainPendingCreates } from '@/lib/deferredCreate';
 import { syncAllProperties, dropPropertyMemCache } from '@/lib/propertyCache';
+import { setViewAsVendor, VIEW_AS_COOKIE } from '@/lib/services/viewAs';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -77,6 +78,15 @@ export default function Home() {
   const router = useRouter();
   const [me, setMe] = useState<MeUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  // Admin "View as Vendor" preview (cookie set by the View As picker). While
+  // active, /api/inspections scopes the list to the picked vendor's OWN
+  // inspections — surface that with a banner + an exit. Real vendor logins
+  // never carry this cookie, so they never see the banner.
+  const [asVendor, setAsVendor] = useState(false);
+  useEffect(() => {
+    try { setAsVendor(new RegExp(`(?:^|;\\s*)${VIEW_AS_COOKIE}=vendor(?:;|$)`).test(document.cookie)); }
+    catch { /* ignore */ }
+  }, []);
 
   const [inspections, setInspections] = useState<InspectionSummary[]>([]);
   // Inspections STARTED OFFLINE that haven't synced to HubSpot yet — merged into
@@ -846,6 +856,16 @@ export default function Home() {
 
           </div>
         </header>
+
+        {/* View-As-Vendor preview banner — mirrors the Services one. */}
+        {asVendor && (
+          <div className="max-w-3xl mx-auto px-4 pt-3">
+            <div className="flex items-center justify-between gap-2 bg-purple-600 text-white rounded-xl px-3 py-2 text-[12px] font-heading font-semibold">
+              <span>Viewing as Vendor — showing only this vendor&apos;s inspections.</span>
+              <button type="button" onClick={() => { setViewAsVendor(false); window.location.reload(); }} className="underline shrink-0">Exit</button>
+            </div>
+          </div>
+        )}
 
         {/* Frozen top region (large screens only): search + filters + bulk bar */}
         <div className="frozen-top">

@@ -14,6 +14,7 @@ import type {
   InspectionCounts,
 } from '@/lib/hubspot';
 import { isExternalEmail } from '@/lib/userAccess';
+import { isViewingAsVendor, viewAsVendorEmail } from '@/lib/services/viewAs';
 import { getSharedGen, sharedGet, sharedSet, bumpSharedGen, sharedCacheEnabled } from '@/lib/sharedCache';
 import type { InspectionSummary } from '@/lib/types';
 
@@ -121,11 +122,11 @@ export async function warmInspectionsCache(): Promise<boolean> {
   const pageSize = 20;
   const viewKey = null;
   // Byte-for-byte identical to the handler's countKey / listKey for this query.
-  const countKey = JSON.stringify({ search: '', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey });
-  const listKey = JSON.stringify({ search: '', status: 'all', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey, sortField, sortDir, page, pageSize });
+  const countKey = JSON.stringify({ search: '', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey, ownOnly: false });
+  const listKey = JSON.stringify({ search: '', status: 'all', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey, sortField, sortDir, page, pageSize, ownOnly: false });
   // Also warm the approvers' hot view (pending_approval) — same query, different
   // status chip. Counts are status-independent, so one counts warm covers both.
-  const pendingListKey = JSON.stringify({ search: '', status: 'pending_approval', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey, sortField, sortDir, page, pageSize });
+  const pendingListKey = JSON.stringify({ search: '', status: 'pending_approval', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey, sortField, sortDir, page, pageSize, ownOnly: false });
   await Promise.all([
     withCache(lists, listKey, TTL_MS, true, () =>
       searchInspectionsPage({ ...baseQuery, sortField, sortDir, page, pageSize }), STALE_MS),
@@ -285,17 +286,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const externalEmail = isExternalEmail(session.email) ? session.email : null;
   const templates = templatesRaw;
 
-  // State gate (external only): the view-only completed Scope/QC set is limited
-  // to the regions in states where this user has an inspection of their own.
-  // Empty array = no states unlocked yet (they see only their own 1099s). The
-  // value is folded into every cache key below since it's per-user.
+  // VENDOR mode: a vendor session — or an internal user in the View-As-Vendor
+  // preview — sees ONLY the inspections assigned to that vendor's email (every
+  // template type). No 1099-wide template rule and no unlocked completed
+  // Scope/QC view group. Checked BEFORE the 1099 path: a vendor's company email
+  // can be on an external domain, and the session flag must win. The preview
+  // branch is internal-only (session.vendor false + internal email), so a 1099
+  // setting the cookie can't widen or redirect their own scope. A preview with
+  // no picked vendor scopes to a sentinel that matches nothing (fail closed).
+  const vendorScopeEmail = session.vendor
+    ? session.email
+    : (!externalEmail && isViewingAsVendor(req))
+      ? (viewAsVendorEmail(req) || '__no-vendor-picked__@resiwalk.invalid')
+      : null;
+  const ownInspectionsOnly = vendorScopeEmail != null;
+  const effectiveEmail = ownInspectionsOnly ? vendorScopeEmail : externalEmail;
+
+  // State gate (1099 external only): the view-only completed Scope/QC set is
+  // limited to the regions in states where this user has an inspection of their
+  // own. Empty array = no states unlocked yet (they see only their own 1099s).
+  // The value is folded into every cache key below since it's per-user. Vendor
+  // mode skips it entirely (no view group to gate).
   let externalViewRegions: string[] | undefined;
-  if (externalEmail) {
+  if (externalEmail && !ownInspectionsOnly) {
     try { externalViewRegions = (await externalUnlockedView(externalEmail)).regions; }
     catch { externalViewRegions = []; }
   }
 
-  const baseQuery: InspectionQuery = { search, status, inspectors, templates, regions, externalEmail, externalViewRegions };
+  const baseQuery: InspectionQuery = { search, status, inspectors, templates, regions, externalEmail: effectiveEmail, externalViewRegions, ownInspectionsOnly };
   // Stable key parts: sort the multi-value arrays so equivalent selections share
   // a cache entry regardless of click order.
   const insKey = [...inspectors].sort();
@@ -305,12 +323,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const viewKey = externalViewRegions ? [...externalViewRegions].sort() : null;
   // Counts ignore the selected status (each chip shows its own total) and the
   // page/sort, so cache them on just the constraining filters.
-  const countKey = JSON.stringify({ search, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail, viewKey });
-  const listKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail, viewKey, sortField, sortDir, page, pageSize });
+  const countKey = JSON.stringify({ search, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail: effectiveEmail, viewKey, ownOnly: ownInspectionsOnly });
+  const listKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail: effectiveEmail, viewKey, sortField, sortDir, page, pageSize, ownOnly: ownInspectionsOnly });
   // Facets are DEPENDENT: each dropdown is constrained by the other active
   // filters (status, search, and the other dimensions' selections), so the cache
   // key includes them all.
-  const facetKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail, viewKey });
+  const facetKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail: effectiveEmail, viewKey, ownOnly: ownInspectionsOnly });
 
   // The filter dropdown options (facets) require a multi-page scan and are NOT
   // needed to render the inspection cards. On a slow connection that scan would

@@ -2359,6 +2359,11 @@ export interface InspectionQuery {
   //   • [..]      → restrict the view-only group to these regions.
   // Derived from `externalEmail`, so callers MUST fold it into any cache key.
   externalViewRegions?: string[] | null;
+  // VENDOR mode: with `externalEmail` set, restrict to ONLY the inspections
+  // assigned to that email (every template type) — no 1099-wide template rule
+  // and no unlocked completed Scope/Re-Inspect view group. Used for real vendor
+  // sessions and the admin View-As-Vendor preview. Fold into cache keys.
+  ownInspectionsOnly?: boolean;
 }
 
 export interface InspectionCounts {
@@ -2416,6 +2421,22 @@ function externalAllowGroups(q: InspectionQuery): { filters: any[] }[] {
   const ownerFilter = ownerValues.length
     ? [{ propertyName: 'inspector_email', operator: 'IN', values: ownerValues }]
     : [];
+  // VENDOR mode (real vendor session, or the admin View-As-Vendor preview):
+  // strictly the inspections ASSIGNED TO THEM — every template type, but no
+  // 1099-wide visibility and no unlocked completed-scope view group.
+  if (q.ownInspectionsOnly) {
+    // Fail closed: with no email to scope by, match nothing (never widen).
+    if (!ownerFilter.length) {
+      return [{ filters: [{ propertyName: 'inspector_email', operator: 'EQ', value: '__none__' }] }];
+    }
+    const status0 = q.status && q.status !== 'all' ? q.status : '';
+    const statusFilter = status0 === 'open'
+      ? { propertyName: 'status', operator: 'NOT_IN', values: OPEN_EXCLUDE_VARIANTS }
+      : status0 && STATUS_VARIANTS[status0]
+        ? { propertyName: 'status', operator: 'IN', values: STATUS_VARIANTS[status0] }
+        : { propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS };
+    return [{ filters: [statusFilter, ...ownerFilter, ...common] }];
+  }
   const selected = (q.templates || []).map((t) => t.trim()).filter((t) => t && t !== 'all');
   let editTpls: string[] = [...EXTERNAL_EDIT_TEMPLATES];
   let viewTpls: string[] = [...EXTERNAL_VIEW_TEMPLATES];
@@ -2828,9 +2849,10 @@ export async function inspectionFacets(query: InspectionQuery): Promise<{ inspec
   // rule (own 1099 + completed Scope/Re-Inspect) is carried through
   // `externalEmail`, so every scan is already bounded to what the user may see.
   const extViewRegions = query.externalViewRegions;
-  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, regions: query.regions, externalEmail: extEmail, externalViewRegions: extViewRegions };
-  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, regions: query.regions, externalEmail: extEmail, externalViewRegions: extViewRegions };
-  const regionQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, templates: query.templates, externalEmail: extEmail, externalViewRegions: extViewRegions };
+  const ownOnly = query.ownInspectionsOnly;
+  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, regions: query.regions, externalEmail: extEmail, externalViewRegions: extViewRegions, ownInspectionsOnly: ownOnly };
+  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, regions: query.regions, externalEmail: extEmail, externalViewRegions: extViewRegions, ownInspectionsOnly: ownOnly };
+  const regionQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, templates: query.templates, externalEmail: extEmail, externalViewRegions: extViewRegions, ownInspectionsOnly: ownOnly };
   const noneSelected = (query.inspectors?.length || 0) === 0
     && (query.templates?.length || 0) === 0
     && (query.regions?.length || 0) === 0;
