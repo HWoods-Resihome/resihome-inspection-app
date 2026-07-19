@@ -7705,6 +7705,131 @@ export async function fetchApprovedVendorCompanies(force = false): Promise<Vendo
   return out;
 }
 
+/** Drop the approved-vendors cache — call after ANY vendor company write so
+ *  access changes (deactivate/delete) take effect immediately on this instance. */
+export function bustVendorCompaniesCache(): void { _vendorCompanies = null; }
+
+// ── Vendor Management (admin) — full CRUD over vendor Companies ──────────────
+// The app is the primary UI for vendor onboarding/access (replacing hand-editing
+// the HubSpot Companies tab). Every write goes straight to HubSpot (companies
+// API) and busts the approved-vendors cache, so pickers/logins re-read live.
+
+export interface VendorAdminRow {
+  id: string;
+  name: string;
+  email: string;
+  regionsServiced: string;          // display string, e.g. "GA: Atlanta; TX: Houston"
+  resiwalkAccess: boolean;
+  eligibleForRecurring: boolean;
+  afterHoursService: boolean;
+  hasPassword: boolean;             // has set their ResiWalk login password
+}
+
+const VENDOR_ADMIN_PROPS = ['name', 'email', 'regions_serviced', 'resiwalk_access', 'eligible_for_recurring', 'after_hours_service', 'resiwalk_password'];
+// Properties that may not exist in a portal — dropped (with a warning) instead of
+// failing the whole list, mirroring the resiwalk_password fallback above.
+const VENDOR_ADMIN_OPTIONAL = ['regions_serviced', 'after_hours_service', 'resiwalk_password'];
+
+/** All vendor companies WITH ResiWalk access (any recurring state), full admin
+ *  fields. The "available for assignment" set stays the both-Yes list
+ *  (fetchApprovedVendorCompanies); this view manages access itself. */
+export async function fetchVendorAdminList(): Promise<VendorAdminRow[]> {
+  let properties = [...VENDOR_ADMIN_PROPS];
+  const runPage = (after?: string) => hubspotFetch(`/crm/v3/objects/companies/search`, {
+    method: 'POST',
+    body: JSON.stringify({
+      limit: 100, after, properties,
+      filterGroups: [{ filters: [{ propertyName: 'resiwalk_access', operator: 'IN', values: VENDOR_APPROVED_VALUES }] }],
+      sorts: [{ propertyName: 'name', direction: 'ASCENDING' }],
+    }),
+  });
+  const out: VendorAdminRow[] = [];
+  let after: string | undefined;
+  do {
+    let resp;
+    for (;;) {
+      try { resp = await runPage(after); break; }
+      catch (e: any) {
+        const missing = VENDOR_ADMIN_OPTIONAL.find((p) => properties.includes(p) && isMissingPropertyError(e, p));
+        if (!missing) throw e;
+        console.warn(`[vendor-admin] company property "${missing}" not provisioned — listing without it`);
+        properties = properties.filter((p) => p !== missing);
+      }
+    }
+    for (const r of resp.results || []) {
+      const p = r.properties || {};
+      if (!vendorTruthy(p.resiwalk_access)) continue;   // defensive re-check
+      out.push({
+        id: String(r.id),
+        name: String(p.name || '').trim(),
+        email: String(p.email || '').trim(),
+        regionsServiced: String(p.regions_serviced || '').trim(),
+        resiwalkAccess: true,
+        eligibleForRecurring: vendorTruthy(p.eligible_for_recurring),
+        afterHoursService: vendorTruthy(p.after_hours_service),
+        hasPassword: isVendorPasswordSet(p.resiwalk_password),
+      });
+    }
+    after = resp.paging?.next?.after || undefined;
+  } while (after);
+  return out;
+}
+
+export interface VendorWritePatch {
+  name?: string;
+  email?: string;
+  regionsServiced?: string;
+  resiwalkAccess?: boolean;
+  eligibleForRecurring?: boolean;
+  afterHoursService?: boolean;
+}
+
+// The Yes/No flags may be booleancheckbox ('true') OR a Yes/No enum ('Yes')
+// depending on how the portal defined them. Write the first candidate; on a
+// validation 400 retry with the alternate so both definitions work.
+function vendorFlagCandidates(v: boolean): [string, string] { return v ? ['Yes', 'true'] : ['No', 'false']; }
+function vendorPropsFor(patch: VendorWritePatch, pick: 0 | 1): Record<string, string> {
+  const props: Record<string, string> = {};
+  if (patch.name != null) props.name = patch.name.trim();
+  if (patch.email != null) props.email = patch.email.trim();
+  if (patch.regionsServiced != null) props.regions_serviced = patch.regionsServiced.trim();
+  if (patch.resiwalkAccess != null) props.resiwalk_access = vendorFlagCandidates(patch.resiwalkAccess)[pick];
+  if (patch.eligibleForRecurring != null) props.eligible_for_recurring = vendorFlagCandidates(patch.eligibleForRecurring)[pick];
+  if (patch.afterHoursService != null) props.after_hours_service = vendorFlagCandidates(patch.afterHoursService)[pick];
+  return props;
+}
+const isFlagFormatError = (e: any) => /not one of|invalid.*option|VALIDATION|was not valid|must be.*(true|false)/i.test(`${e?.message || ''} ${e?.detail || ''}`);
+
+/** Create a vendor Company in HubSpot (ResiWalk access ON unless specified). */
+export async function createVendorCompany(patch: VendorWritePatch): Promise<string> {
+  const full: VendorWritePatch = { resiwalkAccess: true, ...patch };
+  let resp;
+  try { resp = await hubspotFetch(`/crm/v3/objects/companies`, { method: 'POST', body: JSON.stringify({ properties: vendorPropsFor(full, 0) }) }); }
+  catch (e: any) {
+    if (!isFlagFormatError(e)) throw e;
+    resp = await hubspotFetch(`/crm/v3/objects/companies`, { method: 'POST', body: JSON.stringify({ properties: vendorPropsFor(full, 1) }) });
+  }
+  bustVendorCompaniesCache();
+  return String(resp?.id || '');
+}
+
+/** Patch a vendor Company (name/email/regions/flags). Access-off = revoke. */
+export async function updateVendorCompany(id: string, patch: VendorWritePatch): Promise<void> {
+  try { await hubspotFetch(`/crm/v3/objects/companies/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: vendorPropsFor(patch, 0) }) }); }
+  catch (e: any) {
+    if (!isFlagFormatError(e)) throw e;
+    await hubspotFetch(`/crm/v3/objects/companies/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: vendorPropsFor(patch, 1) }) });
+  }
+  bustVendorCompaniesCache();
+}
+
+/** Archive (delete) a vendor Company — removes it from HubSpot's active records
+ *  and thereby from every ResiWalk vendor list/login. */
+export async function archiveVendorCompany(id: string): Promise<void> {
+  await hubspotFetch(`/crm/v3/objects/companies/${id}`, { method: 'DELETE' });
+  bustVendorCompaniesCache();
+}
+
 /** The approved vendor whose notification `email` matches (case-insensitive), or null. */
 export async function findApprovedVendorByEmail(email: string | null | undefined): Promise<VendorCompany | null> {
   const e = String(email || '').trim().toLowerCase();
