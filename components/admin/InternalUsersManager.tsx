@@ -19,6 +19,9 @@ const CAPS: { key: CapKey; label: string }[] = [
   { key: 'admin', label: 'Admin' },
 ];
 const SECTION_CAPS: CapKey[] = ['inspections', 'services', 'insights'];
+// Instant repaint on reopen: cache the last roster in localStorage; the fresh
+// fetch reconciles behind it.
+const SNAP_KEY = 'resiwalk_users_admin_v1';
 
 interface UserRow {
   email: string; name: string; lastLogin: string | null; loginCount: number; seed: boolean;
@@ -74,11 +77,18 @@ export function InternalUsersManager() {
       const r = await fetch('/api/admin/users', { cache: 'no-store' });
       const d = await r.json();
       if (!r.ok) { setError(d.error || 'Failed to load'); return; }
-      setUsers(Array.isArray(d.users) ? d.users : []);
-      setEdits({});
+      const list: UserRow[] = Array.isArray(d.users) ? d.users : [];
+      setUsers(list); setEdits({});
+      try { localStorage.setItem(SNAP_KEY, JSON.stringify(list)); } catch { /* quota */ }
     } catch (e: any) { setError(String(e?.message || e)); }
   }, []);
-  useEffect(() => { if (open && users === null) void load(); }, [open, users, load]);
+  // Paint the last snapshot instantly on open (no spinner on reopen), then
+  // reconcile in the background — mirrors the vendor management page.
+  useEffect(() => {
+    if (!open || users !== null) return;
+    try { const snap = JSON.parse(localStorage.getItem(SNAP_KEY) || 'null'); if (Array.isArray(snap) && snap.length) setUsers(snap); } catch { /* corrupt */ }
+    void load();
+  }, [open, users, load]);
 
   const eff = (row: UserRow, cap: CapKey): boolean => {
     const e = edits[row.email];

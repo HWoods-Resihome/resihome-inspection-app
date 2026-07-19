@@ -16,11 +16,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { servicesEnabled } from '@/lib/servicesAccess';
-import { canViewInsights } from '@/lib/insightsAccess';
+import { isInternalEmail } from '@/lib/userAccess';
 import { readLoginActivity } from '@/lib/loginActivity';
-import { readAppUsers, fetchActiveUsers, fetchVendorAdminList } from '@/lib/hubspot';
-import { isResiwalkActive, inspectionsEnabled, applyUserPatches, isSeedUserEmail, type UserPatch } from '@/lib/userManagement';
+import { readAppUsers, readAppAdmins, readInsightsUsers, fetchActiveUsers, fetchVendorAdminList } from '@/lib/hubspot';
+import { applyUserPatches, isSeedUserEmail, type UserPatch } from '@/lib/userManagement';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req).catch(() => null);
@@ -29,37 +28,49 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'GET') {
     try {
-      const [activity, overrides, hubspotUsers, vendors] = await Promise.all([
+      // Read every map ONCE, in parallel, then compute each user's flags inline.
+      // (Calling the per-user resolvers instead caused a cold-cache stampede —
+      // every user concurrently re-fetching the same admin/insights/override
+      // blobs, dozens of duplicate HubSpot round-trips — which made this slow.)
+      const [activity, overrides, hubspotUsers, vendors, adminList, insightsList] = await Promise.all([
         readLoginActivity(),
         readAppUsers(),
         fetchActiveUsers().catch(() => []),
         fetchVendorAdminList().catch(() => []),
+        readAppAdmins().catch(() => []),
+        readInsightsUsers().catch(() => []),
       ]);
       // Vendor COMPANY emails never belong in the people roster.
       const vendorEmails = new Set(vendors.map((v) => v.email.trim().toLowerCase()).filter(Boolean));
       // HubSpot names by email — the fallback for users with no activity record.
       const hsName = new Map<string, string>();
       for (const u of hubspotUsers) hsName.set(String(u.email || '').trim().toLowerCase(), String(u.fullName || ''));
+      const adminSet = new Set(adminList.map((a) => a.email.trim().toLowerCase()));
+      const insightsSet = new Set(insightsList.map((u) => u.email.trim().toLowerCase()));
       const emails = Array.from(new Set(
         [...Object.keys(activity), ...Object.keys(overrides), ...hsName.keys()]
           .map((e) => e.trim().toLowerCase())
           .filter((e) => e && e.includes('@') && !vendorEmails.has(e)),
       ));
-      const users = await Promise.all(emails.map(async (email) => {
+      const users = emails.map((email) => {
         const act = activity[email] || {};
         const ov = overrides[email] || {};
-        const [active, inspections, services, insights, admin] = await Promise.all([
-          isResiwalkActive(email), inspectionsEnabled(email), servicesEnabled(email), canViewInsights(email), isAppAdmin(email),
-        ]);
+        const seed = isSeedUserEmail(email);
+        // Same resolution the gates use, but from the pre-read maps (no per-user IO).
+        const admin = seed ? true : (typeof ov.admin === 'boolean' ? ov.admin : adminSet.has(email));
+        const services = typeof ov.services === 'boolean' ? ov.services : admin;
+        const insights = typeof ov.insights === 'boolean' ? ov.insights : (admin || insightsSet.has(email));
+        const inspections = typeof ov.inspections === 'boolean' ? ov.inspections : isInternalEmail(email);
+        const active = seed ? true : ov.active !== false;
         return {
           email,
           name: (ov.name || act.name || hsName.get(email) || '').toString(),
           lastLogin: act.lastAt || null,
           loginCount: act.count || 0,
-          seed: isSeedUserEmail(email),
+          seed,
           access: { active, inspections, services, insights, admin },
         };
-      }));
+      });
       users.sort((a, b) => (b.lastLogin || '').localeCompare(a.lastLogin || ''));
       return res.status(200).json({ users });
     } catch (e: any) {
