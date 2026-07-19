@@ -14,11 +14,36 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchVendorAdminList, createVendorCompany, fetchPropertyCoverage } from '@/lib/hubspot';
+import { fetchVendorAdminList, createVendorCompany, updateVendorCompany, fetchPropertyCoverage } from '@/lib/hubspot';
+import { parseRegions, normalizeRegionsString } from '@/lib/vendorRegions';
 
 export const config = { maxDuration: 60 };
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+// The coverage scan (region options) is heavy and near-static — cache ~15 min.
+let _regionOptsCache: { at: number; regions: string[] } | null = null;
+async function regionOptionList(): Promise<string[]> {
+  if (_regionOptsCache && Date.now() - _regionOptsCache.at < 15 * 60 * 1000) return _regionOptsCache.regions;
+  const coverage = await fetchPropertyCoverage().catch(() => null);
+  const regions = (coverage?.regions || []).map((r: any) => (typeof r === 'string' ? r : r.key)).filter(Boolean);
+  _regionOptsCache = { at: Date.now(), regions };
+  return regions;
+}
+
+// Lazy DATA REPAIR: any vendor whose stored regions_serviced isn't in canonical
+// form (typo'd city, broken "O :" prefix, colon-joined multi-regions) gets its
+// Company record patched to the normalized string. Bounded + fire-and-forget so
+// a read never blocks on writes; each repair is permanent, so the set drains.
+function repairMalformedRegions(vendors: { id: string; regionsServiced: string }[]): void {
+  const broken = vendors
+    .filter((v) => v.regionsServiced && normalizeRegionsString(v.regionsServiced) !== v.regionsServiced)
+    .slice(0, 15);
+  if (!broken.length) return;
+  void Promise.allSettled(broken.map((v) =>
+    updateVendorCompany(v.id, { regionsServiced: normalizeRegionsString(v.regionsServiced) })
+  )).then(() => console.log(`[admin/vendors] repaired regions_serviced on ${broken.length} compan${broken.length === 1 ? 'y' : 'ies'}`));
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req).catch(() => null);
@@ -29,11 +54,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'GET') {
     try {
-      const [vendors, coverage] = await Promise.all([
-        fetchVendorAdminList(),
-        fetchPropertyCoverage().catch(() => null),
+      const force = String(req.query.refresh || '') === '1';
+      const [rawVendors, coverageRegions] = await Promise.all([
+        fetchVendorAdminList(force),
+        regionOptionList(),
       ]);
-      const regionOptions = (coverage?.regions || []).map((r: any) => (typeof r === 'string' ? r : r.key)).filter(Boolean);
+      // Serve NORMALIZED regions (display + option list are clean even before the
+      // background repair lands in HubSpot), and kick the repair for any rows
+      // whose stored string differs from canonical.
+      repairMalformedRegions(rawVendors);
+      const vendors = rawVendors.map((v) => ({ ...v, regionsServiced: normalizeRegionsString(v.regionsServiced) }));
+      const optionSet = new Set<string>(coverageRegions.map((r) => parseRegions(r)[0] || r));
+      for (const v of vendors) for (const r of parseRegions(v.regionsServiced)) optionSet.add(r);
+      const regionOptions = Array.from(optionSet).sort();
       return res.status(200).json({ vendors, regionOptions });
     } catch (e: any) {
       console.error('[admin/vendors] list failed:', e);
@@ -45,7 +78,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const b = req.body || {};
     const name = String(b.name || '').trim();
     const email = String(b.email || '').trim().toLowerCase();
-    const regionsServiced = String(b.regionsServiced || '').trim();
+    const regionsServiced = normalizeRegionsString(String(b.regionsServiced || ''));
     if (!name) return res.status(400).json({ error: 'Vendor name is required.' });
     if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'A valid email is required.' });
     if (!regionsServiced) return res.status(400).json({ error: 'At least one region is required.' });

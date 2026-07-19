@@ -9,7 +9,7 @@ import { useRef, useState } from 'react';
  * CLAMPED to the viewport, so it never runs off-screen on right-side filters.
  * Long option labels scroll horizontally inside the (viewport-capped) menu.
  */
-export function MultiFilter({ label, options, selected, onChange, className, sheet }: {
+export function MultiFilter({ label, options, selected, onChange, className, sheet, triggerLabel }: {
   label: string;
   options: { value: string; label: string }[];
   selected: string[];
@@ -19,13 +19,16 @@ export function MultiFilter({ label, options, selected, onChange, className, she
    *  instead of an anchored dropdown — for long lists on mid-page triggers that
    *  would otherwise run off-screen. */
   sheet?: boolean;
+  /** Override the trigger text (e.g. show the selected values themselves so the
+   *  value line IS the tappable control). The sheet header still shows `label`. */
+  triggerLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const btnRef = useRef<HTMLButtonElement>(null);
   const active = selected.length > 0;
   const toggle = (v: string) => onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
-  const summary = active ? `${label} (${selected.length})` : label;
+  const summary = triggerLabel ?? (active ? `${label} (${selected.length})` : label);
   const base = className ??
     `w-full truncate text-[11px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-md bg-white flex items-center justify-between ${active ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`;
 

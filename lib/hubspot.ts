@@ -7705,9 +7705,9 @@ export async function fetchApprovedVendorCompanies(force = false): Promise<Vendo
   return out;
 }
 
-/** Drop the approved-vendors cache — call after ANY vendor company write so
- *  access changes (deactivate/delete) take effect immediately on this instance. */
-export function bustVendorCompaniesCache(): void { _vendorCompanies = null; }
+/** Drop the vendor caches — call after ANY vendor company write so access
+ *  changes (deactivate/delete) take effect immediately on this instance. */
+export function bustVendorCompaniesCache(): void { _vendorCompanies = null; _vendorAdminCache = null; }
 
 // ── Vendor Management (admin) — full CRUD over vendor Companies ──────────────
 // The app is the primary UI for vendor onboarding/access (replacing hand-editing
@@ -7729,17 +7729,32 @@ const VENDOR_ADMIN_PROPS = ['name', 'email', 'regions_serviced', 'resiwalk_acces
 // Properties that may not exist in a portal — dropped (with a warning) instead of
 // failing the whole list, mirroring the resiwalk_password fallback above.
 const VENDOR_ADMIN_OPTIONAL = ['regions_serviced', 'after_hours_service', 'resiwalk_password'];
+// Explicit "No" encodings — a company whose resiwalk_access is SET to a negative
+// value is a DEACTIVATED vendor (shown for reactivation). Companies with the
+// property unset are ordinary companies and never appear here.
+const VENDOR_DENIED_VALUES = ['false', 'False', 'FALSE', 'No', 'no', 'NO', '0'];
 
-/** All vendor companies WITH ResiWalk access (any recurring state), full admin
- *  fields. The "available for assignment" set stays the both-Yes list
+// The companies search is the slowest read on the admin page and the roster
+// changes rarely — cache ~10 min; every vendor write busts it (see
+// bustVendorCompaniesCache) so edits still read back instantly.
+let _vendorAdminCache: { at: number; list: VendorAdminRow[] } | null = null;
+
+/** Every vendor Company ResiWalk knows: access=Yes (active) AND access
+ *  explicitly No (deactivated — reactivatable). Full admin fields. The
+ *  "available for assignment" set stays the both-Yes list
  *  (fetchApprovedVendorCompanies); this view manages access itself. */
-export async function fetchVendorAdminList(): Promise<VendorAdminRow[]> {
+export async function fetchVendorAdminList(force = false): Promise<VendorAdminRow[]> {
+  if (!force && _vendorAdminCache && Date.now() - _vendorAdminCache.at < 10 * 60 * 1000) return _vendorAdminCache.list;
   let properties = [...VENDOR_ADMIN_PROPS];
   const runPage = (after?: string) => hubspotFetch(`/crm/v3/objects/companies/search`, {
     method: 'POST',
     body: JSON.stringify({
       limit: 100, after, properties,
-      filterGroups: [{ filters: [{ propertyName: 'resiwalk_access', operator: 'IN', values: VENDOR_APPROVED_VALUES }] }],
+      // Two groups = OR: active vendors ∪ explicitly-deactivated vendors.
+      filterGroups: [
+        { filters: [{ propertyName: 'resiwalk_access', operator: 'IN', values: VENDOR_APPROVED_VALUES }] },
+        { filters: [{ propertyName: 'resiwalk_access', operator: 'IN', values: VENDOR_DENIED_VALUES }] },
+      ],
       sorts: [{ propertyName: 'name', direction: 'ASCENDING' }],
     }),
   });
@@ -7758,13 +7773,14 @@ export async function fetchVendorAdminList(): Promise<VendorAdminRow[]> {
     }
     for (const r of resp.results || []) {
       const p = r.properties || {};
-      if (!vendorTruthy(p.resiwalk_access)) continue;   // defensive re-check
+      const raw = String(p.resiwalk_access ?? '').trim();
+      if (!raw) continue;   // property unset — not a ResiWalk vendor
       out.push({
         id: String(r.id),
         name: String(p.name || '').trim(),
         email: String(p.email || '').trim(),
         regionsServiced: String(p.regions_serviced || '').trim(),
-        resiwalkAccess: true,
+        resiwalkAccess: vendorTruthy(raw),
         eligibleForRecurring: vendorTruthy(p.eligible_for_recurring),
         afterHoursService: vendorTruthy(p.after_hours_service),
         hasPassword: isVendorPasswordSet(p.resiwalk_password),
@@ -7772,6 +7788,7 @@ export async function fetchVendorAdminList(): Promise<VendorAdminRow[]> {
     }
     after = resp.paging?.next?.after || undefined;
   } while (after);
+  _vendorAdminCache = { at: Date.now(), list: out };
   return out;
 }
 

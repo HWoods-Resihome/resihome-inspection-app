@@ -13,6 +13,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { updateVendorCompany, archiveVendorCompany, type VendorWritePatch } from '@/lib/hubspot';
+import { normalizeRegionsString } from '@/lib/vendorRegions';
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -39,7 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       patch.email = email;
     }
     if (b.regionsServiced != null) {
-      const regions = String(b.regionsServiced).trim();
+      const regions = normalizeRegionsString(String(b.regionsServiced));
       if (!regions) return res.status(400).json({ error: 'At least one region is required.' });
       patch.regionsServiced = regions;
     }
