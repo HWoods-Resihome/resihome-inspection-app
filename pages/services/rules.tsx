@@ -498,13 +498,26 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
       skipMonths: rule.skipMonths.includes(m) ? rule.skipMonths.filter((x) => x !== m) : [...rule.skipMonths, m],
       cadences: rule.cadences.map((c) => ({ ...c, months: c.months.filter((x) => x !== m) })),
     });
+  // Every region under a set of portfolios (union, deduped), from the catalog.
+  const regionsUnder = (pfs: string[]): string[] => {
+    const s = new Set<string>();
+    for (const pf of pfs) for (const x of (coverage.regionsByPortfolio[pf] || [])) s.add(x.key);
+    return [...s];
+  };
   const toggleCoverage = (key: string) => {
-    if (rule.scope === 'property') patch({ portfolios: rule.portfolios.includes(key) ? rule.portfolios.filter((x) => x !== key) : [...rule.portfolios, key] });
-    else patch({ communities: rule.communities.includes(key) ? rule.communities.filter((x) => x !== key) : [...rule.communities, key] });
+    if (rule.scope === 'property') {
+      // Selecting a portfolio auto-checks every region under it; unchecking drops
+      // the regions no remaining portfolio still covers. Regions = all under the
+      // chosen portfolios (empty only while the catalog is still loading → = all).
+      const nextPfs = rule.portfolios.includes(key) ? rule.portfolios.filter((x) => x !== key) : [...rule.portfolios, key];
+      patch({ portfolios: nextPfs, regions: regionsUnder(nextPfs) });
+    } else patch({ communities: rule.communities.includes(key) ? rule.communities.filter((x) => x !== key) : [...rule.communities, key] });
   };
   const setManyCoverage = (keys: string[], on: boolean) => {
-    if (rule.scope === 'property') patch({ portfolios: on ? [...new Set([...rule.portfolios, ...keys])] : rule.portfolios.filter((k) => !keys.includes(k)) });
-    else patch({ communities: on ? [...new Set([...rule.communities, ...keys])] : rule.communities.filter((k) => !keys.includes(k)) });
+    if (rule.scope === 'property') {
+      const nextPfs = on ? [...new Set([...rule.portfolios, ...keys])] : rule.portfolios.filter((k) => !keys.includes(k));
+      patch({ portfolios: nextPfs, regions: regionsUnder(nextPfs) });
+    } else patch({ communities: on ? [...new Set([...rule.communities, ...keys])] : rule.communities.filter((k) => !keys.includes(k)) });
   };
   const setManyRegions = (keys: string[], on: boolean) =>
     patch({ regions: on ? [...new Set([...rule.regions, ...keys])] : rule.regions.filter((k) => !keys.includes(k)) });
