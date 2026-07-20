@@ -397,7 +397,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   // Until the catalog is loaded, counts show "…" instead of a misleading 0.
   const [covLoaded, setCovLoaded] = useState(false);
   useEffect(() => {
-    const CACHE_KEY = 'resiwalk.services.coverage.v1';
+    const CACHE_KEY = 'resiwalk.services.coverage.v2';   // v2: excludes inactive/sold/test properties + test portfolios
     const shape = (d: any): Coverage => ({
       portfolios: d.portfolios || [], regionsByPortfolio: d.regionsByPortfolio || {},
       regions: d.regions || [], communities: d.communities || [], statuses: d.statuses || [],

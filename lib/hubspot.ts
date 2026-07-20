@@ -541,6 +541,26 @@ const PROPERTY_EXCLUDE_STATUSES = (process.env.PROPERTY_EXCLUDE_STATUSES ||
   'Not Managed,Property Sold,PM Denied')
   .split(',').map((s) => s.trim()).filter(Boolean);
 
+// Canonical excluded-status set (case-insensitive), covering both "Property Sold"
+// and "Properties Sold" spellings so a sold home is hidden regardless of which the
+// HubSpot enum actually uses. Union of the env/default list above + these literals.
+const EXCLUDE_STATUS_SET = new Set(
+  [...PROPERTY_EXCLUDE_STATUSES, 'Not Managed', 'Property Sold', 'Properties Sold', 'PM Denied']
+    .map((s) => s.toLowerCase().trim()).filter(Boolean),
+);
+const isExcludedPropertyStatus = (status: string): boolean =>
+  EXCLUDE_STATUS_SET.has(String(status || '').toLowerCase().trim());
+// Test data — any address or portfolio name containing "test" (case-insensitive).
+const hasTestMarker = (text: string): boolean => /test/i.test(String(text || ''));
+/** A property is hidden from EVERY selection surface (inspections, services, rules
+ *  coverage) when its status is inactive/sold or its address is test data. */
+const isHiddenProperty = (status: string, address: string): boolean =>
+  isExcludedPropertyStatus(status) || hasTestMarker(address);
+/** A portfolio is hidden from selection when its name is test data (e.g.
+ *  "testPortfolio"). Portfolios that are only all-excluded properties disappear
+ *  on their own, because none of their properties survive the property filter. */
+const isExcludedPortfolio = (name: string): boolean => hasTestMarker(name);
+
 /**
  * Search the Property object server-side for the new-inspection picker.
  *
@@ -651,6 +671,8 @@ export async function fetchProperties(
   for (const r of resp.results || []) {
     const p = r.properties || {};
     const address = p.address || '';
+    const status = (p[PROPERTY_STATUS_PROPERTY] || '').toString().trim();
+    if (isHiddenProperty(status, address)) continue; // never selectable: inactive/sold or test
     const city = p.city || '';
     const state = p.state_code || p.state || '';
     const zip = (p.zip_code || p.zip || '').toString().trim();
@@ -666,7 +688,7 @@ export async function fetchProperties(
       state: state || undefined,
       zip: zip || undefined,
       region: (p.region || '').toString().trim() || undefined,
-      status: (p[PROPERTY_STATUS_PROPERTY] || '').toString().trim() || undefined,
+      status: status || undefined,
       bedrooms,
       bathrooms,
     });
@@ -698,8 +720,8 @@ export async function fetchPropertiesPage(
   for (const r of resp.results || []) {
     const p = r.properties || {};
     const status = (p[PROPERTY_STATUS_PROPERTY] || '').toString().trim();
-    if (status && PROPERTY_EXCLUDE_STATUSES.includes(status)) continue; // skip inactive
     const address = p.address || '';
+    if (isHiddenProperty(status, address)) continue; // skip inactive/sold or test
     const city = p.city || '';
     const state = p.state_code || p.state || '';
     const zip = (p.zip_code || p.zip || '').toString().trim();
@@ -823,15 +845,18 @@ export async function fetchPropertyCoverage(cap = 6000): Promise<CoverageCatalog
   try {
     let after: string | undefined;
     do {
-      const qs = new URLSearchParams({ limit: '100', properties: ['portfolio', 'region', PROPERTY_STATUS_PROPERTY].join(','), archived: 'false' });
+      const qs = new URLSearchParams({ limit: '100', properties: ['portfolio', 'region', 'address', PROPERTY_STATUS_PROPERTY].join(','), archived: 'false' });
       if (after) qs.set('after', after);
       const resp = await hubspotFetch(`/crm/v3/objects/${typeId}?${qs.toString()}`);
       for (const r of resp.results || []) {
         const p = r.properties || {};
         const status = String(p[PROPERTY_STATUS_PROPERTY] || '').trim();
-        if (status && PROPERTY_EXCLUDE_STATUSES.includes(status)) continue; // skip inactive
-        scanned++;
         const portfolio = String(p.portfolio || '').trim();
+        // Skip inactive/sold + test properties, and any test-named portfolio — so a
+        // portfolio with no surviving properties (e.g. all Not Managed, or testPortfolio)
+        // never appears as a selectable option.
+        if (isHiddenProperty(status, String(p.address || '')) || isExcludedPortfolio(portfolio)) continue;
+        scanned++;
         const region = String(p.region || '').trim();
         if (portfolio) {
           pf.set(portfolio, (pf.get(portfolio) || 0) + 1);
@@ -924,14 +949,17 @@ export async function searchPropertiesForCoverage(
       for (const r of resp.results || []) {
         const p = r.properties || {};
         const address = String(p.address || '').trim();
+        const status = String(p[PROPERTY_STATUS_PROPERTY] || '').trim();
+        const portfolio = String(p.portfolio || '').trim();
+        if (isHiddenProperty(status, address) || isExcludedPortfolio(portfolio)) continue; // inactive/sold/test
         const city = String(p.city || '').trim();
         const st = String(p.state_code || p.state || '').trim();
         const zip = String(p.zip_code || p.zip || '').trim();
         out.push({
           id: String(r.id), address: address || `(Property ${r.id})`,
           locality: [city, st, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
-          region: String(p.region || '').trim(), portfolio: String(p.portfolio || '').trim(),
-          status: String(p[PROPERTY_STATUS_PROPERTY] || '').trim(),
+          region: String(p.region || '').trim(), portfolio,
+          status,
           rrqcPassDate: String(p.rrqc_pass_date || '').trim(),
         });
         if (out.length >= limit) return out;
@@ -1245,16 +1273,19 @@ export async function fetchCommunityProperties(communityId: string): Promise<Com
       });
       for (const r of resp.results || []) {
         const p = r.properties || {};
+        const address = String(p.address || '').trim();
+        const status = String(p[PROPERTY_STATUS_PROPERTY] || '').trim();
+        if (isHiddenProperty(status, address)) continue; // don't service inactive/sold/test homes
         const city = String(p.city || '').trim();
         const st = String(p.state_code || p.state || '').trim();
         const zip = String(p.zip_code || p.zip || '').trim();
         out.push({
           id: String(r.id),
-          address: String(p.address || '').trim() || `(Property ${r.id})`,
+          address: address || `(Property ${r.id})`,
           locality: [city, st, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
           region: String(p.region || '').trim(),
           rrqcPassDate: String(p.rrqc_pass_date || '').trim(),
-          status: String(p[PROPERTY_STATUS_PROPERTY] || '').trim(),
+          status,
         });
       }
     } catch (e) { console.warn('[community] batch read failed:', e); }
