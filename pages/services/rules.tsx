@@ -526,6 +526,16 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
       : field === 'Deal Stage'
         ? dealStages
         : optsFor(field).map((o) => ({ value: o, label: o }));
+  // ENROLLMENT can't target inactive statuses — you don't start servicing a home
+  // because it was sold or dropped from management. (Stop criteria still can, so a
+  // rule can end when a home hits one of these.) Filtered by label/value.
+  const ENROLL_HIDDEN_STATUSES = ['property sold', 'properties sold', 'not managed'];
+  const enrollValueOptsFor = (field: string): { value: string; label: string }[] =>
+    field === 'Property Status'
+      ? valueOptsFor(field).filter((o) =>
+          !ENROLL_HIDDEN_STATUSES.includes(o.label.toLowerCase().trim()) &&
+          !ENROLL_HIDDEN_STATUSES.includes(o.value.toLowerCase().trim()))
+      : valueOptsFor(field);
   const applicableProps = coverageProps;   // server-filtered to the selected portfolios + regions
   // Search matches address, region, AND the City/ST/ZIP locality (so a city or
   // zip narrows the list).
@@ -1144,7 +1154,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                     <div className="basis-[34%] shrink min-w-0">
                       <ListPicker value={c.field} ariaLabel="Enrollment field" className={`${pick} w-full`}
                         options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
-                        onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patchCrit(i, { field: v, op: opsFor(v)[0], vals: first ? [first] : [] }); }} />
+                        onChange={(v) => { const first = enrollValueOptsFor(v)[0]?.value; patchCrit(i, { field: v, op: opsFor(v)[0], vals: first ? [first] : [] }); }} />
                     </div>
                     <div className="basis-[26%] shrink min-w-0">
                       <ListPicker value={c.op} ariaLabel="Operator" className={`${pick} w-full`}
@@ -1155,11 +1165,11 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                       {c.op === 'is known' ? (
                         <span className="text-[12px] text-gray-500">has any date</span>
                       ) : isMultiOp(c.op) ? (
-                        <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
+                        <MultiFilter label="Values" sheet options={enrollValueOptsFor(c.field)} selected={c.vals}
                           onChange={(next) => patchCrit(i, { vals: next })} className={`${pick} w-full`} />
                       ) : (
                         <ListPicker value={c.vals[0] || ''} ariaLabel="Value" className={`${pick} w-full`}
-                          options={valueOptsFor(c.field)} onChange={(v) => patchCrit(i, { vals: [v] })} />
+                          options={enrollValueOptsFor(c.field)} onChange={(v) => patchCrit(i, { vals: [v] })} />
                       )}
                     </div>
                     <button type="button" onClick={() => removeCrit(i)} aria-label="Remove criterion"
