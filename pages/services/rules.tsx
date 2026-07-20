@@ -517,7 +517,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
         ? dealStages
         : optsFor(field).map((o) => ({ value: o, label: o }));
   const applicableProps = coverageProps;   // server-filtered to the selected portfolios + regions
-  const visibleProps = applicableProps.filter((p) => !propSearch.trim() || `${p.address} ${p.region}`.toLowerCase().includes(propSearch.trim().toLowerCase()));
+  // Search matches address, region, AND the City/ST/ZIP locality (so a city or
+  // zip narrows the list).
+  const visibleProps = applicableProps.filter((p) => !propSearch.trim() || `${p.address} ${p.locality} ${p.region}`.toLowerCase().includes(propSearch.trim().toLowerCase()));
   const isPropOn = (id: string) => !!rule && (rule.propsMode === 'all' || rule.includedProps.includes(id));
   // Current included id set: everything applicable in 'all' mode, else the fixed list.
   const effectiveIncluded = () => new Set(rule && rule.propsMode === 'all' ? applicableProps.map((p) => p.id) : (rule?.includedProps || []));
@@ -934,7 +936,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                   {propsOpen && (
                     <div className="border-t border-gray-100">
                       <div className="p-2 border-b border-gray-100">
-                        <input value={propSearch} onChange={(e) => setPropSearch(e.target.value)} placeholder="Search properties…"
+                        <input value={propSearch} onChange={(e) => setPropSearch(e.target.value)} placeholder="Search address, city, or zip…"
                           className="w-full text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:border-brand" />
                       </div>
                       <div className="flex gap-4 px-3 py-2 text-[12px] font-semibold border-b border-gray-100">
@@ -948,7 +950,10 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                           return (
                             <button key={p.id} type="button" onClick={() => toggleProp(p.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] hover:bg-gray-50 text-left">
                               <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] font-bold shrink-0 ${on ? 'bg-brand border-brand text-white' : 'border-gray-300'}`}>{on ? '✓' : ''}</span>
-                              <span className="flex-1 truncate text-ink">{p.address}</span>
+                              <span className="flex-1 min-w-0">
+                                <span className="block truncate text-ink">{p.address}</span>
+                                {p.locality && <span className="block truncate text-[11px] text-gray-400">{p.locality}</span>}
+                              </span>
                               <span className="text-[11px] text-gray-400 shrink-0">{p.region.replace('GA: ', '')}</span>
                             </button>
                           );
