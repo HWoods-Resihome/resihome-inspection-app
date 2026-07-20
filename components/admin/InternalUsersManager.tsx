@@ -279,11 +279,13 @@ export function InternalUsersManager() {
                         className="w-full flex items-center justify-between gap-3 px-3.5 py-2.5 text-left hover:bg-gray-50">
                         <div className="min-w-0">
                           {/* Full name always visible — wraps to more lines
-                              instead of truncating (the header grows). */}
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-heading font-bold text-[14px] text-ink break-words">{u.name || u.email}</span>
-                            {!isInternalEmail(u.email) && <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5">1099</span>}
-                            {dirty && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-brand" />}
+                              instead of truncating (the header grows). The 1099
+                              badge + dirty dot flow INLINE after the last word
+                              of the name, so they never claim their own row. */}
+                          <div className="font-heading font-bold text-[14px] text-ink break-words">
+                            {u.name || u.email}
+                            {!isInternalEmail(u.email) && <span className="ml-2 align-middle inline-block text-[9px] font-bold uppercase tracking-wide text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5">1099</span>}
+                            {dirty && <span className="ml-1.5 align-middle inline-block w-1.5 h-1.5 rounded-full bg-brand" />}
                           </div>
                           <div className="text-[12px] text-gray-500 truncate">{u.email}</div>
                           {/* Own line so a long email can't truncate the date away. */}
