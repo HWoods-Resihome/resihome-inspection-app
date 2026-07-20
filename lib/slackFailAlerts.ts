@@ -19,6 +19,10 @@ export type FailReviewType = 'Grass' | 'Pool';
 
 export const PINK = '#FF0066'; // ResiHome hot pink — NEW / needs action
 
+// Single label the shared v0 interactivity handler keys on for BOTH grass and
+// pool fails, so one branch there serves both alerts.
+export const SHARED_REVIEW_TYPE = 'Grass/Pool';
+
 /** Context for rendering the card + the shared handler's `leave_note` payload. */
 export interface FailNoteCtx {
   reviewType: FailReviewType;
@@ -51,7 +55,7 @@ function leaveNoteBtn(c: FailNoteCtx) {
     text: { type: 'plain_text', text: 'Leave Note on Property', emoji: true },
     value: JSON.stringify({
       action: 'leave_note',
-      reviewType: c.reviewType,
+      reviewType: SHARED_REVIEW_TYPE, // 'Grass/Pool' — one branch serves both
       inspectionId: c.inspectionId,
       propertyId: c.propertyId || '',
       address: c.address,
