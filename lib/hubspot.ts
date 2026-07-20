@@ -1768,16 +1768,29 @@ const HUBSPOT_SEARCH_MAX = 10_000;
  *  generation dedup + rotation. Null ONLY when the object isn't configured; a real
  *  read error THROWS (so generation fails loudly instead of silently reading the
  *  null as "not configured" and creating nothing). */
-export async function readServiceWorkOrderKeys(): Promise<{ key: string; status: string; vendor: string }[] | null> {
+export interface ServiceWorkOrderKey {
+  key: string; status: string; vendor: string;
+  // Cadence anchors for recurring regeneration: submittedAt (the service-completion
+  // date — self-healing anchor), completedAt (approval — fallback), dueDate (the
+  // order's scheduled due). All '' when unset. YYYY-MM-DD or ISO/epoch strings.
+  submittedAt: string; completedAt: string; dueDate: string;
+}
+export async function readServiceWorkOrderKeys(): Promise<ServiceWorkOrderKey[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
-  const out: { key: string; status: string; vendor: string }[] = [];
+  const out: ServiceWorkOrderKey[] = [];
   let after: string | undefined;
   do {
     const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-      method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status', 'vendor_name'] }),
+      method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status', 'vendor_name', 'submitted_at', 'completed_at', 'due_date'] }),
     });
-    for (const r of resp.results || []) out.push({ key: String(r.properties?.enrollment_key || ''), status: String(r.properties?.status || ''), vendor: String(r.properties?.vendor_name || '') });
+    for (const r of resp.results || []) {
+      const p = r.properties || {};
+      out.push({
+        key: String(p.enrollment_key || ''), status: String(p.status || ''), vendor: String(p.vendor_name || ''),
+        submittedAt: String(p.submitted_at || ''), completedAt: String(p.completed_at || ''), dueDate: String(p.due_date || ''),
+      });
+    }
     after = resp.paging?.next?.after;
     if (out.length >= HUBSPOT_SEARCH_MAX) { if (after) console.warn('[services] key scan hit the 10k search cap — dedup set is partial'); break; }
   } while (after);

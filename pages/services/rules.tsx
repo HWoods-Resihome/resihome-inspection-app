@@ -97,11 +97,14 @@ const RULE_SORT: { value: RuleSortField; label: string }[] = [
   { value: 'region', label: 'Region' }, { value: 'community', label: 'Community' },
 ];
 
-type Unit = 'days' | 'weeks' | 'months';
-// interval is a STRING so it can be cleared/retyped; dow -1 and dom 0 mean "Any day".
-// dueDays = the completion window: an order created by this cadence is due N days
-// after it generates (blank → falls back to the rule's First Order Due, else 5).
-interface Cadence { id: number; unit: Unit; interval: string; dow: number; dom: number; months: number[]; dueDays: string; }
+// Cadence is either "every N days" (unit 'days'; dow = optional weekday anchor
+// that seeds the first order — Mon=0…Sun=6, -1 = any day) or "monthly on day X"
+// (unit 'months'; interval = every N months, dom = day-of-month, 0 = any). Legacy
+// 'weeks' cadences are migrated to days (×7) on load. interval is a STRING so it
+// can be cleared/retyped. The due date IS the scheduled service date — there is no
+// separate "due within N days" window (recurring regeneration is self-healing).
+type Unit = 'days' | 'months';
+interface Cadence { id: number; unit: Unit; interval: string; dow: number; dom: number; months: number[]; }
 interface Rule {
   id: number; recordId?: string;            // HubSpot Service Rule record id (undefined = not saved yet)
   name: string; active: boolean; worktype: Worktype; subtype: string;
@@ -134,7 +137,7 @@ interface Rule {
 }
 
 let _cid = 100;
-const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: '', dow: -1, dom: 0, months, dueDays: '' });
+const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'days', interval: '7', dow: -1, dom: 1, months });
 
 // Searchable, multi-select, scrollable dropdown for portfolio/community/region
 // coverage, with Select all / Deselect all over the current search results.
@@ -194,8 +197,8 @@ const SEED: Rule[] = [
     portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [
-      { id: 11, unit: 'weeks', interval: '2', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9], dueDays: '4' },
-      { id: 12, unit: 'months', interval: '1', dow: 0, dom: 15, months: [10, 11], dueDays: '7' },
+      { id: 11, unit: 'days', interval: '14', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
+      { id: 12, unit: 'months', interval: '1', dow: 0, dom: 15, months: [10, 11] },
     ],
     initialDueDays: '5', skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
@@ -206,7 +209,7 @@ const SEED: Rule[] = [
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
     portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
-    cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dueDays: '4' }],
+    cadences: [{ id: 21, unit: 'days', interval: '7', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
     enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }], enrollCombinator: 'and', startDate: '',
@@ -259,7 +262,14 @@ function parseStopCriteria(p: Record<string, any>): EnrollCriterion[] {
 let _rid = 900;
 function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule {
   const p = rec.props;
-  const cadences: Cadence[] = parseArr(p.cadences_json).map((c: any) => ({ id: ++_cid, unit: (c.unit || 'weeks') as Unit, interval: String(c.interval ?? ''), dow: Number(c.dow ?? -1), dom: Number(c.dom ?? 0), months: Array.isArray(c.months) ? c.months : [], dueDays: c.dueDays != null ? String(c.dueDays) : '' }));
+  // Migrate legacy cadences: 'weeks' → 'days' (×7); the old per-cadence "dueDays"
+  // completion window is dropped (the due date is now the scheduled service date).
+  const cadences: Cadence[] = parseArr(p.cadences_json).map((c: any) => {
+    const rawUnit = String(c.unit || 'weeks');
+    const unit: Unit = rawUnit === 'months' ? 'months' : 'days';
+    const interval = rawUnit === 'weeks' ? String((Number(c.interval) || 1) * 7) : String(c.interval ?? '');
+    return { id: ++_cid, unit, interval, dow: Number(c.dow ?? -1), dom: Number(c.dom ?? 0), months: Array.isArray(c.months) ? c.months : [] };
+  });
   return {
     id: ++_rid, recordId: rec.id,
     name: p.rule_name || 'Rule', active: p.active === 'true',
@@ -1029,7 +1039,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                     className={`${ctl} w-12 text-center tabular-nums ${!rule.recurring && !rule.initialDueDays.trim() ? 'border-red-300' : ''}`} />
                   <span className="text-gray-600">days after enrollment</span>
                 </div>
-                <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Fallback due window · a cadence’s own “Due within” overrides this.' : 'Required — a one-time service has no cadence to schedule from.'}</div>
+                <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Optional — the first order lands this many days after enrollment; the cadence takes over after that.' : 'Required — a one-time service has no cadence to schedule from.'}</div>
               </div>
             </div>
 
@@ -1053,27 +1063,27 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                           aria-label="Delete cadence" title="Delete cadence"
                           className="absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 text-lg leading-none">×</button>
                       )}
-                      <div className="flex flex-nowrap items-center gap-1.5 mb-2.5">
+                      <div className="flex flex-nowrap items-center gap-1.5 mb-2">
                         <span className="text-[13px] text-gray-600 shrink-0">Every</span>
-                        <input value={c.interval} onChange={(e) => patchCadence(c.id, { interval: e.target.value.replace(/\D/g, '') })} className={`${ctl} w-11 shrink-0 text-center tabular-nums`} />
+                        <input value={c.interval} inputMode="numeric" onChange={(e) => patchCadence(c.id, { interval: e.target.value.replace(/\D/g, '') })} className={`${ctl} w-11 shrink-0 text-center tabular-nums`} />
                         <select value={c.unit} onChange={(e) => patchCadence(c.id, { unit: e.target.value as Unit })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}>
-                          <option value="days">days</option><option value="weeks">weeks</option><option value="months">months</option>
+                          <option value="days">days</option><option value="months">months</option>
                         </select>
-                        {c.unit === 'weeks' && (
+                        {c.unit === 'days' ? (
                           <><span className="text-[13px] text-gray-600 shrink-0">on</span>
-                          <select value={c.dow} onChange={(e) => patchCadence(c.id, { dow: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={-1}>Any day</option>{DOW.map((d, di) => <option key={d} value={di}>{d}</option>)}</select></>
-                        )}
-                        {c.unit === 'months' && (
+                          <select value={c.dow} onChange={(e) => patchCadence(c.id, { dow: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={-1}>any day</option>{DOW.map((d, di) => <option key={d} value={di}>{d}</option>)}</select></>
+                        ) : (
                           <><span className="text-[13px] text-gray-600 shrink-0 whitespace-nowrap">on day</span>
-                          <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={0}>Any day</option>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
+                          <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={0}>any day</option>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
                         )}
                       </div>
-                      {/* Completion window: how many days after it generates the order is due. */}
-                      <div className="flex flex-nowrap items-center gap-1.5 mb-2.5">
-                        <span className="text-[13px] text-gray-600 shrink-0">Due within</span>
-                        <input value={c.dueDays} inputMode="numeric" onChange={(e) => patchCadence(c.id, { dueDays: e.target.value.replace(/\D/g, '') })}
-                          placeholder="—" className={`${ctl} w-11 shrink-0 text-center tabular-nums`} />
-                        <span className="text-[13px] text-gray-600 shrink-0">days of creation</span>
+                      {/* The due date IS the scheduled service date — no separate completion window. */}
+                      <div className="text-[11px] text-gray-400 mb-2.5 leading-snug">
+                        {c.unit === 'days'
+                          ? (c.dow >= 0
+                              ? `First order lands on the next ${DOW[c.dow]}; each next order is due one cadence (${c.interval || '—'} days) after the prior service is completed.`
+                              : 'The first order seeds the rhythm; each next order is due one cadence after the prior service is completed.')
+                          : `A fixed calendar date${c.dom > 0 ? ` (the ${c.dom}${c.dom === 1 ? 'st' : c.dom === 2 ? 'nd' : c.dom === 3 ? 'rd' : 'th'})` : ''} each ${c.interval && c.interval !== '1' ? `${c.interval} months` : 'month'} — best for contract billing.`}
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {MONTHS.map((m, mi) => {

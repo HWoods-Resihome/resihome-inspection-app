@@ -92,6 +92,94 @@ function addDays(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// ── Cadence date math ─────────────────────────────────────────────────────────
+const monthOf = (iso: string): number => Number(iso.slice(5, 7)) - 1;
+// Day of week with MONDAY = 0 … SUNDAY = 6 (matches the rules UI's DOW array).
+const dowMon0 = (iso: string): number => (new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7;
+const daysInMonth = (y: number, m0: number): number => new Date(Date.UTC(y, m0 + 1, 0)).getUTCDate();
+/** Next date on/after `iso` whose weekday (Mon=0) equals `dow`. */
+function nextDowOnOrAfter(iso: string, dow: number): string {
+  let d = iso;
+  for (let i = 0; i < 7; i++) { if (dowMon0(d) === dow) return d; d = addDays(d, 1); }
+  return iso;
+}
+/** Add `months` calendar months to `iso`, landing on day `dom` (0 = keep the same
+ *  day-of-month), clamped to the target month's length (so day 31 → Feb 28/29). */
+function addMonthsClampDom(iso: string, months: number, dom: number): string {
+  const y = Number(iso.slice(0, 4)); const m0 = Number(iso.slice(5, 7)) - 1; const d = Number(iso.slice(8, 10));
+  const t = m0 + months; const ny = y + Math.floor(t / 12); const nm = ((t % 12) + 12) % 12;
+  const day = Math.min(dom > 0 ? dom : d, daysInMonth(ny, nm));
+  return `${String(ny).padStart(4, '0')}-${String(nm + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+/** Next occurrence of day-of-month `dom` on/after `iso`. */
+function nextDomOnOrAfter(iso: string, dom: number): string {
+  const same = addMonthsClampDom(iso, 0, dom);
+  return same >= iso ? same : addMonthsClampDom(iso, 1, dom);
+}
+/** Normalise any stored date/datetime (YYYY-MM-DD, ISO, or epoch-ms) to YYYY-MM-DD. */
+function dateOnly(s: string): string {
+  const raw = (s || '').trim(); if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const d = new Date(/^\d+$/.test(raw) ? Number(raw) : raw);
+  return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
+const maxISO = (a: string, b: string): string => (!a ? b : !b ? a : a >= b ? a : b);
+
+// ── Cadence model ─────────────────────────────────────────────────────────────
+// A rule's cadence: "every N days" (unit days/weeks, dow = weekday anchor seed) or
+// "monthly on day X" (unit months, dom = day-of-month). Legacy weekly cadences
+// (unit 'weeks') are read as N×7 days. Each cadence owns a set of months.
+type CUnit = 'days' | 'weeks' | 'months';
+interface Cad { unit: CUnit; interval: number; dow: number; dom: number; months: number[] }
+function parseCadences(p: Record<string, any>): Cad[] {
+  return parseArr(p.cadences_json).map((c: any) => ({
+    unit: (c.unit === 'days' || c.unit === 'months') ? c.unit : 'weeks',
+    interval: Math.max(1, Number(c.interval) || 1),
+    dow: Number(c.dow ?? -1), dom: Number(c.dom ?? 0),
+    months: Array.isArray(c.months) ? c.months.map(Number) : [],
+  }));
+}
+const isMonthly = (c: Cad): boolean => c.unit === 'months';
+const intervalDaysOf = (c: Cad): number => (c.unit === 'weeks' ? c.interval * 7 : c.interval);
+const cadenceForMonth = (cads: Cad[], monthIdx: number): Cad | null =>
+  cads.find((c) => c.months.includes(monthIdx)) || cads[0] || null;
+/** One cadence step from `iso` (dir +1 forward, -1 back). Monthly steps by calendar
+ *  month on the cadence's day; day/week cadences step by whole days. */
+function stepDate(iso: string, c: Cad, dir: 1 | -1): string {
+  return isMonthly(c) ? addMonthsClampDom(iso, dir * c.interval, c.dom) : addDays(iso, dir * intervalDaysOf(c));
+}
+/** A month is generatable if some cadence covers it AND it isn't a skip month. */
+const isActiveMonth = (monthIdx: number, cads: Cad[], skip: Set<number>): boolean =>
+  cads.some((c) => c.months.includes(monthIdx)) && !skip.has(monthIdx);
+/** Roll a candidate due date forward whole cadence steps until it lands in an
+ *  active month (skip-months respected by the DUE date's month). Returns null if
+ *  no active month is reachable within a year (e.g. every month skipped). */
+function rollToActiveDue(iso: string, cads: Cad[], skip: Set<number>): { due: string; rolled: boolean } | null {
+  let due = iso; let rolled = false;
+  for (let i = 0; i < 24; i++) {
+    if (isActiveMonth(monthOf(due), cads, skip)) return { due, rolled };
+    const c = cadenceForMonth(cads, monthOf(due)); if (!c) return null;
+    due = stepDate(due, c, 1); rolled = true;
+  }
+  return null;
+}
+/** First-order due date for a fresh enrollment: the "first order due earlier"
+ *  window if set, else the cadence's weekday / day-of-month anchor, else one step
+ *  out — then rolled into an active month. */
+function seedFirstDue(p: Record<string, any>, cads: Cad[], todayISO: string, skip: Set<number>): { due: string; rolled: boolean } | null {
+  const start = String(p.start_date || '').trim();
+  const base = start && start > todayISO ? start : todayISO;
+  const initial = Number(p.initial_due_days);
+  const c0 = cadenceForMonth(cads, monthOf(base));
+  let due: string;
+  if (Number.isFinite(initial) && initial > 0) due = addDays(base, initial);
+  else if (c0 && isMonthly(c0)) due = nextDomOnOrAfter(base, c0.dom > 0 ? c0.dom : Number(base.slice(8, 10)));
+  else if (c0 && c0.dow >= 0) due = nextDowOnOrAfter(base, c0.dow);
+  else if (c0) due = stepDate(base, c0, 1);
+  else due = addDays(base, 7);
+  return rollToActiveDue(due, cads, skip);
+}
+
 interface Target { id: string; scope: 'property' | 'community'; address: string; locality: string; region: string; community?: string;
   // Set only for a one-time, deal-triggered rule: the specific leasing deal whose
   // stage triggered enrollment. Folded into the enrollment key so each new deal
@@ -235,6 +323,9 @@ export interface GenerateResult {
     action: 'CREATE' | 'created' | 'skip-open' | 'error'; recordId?: string; error?: string;
   }[];
   notes: string[];
+  // Community contracts that have ≥3 open orders of the same type stacked up (the
+  // vendor is behind). Surfaced to Admin ▸ Error Log by the nightly cron.
+  communityBacklogAlerts: string[];
   // For a single community grass-cut rule: how many properties the master covers.
   masterCoverage?: number;
 }
@@ -253,10 +344,21 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
 
   // Enrollment keys with a currently-open (non-terminal) order — dedup set.
   const openKeys = new Set(existing.filter((e) => OPEN_STATUSES.has(e.status)).map((e) => e.key).filter(Boolean));
+  // Every key EVER generated (any status) — community date-keyed dedup across runs.
+  const everKeys = new Set(existing.map((e) => e.key).filter(Boolean));
   // Total orders EVER generated per enrollment key (all statuses) — powers the
   // "stop after N services" cap ("all generated" counting basis).
   const genCountByKey = new Map<string, number>();
   for (const e of existing) if (e.key) genCountByKey.set(e.key, (genCountByKey.get(e.key) || 0) + 1);
+  // Most-recent CLOSED (terminal) order per key — the property self-healing anchor.
+  // "Latest" by service date (submitted → completed → due). Only non-open statuses.
+  const closedByKey = new Map<string, typeof existing[number]>();
+  const closedAnchor = (o: typeof existing[number]) => dateOnly(o.submittedAt) || dateOnly(o.completedAt) || dateOnly(o.dueDate);
+  for (const e of existing) {
+    if (!e.key || OPEN_STATUSES.has(e.status)) continue;
+    const cur = closedByKey.get(e.key);
+    if (!cur || closedAnchor(e) > closedAnchor(cur)) closedByKey.set(e.key, e);
+  }
 
   // Vendor rotation state (equal-volume balance + sticky-per-address, §10.18).
   // Built from every existing order's key/status/vendor; pickVendor reserves each
@@ -297,11 +399,12 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
   const result: GenerateResult = {
     mode: apply ? 'apply' : 'dry-run', today: todayISO, configured: true,
     rulesActive: 0, rulesSkipped: 0, wouldCreate: 0, created: 0, skippedExisting: 0, errors: 0,
-    items: [], notes: [
+    items: [], communityBacklogAlerts: [], notes: [
       'Property targets: live Property records in the rule’s portfolios/regions, filtered by the enrollment criteria (Property Status / RRQC), combined with the rule’s AND/OR. Community targets: one per selected community.',
-      'Stop enforced: condition (Property Status / RRQC), date (rule stops on/after the date), and count (stop after N generated per property). A rule with a future start date stays dormant. Due = created date + the active cadence’s “Due within” days (else First Order Due, else +5).',
+      'Property (self-healing): one open order per property. The next is created immediately after the current closes, due = max(scheduled due, service-completion date) + one cadence step — a late finish re-anchors the rhythm to when the work was actually done.',
+      'Community (contract calendar): occurrences generate on a fixed schedule regardless of completion — the day after each due date mints the next (due = prior due + a step), so open orders can stack. ≥3 open of the same type raises a backlog alert.',
+      'Cadence is “every N days” (weekday anchor seeds the first order) or “monthly on day X”. Skip months are respected by the DUE date’s month; a due rolled across a skip month isn’t created until within one step of it. First Order Due lets the first one land earlier.',
       'Vendor rotation: an address keeps its vendor for the enrollment’s life (sticky); net-new enrollments balance toward the rule vendor with the lowest open volume, ties by vendor order.',
-      'One open order per (rule, target) at a time — the next generates after the current completes/cancels.',
     ],
   };
 
@@ -329,60 +432,29 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
     // regenerating after it completes (recurring rules DO regenerate the next
     // occurrence once the current one closes).
     const recurring = p.recurring !== 'false';
-
+    const scope = p.scope === 'community' ? 'community' : 'property';
     const worktype = (p.worktype || 'landscaping') as Worktype;
     const subtype = p.subtype || '';
     const vendors = parseArr(p.vendors_json).map(String);
-    // Due window: the cadence covering the current month sets its own "Due within
-    // N days"; fall back to the rule's First Order Due, then 5. Each cadence can
-    // define a different completion window (e.g. cut every 10 days, due 4 later).
-    const curMonth = new Date(`${todayISO}T00:00:00Z`).getUTCMonth();
-    const activeCad = parseArr(p.cadences_json).find((c: any) => Array.isArray(c.months) && c.months.includes(curMonth));
-    const cadDue = activeCad && String(activeCad.dueDays ?? '').trim() !== '' ? Number(activeCad.dueDays) : NaN;
-    const ruleDue = Number(p.initial_due_days);
-    const dueWindow = Number.isFinite(cadDue) && cadDue > 0 ? cadDue
-      : (Number.isFinite(ruleDue) && ruleDue > 0 ? ruleDue : 5);
-    const dueDate = addDays(todayISO, dueWindow);
     const vendorCost = Number(p.vendor_cost);
     const markupPct = Number(p.markup_pct);
     const clientCost = Number.isFinite(vendorCost) ? Math.round(vendorCost * (1 + (Number.isFinite(markupPct) ? markupPct : 0) / 100) * 100) / 100 : null;
+    const cads = parseCadences(p);
+    const skipSet = new Set<number>(parseArr(p.skip_months_json).map(Number));
+    const ruleName = p.rule_name || 'Rule';
 
-    for (const t of await targetsForRule(p)) {
-      // Per-deal key for one-time deal-triggered rules → a new lease's deal makes a
-      // new key (re-triggers); the same deal in-stage keeps the same key (no dupe).
-      const enrollmentKey = `gen:${ruleId}:${t.id}${t.dealId ? `:${t.dealId}` : ''}`;
-      // Preview label on skips shows this address's sticky vendor (if any); the real
-      // reserved assignment is picked once we commit to creating (below).
+    // Create (or, in dry-run, preview) one Service Work Order for a target on a
+    // given due date. Shared by the one-time, property-recurring, and
+    // community-recurring paths — all the order-building / master-cut / pricing /
+    // geocode / notify logic lives here so the three schedulers only decide WHEN
+    // and WITH WHAT due date to call it.
+    const emitOrder = async (t: Target, dueDate: string, enrollmentKey: string): Promise<void> => {
       const base: {
         ruleId: string; ruleName: string; target: string; worktype: string; subtype: string;
         dueDate: string; vendor: string | null; enrollmentKey: string;
-      } = {
-        ruleId, ruleName: p.rule_name || 'Rule', target: t.address, worktype, subtype,
-        dueDate, vendor: rotation.stickyByKey.get(enrollmentKey) ?? null, enrollmentKey,
-      };
-      // Stop-after-N: this target has already generated its cap → stop.
-      if (stopCountMode && Number.isFinite(stopCount) && stopCount >= 1 && (genCountByKey.get(enrollmentKey) || 0) >= stopCount) {
-        continue; // silently not created (won't count toward wouldCreate)
-      }
-      // Run-once: a one-time rule that has EVER generated for this target (open or
-      // completed) never generates again — so a move-in clean fires once when the
-      // deal hits the trigger stage and doesn't loop while the deal sits there.
-      if (!recurring && (genCountByKey.get(enrollmentKey) || 0) >= 1) {
-        result.skippedExisting++;
-        result.items.push({ ...base, action: 'skip-open' });
-        continue;
-      }
-      if (openKeys.has(enrollmentKey)) {
-        result.skippedExisting++;
-        result.items.push({ ...base, action: 'skip-open' });
-        continue;
-      }
+      } = { ruleId, ruleName, target: t.address, worktype, subtype, dueDate, vendor: rotation.stickyByKey.get(enrollmentKey) ?? null, enrollmentKey };
 
       // Community + Landscaping + Grass Cut = a MASTER of individual house cuts.
-      // Resolve the eligible property snapshot up front (used by BOTH the dry-run
-      // coverage count and the apply pricing). Other community services stay a
-      // single line. Eligibility is driven by the rule's enrollment criterion
-      // (defaults to "RRQC Pass Date is known") — not hard-coded.
       const isCommunityCut = t.scope === 'community' && worktype === 'landscaping' && subtype === 'cut';
       let commId = '';
       let eligibleIds: string[] = [];
@@ -393,24 +465,17 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         const criteria = parseCriteria(p);
         const all = commId ? await fetchCommunityProperties(commId) : [];
         eligibleIds = all.filter((x) => criteria.every((c) => matchCriterion(x, c))).map((x) => x.id);
-        if (!eligibleIds.length) { result.items.push({ ...base, action: 'skip-open' }); result.skippedExisting++; continue; }
+        if (!eligibleIds.length) { result.items.push({ ...base, action: 'skip-open' }); result.skippedExisting++; return; }
         result.masterCoverage = eligibleIds.length;   // for the single-rule "would create" preview
       }
 
-      // Commit point — we will create (or preview) one order for this target. Pick
-      // and RESERVE the vendor now (sticky-per-address, else equal-volume balance)
-      // so the dry-run preview and the apply path agree and same-run net-new
-      // enrollments spread across the rule's vendors.
+      // Commit point — pick and RESERVE the vendor now (sticky-per-address, else
+      // equal-volume balance) so the dry-run preview and the apply path agree.
       const vendor = pickVendor(vendors, enrollmentKey, rotation);
       base.vendor = vendor;
 
-      if (!apply) {
-        result.wouldCreate++;
-        result.items.push({ ...base, action: 'CREATE' });
-        continue;
-      }
+      if (!apply) { result.wouldCreate++; result.items.push({ ...base, action: 'CREATE' }); return; }
 
-      // Build the Service Work Order property map.
       const orderProps: Record<string, any> = {
         service_name: `${wtLabel(worktype)} · ${subLabel(worktype, subtype)} — ${t.address}`,
         worktype, subtype, status: 'assigned', is_bid_item: 'false',
@@ -439,8 +504,8 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         if (clientCost !== null) orderProps.client_cost = clientCost;
       }
 
-      // Property grass cuts carry their tier payouts (from the rule, else the code
-      // defaults) so submit can price by the answered height with no rule lookup.
+      // Property grass cuts carry their tier payouts so submit can price by the
+      // answered height with no rule lookup.
       if (t.scope === 'property' && worktype === 'landscaping' && subtype === 'cut') {
         const num = (v: any, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
         orderProps.grass_rate_standard = num(p.grass_rate_standard, DEFAULT_GRASS_TIERS.standard);
@@ -449,9 +514,7 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
       }
 
       // Stamp reference coordinates NOW (best-effort) so the calendar map can plot
-      // this service without a live geocode. Property scope resolves via the
-      // property's stored coords/address; community scope via the community's
-      // first property; both fall back to geocoding the address text.
+      // this service without a live geocode.
       try {
         const c = await resolveCoords({
           address: [t.address, t.locality].filter(Boolean).join(', '),
@@ -462,7 +525,8 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
 
       try {
         const recordId = await createServiceWorkOrder(orderProps);
-        openKeys.add(enrollmentKey); // guard against duplicate targets within a single run
+        openKeys.add(enrollmentKey);
+        genCountByKey.set(enrollmentKey, (genCountByKey.get(enrollmentKey) || 0) + 1);
         result.created++;
         result.items.push({ ...base, action: 'created', recordId: recordId || undefined });
         // Email the assigned vendor (best-effort, throttled + awaited at the end).
@@ -479,6 +543,114 @@ export async function runServiceGeneration(apply: boolean, todayISO: string, onl
         result.errors++;
         result.items.push({ ...base, action: 'error', error: String(e?.message || e).slice(0, 300) });
       }
+    };
+
+    const skipItem = (t: Target, key: string, dueDate = '') => {
+      result.skippedExisting++;
+      result.items.push({ ruleId, ruleName, target: t.address, worktype, subtype, dueDate, vendor: rotation.stickyByKey.get(key) ?? null, enrollmentKey: key, action: 'skip-open' });
+    };
+    const targets = await targetsForRule(p);
+
+    // ── ONE-TIME (non-recurring): exactly one order per target, ever. Due =
+    // enrollment + First Order Due (fallback +5). ──
+    if (!recurring) {
+      const initDue = Number(p.initial_due_days);
+      const oneTimeDue = addDays(todayISO, Number.isFinite(initDue) && initDue > 0 ? initDue : 5);
+      for (const t of targets) {
+        const key = `gen:${ruleId}:${t.id}${t.dealId ? `:${t.dealId}` : ''}`;
+        if ((genCountByKey.get(key) || 0) >= 1 || openKeys.has(key)) { skipItem(t, key, oneTimeDue); continue; }
+        await emitOrder(t, oneTimeDue, key);
+      }
+      continue;
+    }
+
+    if (!cads.length) continue;   // recurring rule with no cadence — nothing to schedule
+
+    // ── COMMUNITY (contract calendar): generate on a fixed schedule, independent
+    // of completion. The day AFTER each due date mints the next occurrence (due =
+    // prior due + one cadence step), so overlapping open orders legitimately
+    // stack. Each occurrence is keyed by its due date, so a date never doubles. ──
+    if (scope === 'community') {
+      for (const t of targets) {
+        const baseKey = `gen:${ruleId}:${t.id}`;
+        const priorDues = [...everKeys]
+          .filter((k) => k.startsWith(`${baseKey}:`))
+          .map((k) => k.slice(baseKey.length + 1))
+          .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+        // Migration: a pre-existing order under the OLD dateless key seeds the
+        // anchor from its due date, so we don't double-create alongside it.
+        const legacy = existing.find((e) => e.key === baseKey);
+        if (legacy) { const d = dateOnly(legacy.dueDate); if (d) priorDues.push(d); }
+        let lastDue: string | null = priorDues.length ? priorDues.reduce((m, d) => (d > m ? d : m)) : null;
+        let generatedForComm = priorDues.length;
+        const stopReached = () => stopCountMode && Number.isFinite(stopCount) && stopCount >= 1 && generatedForComm >= stopCount;
+
+        // Seed the first occurrence when this community has none yet.
+        if (lastDue == null && !stopReached()) {
+          const seed = seedFirstDue(p, cads, todayISO, skipSet);
+          if (!seed) continue;
+          const cSeed = cadenceForMonth(cads, monthOf(seed.due)) || cads[0];
+          // A seasonally-rolled first due isn't created until within one step of it.
+          const createOn = seed.rolled ? stepDate(seed.due, cSeed, -1) : todayISO;
+          if (todayISO < createOn) continue;
+          const key = `${baseKey}:${seed.due}`;
+          if (!everKeys.has(key)) { await emitOrder(t, seed.due, key); everKeys.add(key); generatedForComm++; }
+          lastDue = seed.due;
+        }
+
+        // Catch up: mint every occurrence whose creation day (prior due + 1) has
+        // arrived. `guard` bounds the loop; normal runs create 0–1 per community.
+        for (let guard = 0; guard < 400 && lastDue && !stopReached(); guard++) {
+          const cB = cadenceForMonth(cads, monthOf(lastDue)) || cads[0];
+          const rolled = rollToActiveDue(stepDate(lastDue, cB, 1), cads, skipSet);
+          if (!rolled) break;
+          const cNd = cadenceForMonth(cads, monthOf(rolled.due)) || cads[0];
+          const createOn = rolled.rolled ? stepDate(rolled.due, cNd, -1) : addDays(lastDue, 1);
+          if (todayISO < createOn) break;   // next occurrence's creation day hasn't arrived
+          // Don't back-fill occurrences already past due (migration / cron downtime);
+          // advance the schedule to the next upcoming one instead.
+          if (rolled.due >= todayISO) {
+            const key = `${baseKey}:${rolled.due}`;
+            if (!everKeys.has(key)) { await emitOrder(t, rolled.due, key); everKeys.add(key); generatedForComm++; }
+          }
+          lastDue = rolled.due;
+        }
+
+        // Backlog alert: ≥3 open orders of this type stacked on one community.
+        const openForComm = [...openKeys].filter((k) => k.startsWith(`${baseKey}:`)).length;
+        if (openForComm >= 3) {
+          result.communityBacklogAlerts.push(`${ruleName} · ${t.address}: ${openForComm} open orders stacked up (vendor is behind on the contract cadence).`);
+        }
+      }
+      continue;
+    }
+
+    // ── PROPERTY (self-healing): one open order per property. The next order is
+    // created immediately after the current CLOSES, due = max(scheduled due,
+    // service-completion date) + one cadence step; a late finish re-anchors the
+    // rhythm to when the work actually happened (submitted_at). ──
+    for (const t of targets) {
+      const key = `gen:${ruleId}:${t.id}${t.dealId ? `:${t.dealId}` : ''}`;
+      if (stopCountMode && Number.isFinite(stopCount) && stopCount >= 1 && (genCountByKey.get(key) || 0) >= stopCount) continue;
+      if (openKeys.has(key)) { skipItem(t, key); continue; }
+      const prior = closedByKey.get(key);
+      let candidate: { due: string; rolled: boolean } | null;
+      if (!prior) {
+        candidate = seedFirstDue(p, cads, todayISO, skipSet);
+      } else {
+        const anchor = dateOnly(prior.submittedAt) || dateOnly(prior.completedAt) || dateOnly(prior.dueDate);
+        const baseDate = maxISO(dateOnly(prior.dueDate), anchor) || todayISO;
+        const cB = cadenceForMonth(cads, monthOf(baseDate)) || cads[0];
+        candidate = rollToActiveDue(stepDate(baseDate, cB, 1), cads, skipSet);
+      }
+      if (!candidate) continue;
+      if (candidate.rolled) {
+        // Seasonal dormancy: a due date rolled across skip months isn't created
+        // until we're within one cadence step of it (no order sits open all winter).
+        const cNd = cadenceForMonth(cads, monthOf(candidate.due)) || cads[0];
+        if (todayISO < stepDate(candidate.due, cNd, -1)) continue;
+      }
+      await emitOrder(t, candidate.due, key);
     }
   }
 

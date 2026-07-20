@@ -26,7 +26,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const report = await runServiceGeneration(true, today);
     if (report === null) return res.status(200).json({ ok: true, skipped: true, reason: 'Service objects not configured.' });
-    console.log('[cron/services-generate]', JSON.stringify({ created: report.created, skipped: report.skippedExisting, errors: report.errors }));
+    console.log('[cron/services-generate]', JSON.stringify({ created: report.created, skipped: report.skippedExisting, errors: report.errors, backlog: report.communityBacklogAlerts.length }));
+    // Community contract backlog (≥3 open orders of the same type on one community
+    // → the vendor is behind) → Admin ▸ Error Log so it's visible, not a hard stop.
+    if (report.communityBacklogAlerts.length) {
+      void recordErrorEvent({
+        kind: 'server', source: 'server',
+        message: `Community service backlog: ${report.communityBacklogAlerts.length} contract(s) with 3+ open orders stacked. ${report.communityBacklogAlerts.slice(0, 10).join(' | ')}`.slice(0, 1000),
+        url: '/api/cron/services-generate',
+        meta: { backlog: report.communityBacklogAlerts.length, today },
+      });
+    }
     // Surface per-rule generation failures in the Admin ▸ Error Log so a broken
     // rule/target isn't buried in Vercel logs. One event summarizing the run, with
     // up to 10 failing (rule → target → error) samples.
