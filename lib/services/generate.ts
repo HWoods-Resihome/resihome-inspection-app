@@ -21,7 +21,7 @@
  * follow the active cadence (else First Order Due, else +5); vendors are assigned by
  * equal-volume rotation with sticky-per-address (see ./rotation).
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool, readGenEnrollSeen, writeGenEnrollSeen } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { DEFAULT_GRASS_TIERS } from './grassPricing';
@@ -373,6 +373,13 @@ export async function runServiceGeneration(
   // "stop after N services" cap ("all generated" counting basis).
   const genCountByKey = new Map<string, number>();
   for (const e of existing) if (e.key) genCountByKey.set(e.key, (genCountByKey.get(e.key) || 0) + 1);
+  // Enroll-delay ("start N days after it meets the criteria") markers: enrollment
+  // base key → YYYY-MM-DD it first met the criteria. Read once; marked/pruned as we
+  // go (a key that stops qualifying is deleted so the clock resets); written back
+  // at the end on apply. Prunes/marks in a dry-run stay in memory only.
+  const enrollSeen: Record<string, string> = { ...((await readGenEnrollSeen()) || {}) };
+  let enrollSeenDirty = false;
+
   // Most-recent CLOSED (terminal) order per key — the property self-healing anchor.
   // "Latest" by service date (submitted → completed → due). Only non-open statuses.
   const closedByKey = new Map<string, typeof existing[number]>();
@@ -574,6 +581,29 @@ export async function runServiceGeneration(
     };
     const targets = await targetsForRule(p);
 
+    // Enroll DELAY: "Starts on → N days after it meets the criteria" (blank = no
+    // delay). Gates the FIRST creation only — a target isn't created until it has
+    // met the criteria for `delayDays` days. startGateOk marks a target's first-
+    // qualified date and returns false until the delay elapses.
+    const delayDays = Number(p.start_delay_days);
+    const hasDelay = Number.isFinite(delayDays) && delayDays > 0;
+    const startGateOk = (baseKey: string): boolean => {
+      if (!hasDelay) return true;
+      const seen = enrollSeen[baseKey];
+      if (!seen) { enrollSeen[baseKey] = todayISO; enrollSeenDirty = true; return false; }   // first sighting → start clock
+      return todayISO >= addDays(seen, delayDays);
+    };
+    // Reset the clock for any tracked key of THIS rule that no longer qualifies
+    // (isn't in the current enrolled set) — so a home that lapses and re-qualifies
+    // waits the full delay again.
+    if (hasDelay) {
+      const enrolledKeys = new Set(targets.map((t) => `gen:${ruleId}:${t.id}${t.dealId ? `:${t.dealId}` : ''}`));
+      const prefix = `gen:${ruleId}:`;
+      for (const k of Object.keys(enrollSeen)) {
+        if (k.startsWith(prefix) && !enrolledKeys.has(k)) { delete enrollSeen[k]; enrollSeenDirty = true; }
+      }
+    }
+
     // ── ONE-TIME (non-recurring): exactly one order per target, ever. Due =
     // enrollment + First Order Due (fallback +5). ──
     if (!recurring) {
@@ -582,6 +612,7 @@ export async function runServiceGeneration(
       for (const t of targets) {
         const key = `gen:${ruleId}:${t.id}${t.dealId ? `:${t.dealId}` : ''}`;
         if ((genCountByKey.get(key) || 0) >= 1 || openKeys.has(key)) { skipItem(t, key, oneTimeDue); continue; }
+        if (!startGateOk(key)) continue;   // enroll delay hasn't elapsed yet
         await emitOrder(t, oneTimeDue, key);
       }
       continue;
@@ -610,6 +641,7 @@ export async function runServiceGeneration(
 
         // Seed the first occurrence when this community has none yet.
         if (lastDue == null && !stopReached()) {
+          if (!startGateOk(baseKey)) continue;   // enroll delay hasn't elapsed yet
           const seed = seedFirstDue(p, cads, todayISO, skipSet);
           if (!seed) continue;
           const cSeed = cadenceForMonth(cads, monthOf(seed.due)) || cads[0];
@@ -660,6 +692,7 @@ export async function runServiceGeneration(
       const prior = closedByKey.get(key);
       let candidate: { due: string; rolled: boolean } | null;
       if (!prior) {
+        if (!startGateOk(key)) continue;   // enroll delay hasn't elapsed yet
         candidate = seedFirstDue(p, cads, todayISO, skipSet);
       } else {
         // Anchor on the date the work was actually DONE (vendor-entered service
@@ -680,6 +713,9 @@ export async function runServiceGeneration(
       await emitOrder(t, candidate.due, key);
     }
   }
+
+  // Persist the enroll-delay markers (apply only — a dry-run must not mutate state).
+  if (apply && enrollSeenDirty) { await writeGenEnrollSeen(enrollSeen).catch(() => {}); }
 
   // Throttled send: at most N in flight so a large run can't hit Gmail rate limits.
   const EMAIL_CONCURRENCY = 5;

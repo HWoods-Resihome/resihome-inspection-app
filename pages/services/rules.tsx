@@ -133,7 +133,8 @@ interface Rule {
   enrollField: string; enrollOp: string; enrollVals: string[];   // legacy single (= first criterion, kept in sync)
   enrollCriteria: EnrollCriterion[];         // enrollment criteria (source of truth)
   enrollCombinator: 'and' | 'or';            // combine enrollment criteria with ALL (AND) / ANY (OR)
-  startDate: string;                         // rule-level start date — dormant until (YYYY-MM-DD, blank = now)
+  startDate: string;                         // "Starts on a date" — rule dormant until (YYYY-MM-DD, blank = n/a)
+  startDelayDays: string;                     // "Starts N days after it meets the criteria" (blank = no delay). Mutually exclusive with startDate.
   stopEnabled: boolean;
   stopMode: 'condition' | 'date' | 'count';  // how enrollment stops
   stopCriteria: EnrollCriterion[];           // stopMode 'condition' — AND/OR combined (source of truth)
@@ -209,7 +210,7 @@ const SEED: Rule[] = [
     ],
     initialDueDays: '5', skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
-    enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }], enrollCombinator: 'and', startDate: '',
+    enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }], enrollCombinator: 'and', startDate: '', startDelayDays: '',
     stopEnabled: true, stopMode: 'condition', stopCriteria: [{ field: 'Property Status', op: 'is', vals: ['Occupied'] }], stopCombinator: 'and', stopField: 'Property Status', stopOp: 'is', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
   {
@@ -219,7 +220,7 @@ const SEED: Rule[] = [
     cadences: [{ id: 21, unit: 'days', interval: '7', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
-    enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }], enrollCombinator: 'and', startDate: '',
+    enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }], enrollCombinator: 'and', startDate: '', startDelayDays: '',
     stopEnabled: false, stopMode: 'condition', stopCriteria: [{ field: 'Property Status', op: 'is', vals: ['Occupied'] }], stopCombinator: 'and', stopField: 'Property Status', stopOp: 'is', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
   {
@@ -233,7 +234,7 @@ const SEED: Rule[] = [
     cadences: [],
     initialDueDays: '2', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Pending MOI/Rekey'],
-    enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Pending MOI/Rekey'] }], enrollCombinator: 'and', startDate: '',
+    enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Pending MOI/Rekey'] }], enrollCombinator: 'and', startDate: '', startDelayDays: '',
     stopEnabled: false, stopMode: 'condition', stopCriteria: [{ field: 'Property Status', op: 'is', vals: ['Occupied'] }], stopCombinator: 'and', stopField: 'Property Status', stopOp: 'is', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
 ];
@@ -295,6 +296,7 @@ function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule 
     enrollCriteria: parseCriteria(p),
     enrollCombinator: p.enroll_combinator === 'or' ? 'or' : 'and',
     startDate: p.start_date ? String(p.start_date).slice(0, 10) : '',
+    startDelayDays: p.start_delay_days != null && String(p.start_delay_days) !== '' ? String(p.start_delay_days) : '',
     stopEnabled: p.stop_enabled === 'true', stopMode: (p.stop_mode || 'condition') as Rule['stopMode'],
     stopCriteria: parseStopCriteria(p),
     stopCombinator: p.stop_combinator === 'or' ? 'or' : 'and',
@@ -336,6 +338,7 @@ function ruleToProps(r: Rule): Record<string, any> {
   }
   if (r.initialDueDays !== '') props.initial_due_days = Number(r.initialDueDays);
   if (r.startDate) props.start_date = r.startDate;
+  if (r.startDelayDays !== '') props.start_delay_days = Number(r.startDelayDays);
   if (r.stopDate) props.stop_date = r.stopDate;
   if (r.stopCount !== '') props.stop_count = Number(r.stopCount);
   return props;
@@ -582,7 +585,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', stopEnabled: false, stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', startDelayDays: '', stopEnabled: false, stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
     openRule(id);
   };
   const duplicateRule = () => {
@@ -1167,12 +1170,45 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
             <SecHead n={3} title="Enrollment & Stop" />
             {openSec[3] && (<div className="mt-3">
             <label className={lbl}>Enroll When</label>
-            {/* Rule-level start date — the rule stays dormant (creates nothing) until this date. */}
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              <span className="text-[13px] text-gray-600">Starts on</span>
-              <DatePicker value={rule.startDate} onChange={(v) => patch({ startDate: v })} placeholder="Immediately" className={`${ctl} flex items-center justify-between gap-2 min-w-[9rem]`} />
-              <span className="text-[12px] text-gray-400">{rule.startDate ? '— dormant until this date.' : '— leave blank to begin now.'}</span>
-            </div>
+            {/* Starts on — three mutually-exclusive modes:
+                 • Immediately: create as soon as the criteria are met (default).
+                 • On a date: rule dormant until a fixed calendar date.
+                 • N days after it meets the criteria: per-property delay — the order
+                   isn't created until the target has met the criteria for N days
+                   (clock resets if it stops qualifying). Blank delay = immediate. */}
+            {(() => {
+              const startMode: 'immediate' | 'date' | 'delay' = rule.startDate ? 'date' : (rule.startDelayDays !== '' ? 'delay' : 'immediate');
+              const setMode = (m: 'immediate' | 'date' | 'delay') =>
+                patch({ startDate: '', startDelayDays: m === 'delay' ? (rule.startDelayDays || '') : '' });
+              return (
+                <div className="mb-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[13px] text-gray-600">Starts</span>
+                    <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[12px] font-heading font-semibold">
+                      {([['immediate', 'Immediately'], ['date', 'On a date'], ['delay', 'After N days']] as const).map(([m, label]) => (
+                        <button key={m} type="button" onClick={() => setMode(m)}
+                          className={`px-2.5 py-1.5 rounded-md ${startMode === m ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{label}</button>
+                      ))}
+                    </div>
+                    {startMode === 'date' && (
+                      <DatePicker value={rule.startDate} onChange={(v) => patch({ startDate: v, startDelayDays: '' })} placeholder="Pick a date" className={`${ctl} flex items-center justify-between gap-2 min-w-[9rem]`} />
+                    )}
+                    {startMode === 'delay' && (
+                      <span className="inline-flex items-center gap-1.5 text-[13px] text-gray-600">
+                        <input value={rule.startDelayDays} inputMode="numeric" onChange={(e) => patch({ startDelayDays: e.target.value.replace(/\D/g, ''), startDate: '' })} placeholder="—"
+                          className={`${ctl} w-14 text-center tabular-nums`} />
+                        days after it meets the criteria
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-gray-400 mt-1">
+                    {startMode === 'date' ? 'Dormant until this calendar date, then enrolls anything that meets the criteria.'
+                      : startMode === 'delay' ? 'The first order isn’t created until a target has met the criteria for this many days — and only if it still qualifies then. The clock resets if it stops qualifying.'
+                        : 'Creates as soon as a target meets the criteria.'}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="space-y-2 mb-4">
               {rule.enrollCriteria.map((c, i) => (
                 <div key={i}>

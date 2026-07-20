@@ -6935,6 +6935,13 @@ export function writeServiceAiChecks(checks: any[]): Promise<boolean> { return w
 export function readServiceTaxonomy(): Promise<any[] | null> { return readAgentJson<any[]>(SERVICE_TAXONOMY_PROP); }
 export function writeServiceTaxonomy(taxonomy: any[]): Promise<boolean> { return writeAgentJson(SERVICE_TAXONOMY_PROP, 'Service Taxonomy (JSON)', taxonomy); }
 
+/** Generation "first-qualified" markers for the enroll-delay ("start N days after
+ *  it meets the criteria") option: enrollment base key → YYYY-MM-DD it first met
+ *  the criteria. The engine reads at start, marks/prunes during a run (a lapsed
+ *  key is deleted so the clock resets), and writes back. Null when unset. */
+export function readGenEnrollSeen(): Promise<Record<string, string> | null> { return readAgentJson<Record<string, string>>('gen_enroll_seen_json'); }
+export function writeGenEnrollSeen(map: Record<string, string>): Promise<boolean> { return writeAgentJson('gen_enroll_seen_json', 'Generation Enrollment Seen (JSON)', map); }
+
 /** Per-user email notification preferences: a map of lowercased email →
  *  { [notificationKey]: boolean }. Absent keys default to ON. Null when unset. */
 export function readNotificationPrefsRaw(): Promise<Record<string, Record<string, boolean>> | null> {
