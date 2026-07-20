@@ -15,8 +15,8 @@ export async function buildBillingXlsx(object: 'inspections' | 'services', rows:
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
   for (const r of rows) sheet.addRow(rowToCells(r));
-  // Money format on the two amount columns (7th + 8th).
-  [7, 8].forEach((c) => { sheet.getColumn(c).numFmt = '"$"#,##0.00'; });
+  // Money format on the "… Amount" columns (1-indexed), wherever they sit.
+  headers.forEach((h, i) => { if (/amount/i.test(String(h))) sheet.getColumn(i + 1).numFmt = '"$"#,##0.00'; });
   // Reasonable widths from header + sampled cell lengths.
   headers.forEach((h, i) => {
     const col = sheet.getColumn(i + 1);

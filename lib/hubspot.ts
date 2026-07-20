@@ -6677,6 +6677,37 @@ export async function fetchAgentBillingByEmails(
 }
 export function bustAgentBillingCache(): void { _ownerIdByEmail.clear(); _agentBillingByOwner.clear(); }
 
+/** Batched vendor Company CODE lookup by vendor EMAIL → the company's code
+ *  (HUBSPOT_COMPANY_CODE_PROP, default 'company_code'). '' when the company or
+ *  code is missing. Used for the services billing "Company Code" column. */
+const _companyCodeByEmail = new Map<string, string>();
+export async function fetchVendorCompanyCodesByEmails(emails: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const prop = (process.env.HUBSPOT_COMPANY_CODE_PROP || 'company_code').trim();
+  const distinct = Array.from(new Set(emails.map((e) => (e || '').trim().toLowerCase()).filter(Boolean)));
+  const need = distinct.filter((e) => { if (_companyCodeByEmail.has(e)) { out.set(e, _companyCodeByEmail.get(e)!); return false; } return true; });
+  for (let i = 0; i < need.length; i += 100) {
+    const chunk = need.slice(i, i + 100);
+    try {
+      const resp = await hubspotFetch(`/crm/v3/objects/companies/search`, {
+        method: 'POST',
+        body: JSON.stringify({
+          limit: 100, properties: ['email', prop],
+          filterGroups: [{ filters: [{ propertyName: 'email', operator: 'IN', values: chunk }] }],
+        }),
+      });
+      for (const r of resp.results || []) {
+        const e = String(r.properties?.email || '').trim().toLowerCase();
+        if (e) { const code = String(r.properties?.[prop] || '').trim(); _companyCodeByEmail.set(e, code); out.set(e, code); }
+      }
+    } catch (e) { console.warn('[billing] company code search failed:', String((e as any)?.message || e).slice(0, 120)); }
+  }
+  // Mark misses as '' so they're cached and not re-queried.
+  for (const e of need) if (!out.has(e)) { _companyCodeByEmail.set(e, ''); out.set(e, ''); }
+  return out;
+}
+export function bustCompanyCodeCache(): void { _companyCodeByEmail.clear(); }
+
 /** Batched Property billing fields by record id → { entityId, portfolio, region,
  *  address }. Chunked batch/read (100/req). Unknown ids are simply absent. */
 export async function fetchPropertyBillingByIds(

@@ -35,6 +35,7 @@ export interface ReportSchedule {
   regions: string[];
   portfolios: string[];
   inspectors: string[];
+  types: string[];             // template/service type labels
   range: RelativeRange;        // completed-date window (relative)
   cadence: Cadence;
   hourET: number;              // 0–23, Eastern
@@ -114,13 +115,15 @@ export function normalizeSchedule(input: any, byEmail?: string): ReportSchedule 
     .map((e: any) => String(e || '').trim().toLowerCase()).filter((e: string) => EMAIL_RE.test(e))));
   if (!recipients.length) throw new Error('At least one valid recipient email is required.');
   const range: RelativeRange = (RELATIVE_RANGE_LABELS as any)[input?.range] ? input.range : 'last_7_days';
+  const strList = (v: any) => (Array.isArray(v) ? v : []).map((s: any) => String(s)).filter(Boolean);
   return {
     id: String(input?.id || '').trim() || `sch_${Math.random().toString(36).slice(2, 10)}`,
-    name: String(input?.name || '').trim().slice(0, 120) || `${object === 'services' ? 'Services' : 'Inspections'} billing`,
+    name: String(input?.name || '').trim().slice(0, 120) || `${object === 'services' ? 'Services' : 'Inspections'} Billing`,
     object, recipients,
-    regions: (Array.isArray(input?.regions) ? input.regions : []).map((s: any) => String(s)).filter(Boolean),
-    portfolios: (Array.isArray(input?.portfolios) ? input.portfolios : []).map((s: any) => String(s)).filter(Boolean),
-    inspectors: (Array.isArray(input?.inspectors) ? input.inspectors : []).map((s: any) => String(s)).filter(Boolean),
+    regions: strList(input?.regions),
+    portfolios: strList(input?.portfolios),
+    inspectors: strList(input?.inspectors),
+    types: strList(input?.types),
     range, cadence,
     hourET: clampHour(input?.hourET),
     dayOfWeek: cadence === 'weekly' ? Math.min(6, Math.max(0, Math.floor(Number(input?.dayOfWeek) || 0))) : undefined,
@@ -158,24 +161,35 @@ export async function markScheduleRun(id: string, dateET: string): Promise<void>
 /** Build + email a schedule's report right now (used by the cron and the
  *  "Send test" button). Resolves the relative range, builds the .xlsx, and
  *  emails it to every recipient from the system mailbox. Returns rows sent. */
+/** YYYY-MM-DD → MM-DD-YY (e.g. 2026-07-20 → 07-20-26). */
+export function mmddyy(day?: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(day || ''));
+  return m ? `${m[2]}-${m[3]}-${m[1].slice(2)}` : '';
+}
+/** Title Case a report name ("inspections billing" → "Inspections Billing"). */
+function titleCase(s: string): string {
+  return String(s || '').replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+}
+
 export async function sendScheduleNow(s: ReportSchedule, req?: { headers: Record<string, any> } | null, now: Date = new Date()): Promise<{ sent: boolean; rows: number; error?: string }> {
   const { from, to } = resolveRange(s.range, now);
-  const rows = await fetchBillingRows(s.object, { regions: s.regions, portfolios: s.portfolios, inspectors: s.inspectors, from, to });
+  const rows = await fetchBillingRows(s.object, { regions: s.regions, portfolios: s.portfolios, inspectors: s.inspectors, types: s.types, from, to });
   const buf = await buildBillingXlsx(s.object, rows);
   const [to0, ...alsoTo] = s.recipients;
   const objLabel = s.object === 'services' ? 'Services' : 'Inspections';
-  const period = from || to ? `${from || '…'} → ${to || '…'}` : 'All time';
+  // MM-DD-YY -> MM-DD-YY (or "All Time"), used identically in title + body.
+  const period = (from || to) ? `${mmddyy(from) || '…'} -> ${mmddyy(to) || '…'}` : 'All Time';
+  const title = titleCase(s.name || `${objLabel} Billing`);
   const r = await sendNotificationEmail({
     to: to0,
     alsoTo,
-    subject: `${s.name} — ${objLabel} billing (${period})`,
-    heading: `${objLabel} Billing Report`,
-    intro: `Your scheduled "${s.name}" report is attached (${rows.length} row${rows.length === 1 ? '' : 's'}, completed ${period}).`,
+    subject: `${title} — ${period}`,
+    heading: title,
+    intro: `${title} — ${period}. ${rows.length} row${rows.length === 1 ? '' : 's'} attached.`,
     rows: [
-      ['Report', s.name],
-      ['Dataset', objLabel],
-      ['Completed', period],
-      ['Filters', [s.regions.length ? `${s.regions.length} region(s)` : '', s.portfolios.length ? `${s.portfolios.length} portfolio(s)` : '', s.inspectors.length ? `${s.inspectors.length} ${s.object === 'services' ? 'vendor' : 'inspector'}(s)` : ''].filter(Boolean).join(' · ') || 'None'],
+      ['Report', title],
+      ['Date Range', period],
+      ['Filters', [s.regions.length ? `${s.regions.length} region(s)` : '', s.portfolios.length ? `${s.portfolios.length} portfolio(s)` : '', s.inspectors.length ? `${s.inspectors.length} ${s.object === 'services' ? 'vendor' : 'inspector'}(s)` : '', s.types?.length ? `${s.types.length} type(s)` : ''].filter(Boolean).join(' · ') || 'None'],
     ],
     linkUrl: `${appBaseUrl(req)}/insights${s.object === 'services' ? '?tab=services' : ''}`,
     linkLabel: 'Open Insights',

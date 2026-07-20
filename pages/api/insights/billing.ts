@@ -32,6 +32,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const object = String(req.query.object || 'inspections') === 'services' ? 'services' : 'inspections';
   const filters: BillingFilters = {
     regions: arr(req.query.regions), portfolios: arr(req.query.portfolios), inspectors: arr(req.query.inspectors),
+    types: arr(req.query.types),
     from: day(req.query.from), to: day(req.query.to),
   };
   try {

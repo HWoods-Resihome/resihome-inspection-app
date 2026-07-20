@@ -18,16 +18,27 @@
 import { readInsightsSnapshot } from '@/lib/insightsSnapshot';
 import { templateLabel } from '@/lib/templateLabels';
 import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
-import { fetchAgentBillingByEmails, fetchPropertyBillingByIds, searchServiceWorkOrdersByStatus } from '@/lib/hubspot';
+import { fetchAgentBillingByEmails, fetchPropertyBillingByIds, fetchVendorCompanyCodesByEmails, searchServiceWorkOrdersByStatus } from '@/lib/hubspot';
 
-export const INTERNAL_EMPLOYEE = 'Internal Employee';
+export const INTERNAL_EMPLOYEE = 'Internal Employee';   // inspections: no agent broker
+export const INTERNAL_VENDOR = 'Internal Vendor';       // services: no company code
 export const DEFAULT_CLIENT_COST = 60;   // when the agent has no inspection_client_cost
 export const DEFAULT_VENDOR_COST = 0;    // when the agent has no inspection_vendor_cost
+
+/** Inspection-style ID for a service: SVC-YYYY-MM-DD-<8hex derived from the
+ *  record id> (mirrors INSP-2026-07-20-82f86ac0). */
+function serviceExternalId(recordId: string, completedDate: string): string {
+  let h = 0; for (const c of String(recordId)) h = (Math.imul(31, h) + c.charCodeAt(0)) >>> 0;
+  const hex = (h >>> 0).toString(16).padStart(8, '0').slice(0, 8);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(completedDate) ? completedDate : new Date().toISOString().slice(0, 10);
+  return `SVC-${d}-${hex}`;
+}
 
 export interface BillingFilters {
   regions?: string[];      // region_snapshot values ("GA: Atlanta")
   portfolios?: string[];   // Property portfolio values (inspections/services)
   inspectors?: string[];   // inspector name OR vendor name (services)
+  types?: string[];        // template/service type LABELS
   from?: string;           // completed on/after (YYYY-MM-DD, inclusive)
   to?: string;             // completed on/before (YYYY-MM-DD, inclusive)
 }
@@ -63,29 +74,30 @@ const inRange = (day: string, from?: string, to?: string): boolean =>
 const has = (list: string[] | undefined, v: string): boolean =>
   !list || !list.length || list.includes(v);
 
-/** Column headers, in order, for each dataset's table + xlsx. */
+/** Column headers, in order, for each dataset's table + xlsx. Cell values (see
+ *  rowToCells) follow the SAME order for both datasets. */
 export const INSPECTION_COLUMNS = [
-  'External Inspection ID', 'Entity ID', 'Full Address', 'Inspector Name', 'Broker Code',
-  'Template Type', 'Vendor Invoice Amount', 'Client Invoice Amount', 'Region', 'Portfolio', 'Completed Date',
+  'External Inspection ID', 'Entity ID', 'Region', 'Portfolio', 'Full Address',
+  'Template Type', 'Inspector Name', 'Broker Code', 'Completed Date', 'Vendor Invoice Amount', 'Client Invoice Amount',
 ] as const;
 export const SERVICE_COLUMNS = [
-  'Service ID', 'Entity ID', 'Full Address', 'Vendor', 'Broker Code',
-  'Service Type', 'Vendor Invoice Amount', 'Client Invoice Amount', 'Region', 'Portfolio', 'Completed Date',
+  'Service ID', 'Entity ID', 'Region', 'Portfolio', 'Full Address',
+  'Service Type', 'Vendor', 'Company Code', 'Completed Date', 'Vendor Invoice Amount', 'Client Invoice Amount',
 ] as const;
 
 export function rowToCells(r: BillingRow): (string | number)[] {
   return [
-    r.externalId, r.entityId, r.fullAddress, r.personName, r.brokerCode,
-    r.typeLabel, r.vendorAmount, r.clientAmount, r.region, r.portfolio, r.completedDate,
+    r.externalId, r.entityId, r.region, r.portfolio, r.fullAddress,
+    r.typeLabel, r.personName, r.brokerCode, r.completedDate, r.vendorAmount, r.clientAmount,
   ];
 }
 
 /** Distinct filter option values across a row set (for the UI dropdowns). */
-export function billingFacets(rows: BillingRow[]): { regions: string[]; portfolios: string[]; people: string[] } {
-  const regions = new Set<string>(); const portfolios = new Set<string>(); const people = new Set<string>();
-  for (const r of rows) { if (r.region) regions.add(r.region); if (r.portfolio) portfolios.add(r.portfolio); if (r.personName) people.add(r.personName); }
+export function billingFacets(rows: BillingRow[]): { regions: string[]; portfolios: string[]; people: string[]; types: string[] } {
+  const regions = new Set<string>(); const portfolios = new Set<string>(); const people = new Set<string>(); const types = new Set<string>();
+  for (const r of rows) { if (r.region) regions.add(r.region); if (r.portfolio) portfolios.add(r.portfolio); if (r.personName) people.add(r.personName); if (r.typeLabel) types.add(r.typeLabel); }
   const sort = (s: Set<string>) => Array.from(s).sort((a, b) => a.localeCompare(b));
-  return { regions: sort(regions), portfolios: sort(portfolios), people: sort(people) };
+  return { regions: sort(regions), portfolios: sort(portfolios), people: sort(people), types: sort(types) };
 }
 
 /** Inspections billing rows (completed only), filtered. */
@@ -112,8 +124,9 @@ export async function fetchInspectionBillingRows(filters: BillingFilters = {}): 
     const vendorCost = num(agent?.vendorCost) ?? DEFAULT_VENDOR_COST;
     const clientCost = num(agent?.clientCost) ?? DEFAULT_CLIENT_COST;
     const brokerCode = (agent?.brokerCode || '').trim() || INTERNAL_EMPLOYEE;
+    const typeLabel = templateLabel(r.templateType) || r.templateType;
     // Apply filters.
-    if (!has(filters.regions, region) || !has(filters.portfolios, portfolio) || !has(filters.inspectors, inspectorName)) continue;
+    if (!has(filters.regions, region) || !has(filters.portfolios, portfolio) || !has(filters.inspectors, inspectorName) || !has(filters.types, typeLabel)) continue;
     if (!inRange(completedDate, filters.from, filters.to)) continue;
     rows.push({
       externalId: r.inspectionIdExternal || r.recordId,
@@ -121,7 +134,7 @@ export async function fetchInspectionBillingRows(filters: BillingFilters = {}): 
       fullAddress: r.propertyAddress || prop?.address || '',
       personName: inspectorName,
       brokerCode,
-      typeLabel: templateLabel(r.templateType) || r.templateType,
+      typeLabel,
       vendorAmount: vendorCost,
       clientAmount: clientCost,
       region, portfolio, completedDate,
@@ -137,7 +150,11 @@ export async function fetchInspectionBillingRows(filters: BillingFilters = {}): 
 export async function fetchServiceBillingRows(filters: BillingFilters = {}): Promise<BillingRow[]> {
   const records = (await searchServiceWorkOrdersByStatus('completed', 5000).catch(() => null)) || [];
   const propIds = records.map((x) => String(x.props.property_id_ref || '').trim()).filter(Boolean);
-  const propMap = await fetchPropertyBillingByIds(propIds);
+  const vendorEmails = records.map((x) => String(x.props.vendor_email || '').trim()).filter(Boolean);
+  const [propMap, codeMap] = await Promise.all([
+    fetchPropertyBillingByIds(propIds),
+    fetchVendorCompanyCodesByEmails(vendorEmails),
+  ]);
 
   const rows: BillingRow[] = [];
   for (const { id, props: p } of records) {
@@ -145,20 +162,22 @@ export async function fetchServiceBillingRows(filters: BillingFilters = {}): Pro
     const region = String(p.region_snapshot || prop?.region || '').trim();
     const portfolio = prop?.portfolio || '';
     const completedDate = dateOnly(p.completed_at);
-    const vendorName = String(p.vendor_name || '').trim() || INTERNAL_EMPLOYEE;
+    const vendorName = String(p.vendor_name || '').trim() || INTERNAL_VENDOR;
     const vendorCost = num(p.vendor_cost) ?? DEFAULT_VENDOR_COST;
     const clientCost = num(p.client_cost) ?? DEFAULT_CLIENT_COST;
+    const companyCode = (codeMap.get(String(p.vendor_email || '').trim().toLowerCase()) || '').trim() || INTERNAL_VENDOR;
     const wt = String(p.worktype || '').trim();
     const st = String(p.subtype || '').trim();
-    if (!has(filters.regions, region) || !has(filters.portfolios, portfolio) || !has(filters.inspectors, vendorName)) continue;
+    const typeLabel = [wt ? worktypeLabel(wt) : '', st ? subtypeLabel(wt, st) : ''].filter(Boolean).join(' · ');
+    if (!has(filters.regions, region) || !has(filters.portfolios, portfolio) || !has(filters.inspectors, vendorName) || !has(filters.types, typeLabel)) continue;
     if (!inRange(completedDate, filters.from, filters.to)) continue;
     rows.push({
-      externalId: String(p.service_name || id),
+      externalId: serviceExternalId(id, completedDate),
       entityId: prop?.entityId || '',
       fullAddress: [String(p.address_snapshot || p.community_name || '').trim(), String(p.locality_snapshot || '').trim()].filter(Boolean).join(', '),
       personName: vendorName,
-      brokerCode: INTERNAL_EMPLOYEE,
-      typeLabel: [wt ? worktypeLabel(wt) : '', st ? subtypeLabel(wt, st) : ''].filter(Boolean).join(' · '),
+      brokerCode: companyCode,
+      typeLabel,
       vendorAmount: vendorCost,
       clientAmount: clientCost,
       region, portfolio, completedDate,

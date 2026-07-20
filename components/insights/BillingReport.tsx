@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type Obj = 'inspections' | 'services';
 type Row = (string | number)[];
-interface Facets { regions: string[]; portfolios: string[]; people: string[] }
+interface Facets { regions: string[]; portfolios: string[]; people: string[]; types: string[] }
 
 const RANGES: { value: string; label: string }[] = [
   { value: 'last_7_days', label: 'Last 7 days' }, { value: 'last_30_days', label: 'Last 30 days' },
@@ -76,16 +76,18 @@ function MultiPick({ label, options, selected, onChange }: { label: string; opti
 
 export function BillingReport({ object }: { object: Obj }) {
   const personLabel = object === 'services' ? 'Vendor' : 'Inspector';
+  const typeLabel = object === 'services' ? 'Service Type' : 'Inspection Type';
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
-  const [facets, setFacets] = useState<Facets>({ regions: [], portfolios: [], people: [] });
+  const [facets, setFacets] = useState<Facets>({ regions: [], portfolios: [], people: [], types: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [regions, setRegions] = useState<string[]>([]);
   const [portfolios, setPortfolios] = useState<string[]>([]);
   const [people, setPeople] = useState<string[]>([]);
-  const [range, setRange] = useState('last_30_days');
+  const [types, setTypes] = useState<string[]>([]);
+  const [range, setRange] = useState('last_7_days');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [exporting, setExporting] = useState(false);
@@ -101,10 +103,11 @@ export function BillingReport({ object }: { object: Obj }) {
     if (regions.length) p.set('regions', regions.join(','));
     if (portfolios.length) p.set('portfolios', portfolios.join(','));
     if (people.length) p.set('inspectors', people.join(','));
+    if (types.length) p.set('types', types.join(','));
     if (resolved.from) p.set('from', resolved.from);
     if (resolved.to) p.set('to', resolved.to);
     return p.toString();
-  }, [object, regions, portfolios, people, resolved]);
+  }, [object, regions, portfolios, people, types, resolved]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -134,11 +137,12 @@ export function BillingReport({ object }: { object: Obj }) {
   }
 
   const money = (v: string | number) => (typeof v === 'number' ? `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : v);
+  const amountCols = useMemo(() => new Set(columns.map((c, i) => (/amount/i.test(c) ? i : -1)).filter((i) => i >= 0)), [columns]);
 
   return (
     <section className="bg-[#18181c] border border-white/10 rounded-2xl p-4 mb-5">
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-        <h2 className="font-heading font-bold text-[15px] text-[#f4f4f5]">{object === 'services' ? 'Services' : 'Inspection'} Billing Export</h2>
+        <h2 className="font-heading font-bold text-[15px] text-[#f4f4f5]">{object === 'services' ? 'Services' : 'Inspections'} Billing</h2>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => void exportXlsx()} disabled={exporting}
             className="text-[13px] font-heading font-bold px-3 py-1.5 rounded-lg bg-[#ff0060] text-white hover:opacity-90 disabled:opacity-60">
@@ -156,6 +160,7 @@ export function BillingReport({ object }: { object: Obj }) {
         <MultiPick label="Region" options={facets.regions} selected={regions} onChange={setRegions} />
         <MultiPick label="Portfolio" options={facets.portfolios} selected={portfolios} onChange={setPortfolios} />
         <MultiPick label={personLabel} options={facets.people} selected={people} onChange={setPeople} />
+        <MultiPick label={typeLabel} options={facets.types} selected={types} onChange={setTypes} />
         <select value={range} onChange={(e) => setRange(e.target.value)} className={CTRL} aria-label="Completed date range">
           {RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
@@ -165,8 +170,8 @@ export function BillingReport({ object }: { object: Obj }) {
             <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className={CTRL} aria-label="To" />
           </>
         )}
-        {(regions.length || portfolios.length || people.length) > 0 && (
-          <button type="button" onClick={() => { setRegions([]); setPortfolios([]); setPeople([]); }} className="text-[12px] text-[#a1a1aa] hover:text-[#f4f4f5] underline">Reset filters</button>
+        {(regions.length || portfolios.length || people.length || types.length) > 0 && (
+          <button type="button" onClick={() => { setRegions([]); setPortfolios([]); setPeople([]); setTypes([]); }} className="text-[12px] text-[#a1a1aa] hover:text-[#f4f4f5] underline">Reset filters</button>
         )}
       </div>
 
@@ -181,7 +186,7 @@ export function BillingReport({ object }: { object: Obj }) {
           <tbody>
             {rows.map((row, i) => (
               <tr key={i} className="hover:bg-white/5">
-                {row.map((cell, j) => <td key={j} className={`px-3 py-1.5 border-b border-white/5 text-[#e4e4e7] ${j === 6 || j === 7 ? 'tabular-nums text-right' : ''}`}>{j === 6 || j === 7 ? money(cell) : String(cell ?? '')}</td>)}
+                {row.map((cell, j) => <td key={j} className={`px-3 py-1.5 border-b border-white/5 text-[#e4e4e7] ${amountCols.has(j) ? 'tabular-nums text-right' : ''}`}>{amountCols.has(j) ? money(cell) : String(cell ?? '')}</td>)}
               </tr>
             ))}
             {!loading && rows.length === 0 && <tr><td colSpan={columns.length || 1} className="px-3 py-8 text-center text-[#71717a]">No rows for these filters.</td></tr>}
@@ -191,7 +196,7 @@ export function BillingReport({ object }: { object: Obj }) {
 
       {schedOpen && (
         <ScheduleManager object={object} personLabel={personLabel} facets={facets}
-          current={{ regions, portfolios, inspectors: people, range: range === 'custom' ? 'last_30_days' : range }}
+          current={{ regions, portfolios, inspectors: people, types, range: range === 'custom' ? 'last_7_days' : range }}
           onClose={() => setSchedOpen(false)} />
       )}
     </section>
@@ -202,12 +207,12 @@ export function BillingReport({ object }: { object: Obj }) {
 // shapes from throwing.
 function cellsFrom(v: any): Row[] { return Array.isArray(v) ? v.map((r) => (Array.isArray(r) ? r : rowFromObj(r))) : []; }
 function rowFromObj(o: any): Row {
-  return [o.externalId, o.entityId, o.fullAddress, o.personName, o.brokerCode, o.typeLabel, o.vendorAmount, o.clientAmount, o.region, o.portfolio, o.completedDate];
+  return [o.externalId, o.entityId, o.region, o.portfolio, o.fullAddress, o.typeLabel, o.personName, o.brokerCode, o.completedDate, o.vendorAmount, o.clientAmount];
 }
 
 // ── Schedule manager modal ───────────────────────────────────────────────────
 interface Sched {
-  id: string; name: string; object: Obj; recipients: string[]; regions: string[]; portfolios: string[]; inspectors: string[];
+  id: string; name: string; object: Obj; recipients: string[]; regions: string[]; portfolios: string[]; inspectors: string[]; types: string[];
   range: string; cadence: 'daily' | 'weekly' | 'monthly'; hourET: number; dayOfWeek?: number; dayOfMonth?: number; enabled: boolean; lastRunAt?: string;
 }
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -215,7 +220,7 @@ function hourLabel(h: number) { const am = h < 12; const h12 = h % 12 === 0 ? 12
 
 function ScheduleManager({ object, personLabel, facets, current, onClose }: {
   object: Obj; personLabel: string; facets: Facets;
-  current: { regions: string[]; portfolios: string[]; inspectors: string[]; range: string };
+  current: { regions: string[]; portfolios: string[]; inspectors: string[]; types: string[]; range: string };
   onClose: () => void;
 }) {
   const [list, setList] = useState<Sched[]>([]);
@@ -223,13 +228,17 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // New/edit form.
-  const [name, setName] = useState(`${object === 'services' ? 'Services' : 'Inspections'} billing`);
+  const [name, setName] = useState(`${object === 'services' ? 'Services' : 'Inspections'} Billing`);
   const [recipients, setRecipients] = useState('');
   const [cadence, setCadence] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [hourET, setHourET] = useState(8);
   const [dayOfWeek, setDayOfWeek] = useState(1);
   const [dayOfMonth, setDayOfMonth] = useState(1);
   const [range, setRange] = useState(current.range || 'last_7_days');
+  // When editing an existing schedule: its id + the filters it carries (so an
+  // edit preserves the schedule's OWN filters rather than the page's current ones).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editFilters, setEditFilters] = useState<{ regions: string[]; portfolios: string[]; inspectors: string[]; types: string[] } | null>(null);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -238,19 +247,35 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
   }, [object]);
   useEffect(() => { void loadList(); }, [loadList]);
 
-  const payload = () => ({
-    object, name: name.trim(),
-    recipients: recipients.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean),
-    regions: current.regions, portfolios: current.portfolios, inspectors: current.inspectors,
-    range, cadence, hourET, dayOfWeek, dayOfMonth, enabled: true,
-  });
+  const resetForm = () => {
+    setEditingId(null); setEditFilters(null); setRecipients('');
+    setName(`${object === 'services' ? 'Services' : 'Inspections'} Billing`);
+    setCadence('weekly'); setHourET(8); setDayOfWeek(1); setDayOfMonth(1); setRange(current.range || 'last_7_days');
+  };
+  const startEdit = (s: Sched) => {
+    setEditingId(s.id); setEditFilters({ regions: s.regions || [], portfolios: s.portfolios || [], inspectors: s.inspectors || [], types: s.types || [] });
+    setName(s.name); setRecipients((s.recipients || []).join(', ')); setCadence(s.cadence); setHourET(s.hourET);
+    setDayOfWeek(s.dayOfWeek ?? 1); setDayOfMonth(s.dayOfMonth ?? 1); setRange(s.range);
+    setMsg(null);
+  };
+
+  const payload = () => {
+    const f = editingId && editFilters ? editFilters : { regions: current.regions, portfolios: current.portfolios, inspectors: current.inspectors, types: current.types };
+    return {
+      object, name: name.trim(),
+      recipients: recipients.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean),
+      regions: f.regions, portfolios: f.portfolios, inspectors: f.inspectors, types: f.types,
+      range, cadence, hourET, dayOfWeek, dayOfMonth, enabled: true,
+      ...(editingId ? { id: editingId } : {}),
+    };
+  };
 
   async function saveNew() {
     setBusy(true); setMsg(null);
     try {
       const r = await fetch('/api/insights/report-schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload()) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      setRecipients(''); await loadList(); setMsg('Schedule saved.');
+      const wasEdit = !!editingId; resetForm(); await loadList(); setMsg(wasEdit ? 'Schedule updated.' : 'Schedule saved.');
     } catch (e: any) { setMsg(`Could not save: ${e?.message || e}`); }
     finally { setBusy(false); }
   }
@@ -285,7 +310,9 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
           <button type="button" onClick={onClose} className="text-[#a1a1aa] text-2xl leading-none px-1">×</button>
         </div>
         <div className="p-4 space-y-3">
-          <p className="text-[12px] text-[#a1a1aa]">Emails the {object === 'services' ? 'services' : 'inspection'} billing Excel using the filters currently applied above ({[current.regions.length ? `${current.regions.length} region(s)` : '', current.portfolios.length ? `${current.portfolios.length} portfolio(s)` : '', current.inspectors.length ? `${current.inspectors.length} ${personLabel.toLowerCase()}(s)` : ''].filter(Boolean).join(', ') || 'no filters'}). Sends from the ResiWalk mailbox.</p>
+          {(() => { const f = editingId && editFilters ? editFilters : current; const summ = [f.regions.length ? `${f.regions.length} region(s)` : '', f.portfolios.length ? `${f.portfolios.length} portfolio(s)` : '', f.inspectors.length ? `${f.inspectors.length} ${personLabel.toLowerCase()}(s)` : '', f.types.length ? `${f.types.length} type(s)` : ''].filter(Boolean).join(', ') || 'no filters'; return (
+            <p className="text-[12px] text-[#a1a1aa]">{editingId ? 'Editing this schedule. It keeps its own saved filters' : 'Emails the billing Excel using the filters currently applied above'} ({summ}). Sends from the ResiWalk mailbox.</p>
+          ); })()}
 
           <label className="block text-[12px] font-heading font-semibold text-[#a1a1aa]">Report name
             <input value={name} onChange={(e) => setName(e.target.value)} className={`${CTRL} w-full mt-1`} />
@@ -326,8 +353,9 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
           </div>
           {msg && <div className="text-[12px] text-[#73E3DF]">{msg}</div>}
           <div className="flex gap-2">
-            <button type="button" onClick={() => void saveNew()} disabled={busy} className="text-[13px] font-heading font-bold px-4 py-2 rounded-lg bg-[#ff0060] text-white disabled:opacity-60">Save schedule</button>
+            <button type="button" onClick={() => void saveNew()} disabled={busy} className="text-[13px] font-heading font-bold px-4 py-2 rounded-lg bg-[#ff0060] text-white disabled:opacity-60">{editingId ? 'Update schedule' : 'Save schedule'}</button>
             <button type="button" onClick={() => void sendTest()} disabled={busy} className="text-[13px] font-heading font-semibold px-4 py-2 rounded-lg bg-[#232329] border border-white/10 disabled:opacity-60">Send test now</button>
+            {editingId && <button type="button" onClick={resetForm} disabled={busy} className="text-[13px] font-heading font-semibold px-4 py-2 rounded-lg text-[#a1a1aa] hover:text-[#f4f4f5]">Cancel edit</button>}
           </div>
 
           <div className="border-t border-white/10 pt-3">
@@ -341,6 +369,7 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
                       <div className="text-[11px] text-[#a1a1aa] truncate">{cadenceDesc(s)} · {s.recipients.length} recipient(s)</div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      <button type="button" onClick={() => startEdit(s)} disabled={busy} className="text-[11px] font-heading font-semibold text-[#f4f4f5] hover:underline">Edit</button>
                       <button type="button" onClick={() => void testSaved(s)} disabled={busy} className="text-[11px] font-heading font-semibold text-[#73E3DF] hover:underline">Test</button>
                       <button type="button" onClick={() => void remove(s)} disabled={busy} className="text-[11px] font-heading font-semibold text-[#ff0060] hover:underline">Delete</button>
                     </div>
