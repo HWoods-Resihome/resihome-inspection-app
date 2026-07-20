@@ -1015,42 +1015,53 @@ export async function fetchPoolProperties(force = false): Promise<PoolProperty[]
   if (!force && _poolPropsCache && Date.now() - _poolPropsCache.at < 10 * 60 * 1000) return _poolPropsCache.list;
   const { property: typeId } = typeIds();
   const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', PROPERTY_STATUS_PROPERTY, 'pool_fee', POOL_SERVICER_PROPERTY, POOL_SERVICER_NOTE_PROPERTY];
-  const out: PoolProperty[] = [];
-  try {
-    let after: string | undefined;
-    do {
-      const body: any = {
-        // pool_fee is set (has a value) — the >0 test is applied in JS since the
-        // field may be stored as a string in some portals.
-        filterGroups: [{ filters: [{ propertyName: 'pool_fee', operator: 'HAS_PROPERTY' }] }],
-        properties: projection, limit: 100, sorts: [{ propertyName: 'address', direction: 'ASCENDING' }],
-      };
-      if (after) body.after = after;
-      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, { method: 'POST', body: JSON.stringify(body) });
-      for (const r of resp.results || []) {
-        const p = r.properties || {};
-        const fee = Number(String(p.pool_fee ?? '').trim());
-        if (!Number.isFinite(fee) || fee <= 0) continue;
-        const status = String(p[PROPERTY_STATUS_PROPERTY] || '').trim();
-        if (EXCLUDE_STATUS_SET.has(status)) continue;   // hide sold/not-managed
-        const city = String(p.city || '').trim();
-        const state = String(p.state_code || p.state || '').trim();
-        const zip = String(p.zip_code || p.zip || '').trim();
-        out.push({
-          id: String(r.id),
-          address: String(p.address || '').trim() || `(Property ${r.id})`,
-          city, state, zip,
-          locality: [city, state, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
-          region: String(p.region || '').trim(),
-          status,
-          poolFee: fee,
-          poolServicer: String(p[POOL_SERVICER_PROPERTY] || '').trim(),
-          poolServicerNote: String(p[POOL_SERVICER_NOTE_PROPERTY] || '').trim(),
-        });
-      }
-      after = resp.paging?.next?.after;
-    } while (after && out.length < 5000);
-  } catch (e) { console.warn('[pools] property search failed:', e); if (!out.length) return _poolPropsCache?.list || []; }
+  // Scan for pool properties under a given filter. The >0 test is re-applied in JS
+  // (a portal may store the fee as a string). Returns null on error.
+  const scan = async (filters: any[]): Promise<PoolProperty[] | null> => {
+    const list: PoolProperty[] = [];
+    try {
+      let after: string | undefined;
+      do {
+        const body: any = { filterGroups: [{ filters }], properties: projection, limit: 100, sorts: [{ propertyName: 'address', direction: 'ASCENDING' }] };
+        if (after) body.after = after;
+        const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, { method: 'POST', body: JSON.stringify(body) });
+        for (const r of resp.results || []) {
+          const p = r.properties || {};
+          const fee = Number(String(p.pool_fee ?? '').trim());
+          if (!Number.isFinite(fee) || fee <= 0) continue;
+          const status = String(p[PROPERTY_STATUS_PROPERTY] || '').trim();
+          if (EXCLUDE_STATUS_SET.has(status)) continue;   // hide sold/not-managed
+          const city = String(p.city || '').trim();
+          const state = String(p.state_code || p.state || '').trim();
+          const zip = String(p.zip_code || p.zip || '').trim();
+          list.push({
+            id: String(r.id),
+            address: String(p.address || '').trim() || `(Property ${r.id})`,
+            city, state, zip,
+            locality: [city, state, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
+            region: String(p.region || '').trim(),
+            status,
+            poolFee: fee,
+            poolServicer: String(p[POOL_SERVICER_PROPERTY] || '').trim(),
+            poolServicerNote: String(p[POOL_SERVICER_NOTE_PROPERTY] || '').trim(),
+          });
+        }
+        after = resp.paging?.next?.after;
+      } while (after && list.length < 5000);
+      return list;
+    } catch (e) { console.warn('[pools] property search failed:', e); return null; }
+  };
+  // FAST path: server-side pool_fee > 0 returns only real pools (a handful) instead
+  // of every property that merely HAS the field set (the old HAS_PROPERTY scan hit
+  // the whole object and hung the tab). Fall back to HAS_PROPERTY only if the
+  // numeric filter matched nothing (e.g. the fee is stored as a string).
+  let out = await scan([{ propertyName: 'pool_fee', operator: 'GT', value: '0' }]);
+  if (!out || !out.length) {
+    const legacy = await scan([{ propertyName: 'pool_fee', operator: 'HAS_PROPERTY' }]);
+    if (legacy && legacy.length) out = legacy;
+    else if (!out) out = legacy;   // both errored → null
+  }
+  if (!out) return _poolPropsCache?.list || [];
   _poolPropsCache = { at: Date.now(), list: out };
   return out;
 }
