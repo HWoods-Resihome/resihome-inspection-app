@@ -109,12 +109,14 @@ export function InternalUsersManager() {
     setEdits((prev) => {
       const next = { ...prev };
       const cur = { ...(next[row.email] || {}) };
-      const put = (k: CapKey, v: boolean) => { if (v === row.access[k]) delete cur[k]; else cur[k] = v; }; // no-op edits drop out
+      const put = (k: BoolCap, v: boolean) => { if (v === row.access[k]) delete cur[k]; else cur[k] = v; }; // no-op edits drop out
       put(cap, val);
       // Inactive cascades: turning ResiWalk Active OFF forces every other section
-      // off too (a deactivated user has no access anywhere).
+      // off too (a deactivated user has no access anywhere). Inspections is
+      // tri-state — the cascade sets it to 'none'.
       if (cap === 'active' && val === false && !row.seed) {
-        put('inspections', false); put('services', false); put('insights', false); put('admin', false);
+        if (normInsp(row.access.inspections) === 'none') delete cur.inspections; else cur.inspections = 'none';
+        put('services', false); put('insights', false); put('admin', false);
       }
       if (Object.keys(cur).length) next[row.email] = cur; else delete next[row.email];
       return next;

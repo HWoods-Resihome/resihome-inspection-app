@@ -127,7 +127,7 @@ export async function applyUserPatches(updates: Record<string, UserPatch>, byEma
       // anywhere — force every other section off. Applied last so it wins over any
       // other flags in the same patch. Seed admins can never be inactive.
       if (rec.active === false && !seed) {
-        rec.inspections = false; rec.services = false; rec.insights = false; rec.admin = false;
+        rec.inspections = 'none'; rec.services = false; rec.insights = false; rec.admin = false;
       }
       rec.updatedAt = nowIso;
       if (by) rec.updatedByEmail = by;
