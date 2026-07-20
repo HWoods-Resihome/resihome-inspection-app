@@ -985,6 +985,10 @@ export const POOL_SERVICER_PROPERTY = (process.env.POOL_SERVICER_PROPERTY || 'po
 export const POOL_SERVICER_RESIHOME = (process.env.POOL_SERVICER_RESIHOME || 'ResiHome').trim();
 export const POOL_SERVICER_TENANT = (process.env.POOL_SERVICER_TENANT || 'Tenant Service').trim();
 export const POOL_TENANT_LEASED_STATUS = (process.env.POOL_TENANT_LEASED_STATUS || 'Tenant Leased').trim();
+// Free-text note explaining a Resident-serviced pool (why the tenant handles
+// it). Stored on the Property; cleared automatically when the pool returns to
+// ResiHome. Env-overridable property name.
+export const POOL_SERVICER_NOTE_PROPERTY = (process.env.POOL_SERVICER_NOTE_PROPERTY || 'pool_servicer_note').trim();
 
 /** A pool is RESIDENT/tenant-serviced (excluded from our generation) when its
  *  pool_servicer value indicates the tenant/resident handles it — matched
@@ -999,6 +1003,7 @@ export interface PoolProperty {
   id: string; address: string; city: string; state: string; zip: string;
   locality: string; region: string; status: string;
   poolFee: number; poolServicer: string;   // '' when unset → treated as ResiHome (in-house)
+  poolServicerNote: string;                 // why the resident services it (cleared on ResiHome)
 }
 
 /** Every Property with a pool_fee > 0, projecting the pool_servicer + address
@@ -1009,7 +1014,7 @@ export function bustPoolPropertiesCache(): void { _poolPropsCache = null; }
 export async function fetchPoolProperties(force = false): Promise<PoolProperty[]> {
   if (!force && _poolPropsCache && Date.now() - _poolPropsCache.at < 10 * 60 * 1000) return _poolPropsCache.list;
   const { property: typeId } = typeIds();
-  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', PROPERTY_STATUS_PROPERTY, 'pool_fee', POOL_SERVICER_PROPERTY];
+  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', PROPERTY_STATUS_PROPERTY, 'pool_fee', POOL_SERVICER_PROPERTY, POOL_SERVICER_NOTE_PROPERTY];
   const out: PoolProperty[] = [];
   try {
     let after: string | undefined;
@@ -1040,6 +1045,7 @@ export async function fetchPoolProperties(force = false): Promise<PoolProperty[]
           status,
           poolFee: fee,
           poolServicer: String(p[POOL_SERVICER_PROPERTY] || '').trim(),
+          poolServicerNote: String(p[POOL_SERVICER_NOTE_PROPERTY] || '').trim(),
         });
       }
       after = resp.paging?.next?.after;
@@ -1109,16 +1115,56 @@ export async function setPoolServicer(propertyId: string, value: string): Promis
   const { property: typeId } = typeIds();
   // Map the requested side to the dropdown's REAL option value.
   const opts = await poolServicerValues();
-  const v = isTenantServicedPool(value) ? opts.tenant : opts.resihome;
-  const write = () => hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: { [POOL_SERVICER_PROPERTY]: v } }) });
-  try { await write(); }
+  const toResident = isTenantServicedPool(value);
+  const v = toResident ? opts.tenant : opts.resihome;
+  // Returning to ResiHome clears the servicer note in the same write (the note
+  // only applies while a resident services the pool). Best-effort: the note
+  // prop may not exist yet — dropped from the patch if HubSpot rejects it.
+  const props: Record<string, any> = { [POOL_SERVICER_PROPERTY]: v };
+  if (!toResident) props[POOL_SERVICER_NOTE_PROPERTY] = '';
+  const write = (body: Record<string, any>) => hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: body }) });
+  try { await write(props); }
   catch (e: any) {
-    if (isMissingPropertyError(e, POOL_SERVICER_PROPERTY)) { await ensurePoolServicerProp(); bustPoolServicerOpts(); await write(); }
+    if (isMissingPropertyError(e, POOL_SERVICER_PROPERTY)) { await ensurePoolServicerProp(); bustPoolServicerOpts(); await write(props); }
+    else if (isMissingPropertyError(e, POOL_SERVICER_NOTE_PROPERTY)) { await write({ [POOL_SERVICER_PROPERTY]: v }); } // note prop absent → skip clearing it
     else {
       // Surface HubSpot's real reason (hubspotFetch sanitizes the message to a
       // bare 400; the detail carries the INVALID_OPTION / allowed-values info).
       throw new Error(`${String(e?.message || e)}${e?.detail ? ` — ${String(e.detail).slice(0, 240)}` : ''}`.trim());
     }
+  }
+  bustPoolPropertiesCache();
+}
+
+/** Save the resident-servicer NOTE on a pool property. Provisions the text
+ *  property (check-first create) if it's missing. Busts the pools cache. */
+let _poolNotePropEnsured = false;
+async function ensurePoolNoteProp(): Promise<void> {
+  if (_poolNotePropEnsured) return;
+  try { await hubspotFetch(`/crm/v3/properties/${typeIds().property}/${POOL_SERVICER_NOTE_PROPERTY}`); _poolNotePropEnsured = true; return; }
+  catch { /* create below */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${typeIds().property}`, {
+      method: 'POST',
+      body: JSON.stringify({ name: POOL_SERVICER_NOTE_PROPERTY, label: 'Pool Servicer Note', type: 'string', fieldType: 'textarea', groupName: 'propertyinformation' }),
+    });
+    _poolNotePropEnsured = true;
+  } catch (e: any) {
+    const s = `${e?.message || ''} ${e?.detail || ''}`;
+    if (/409|already exists|PROPERTY_EXISTS/i.test(s)) { _poolNotePropEnsured = true; return; }
+    throw new Error(`Could not provision the ${POOL_SERVICER_NOTE_PROPERTY} Property field: ${s.slice(0, 200)}`);
+  }
+}
+export async function setPoolServicerNote(propertyId: string, note: string): Promise<void> {
+  const id = String(propertyId || '').trim();
+  if (!/^\d+$/.test(id)) throw new Error('Invalid property id');
+  const { property: typeId } = typeIds();
+  const v = String(note || '').slice(0, 2000);
+  const write = () => hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: { [POOL_SERVICER_NOTE_PROPERTY]: v } }) });
+  try { await write(); }
+  catch (e: any) {
+    if (isMissingPropertyError(e, POOL_SERVICER_NOTE_PROPERTY)) { await ensurePoolNoteProp(); await write(); }
+    else throw new Error(`${String(e?.message || e)}${e?.detail ? ` — ${String(e.detail).slice(0, 240)}` : ''}`.trim());
   }
   bustPoolPropertiesCache();
 }

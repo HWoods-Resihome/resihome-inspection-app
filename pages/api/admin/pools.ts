@@ -11,7 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchPoolProperties, setPoolServicer, isTenantServicedPool, POOL_SERVICER_RESIHOME, POOL_SERVICER_TENANT } from '@/lib/hubspot';
+import { fetchPoolProperties, setPoolServicer, setPoolServicerNote, isTenantServicedPool, POOL_SERVICER_RESIHOME, POOL_SERVICER_TENANT } from '@/lib/hubspot';
 
 export const config = { maxDuration: 60 };
 
@@ -38,13 +38,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === 'PATCH') {
     const b = req.body || {};
     const id = String(b.id || '').trim();
-    const val = String(b.poolServicer || '').trim();
     if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'A valid property id is required.' });
-    if (val !== POOL_SERVICER_RESIHOME && val !== POOL_SERVICER_TENANT) {
-      return res.status(400).json({ error: `poolServicer must be "${POOL_SERVICER_RESIHOME}" or "${POOL_SERVICER_TENANT}".` });
-    }
+    const hasServicer = b.poolServicer != null;
+    const hasNote = b.note !== undefined;
+    if (!hasServicer && !hasNote) return res.status(400).json({ error: 'Nothing to update.' });
     try {
-      await setPoolServicer(id, val);
+      // Servicer FIRST (a switch to ResiHome clears the note in the same write),
+      // then any explicit note (only meaningful for a Resident-serviced pool).
+      if (hasServicer) {
+        const val = String(b.poolServicer).trim();
+        if (val !== POOL_SERVICER_RESIHOME && val !== POOL_SERVICER_TENANT) {
+          return res.status(400).json({ error: `poolServicer must be "${POOL_SERVICER_RESIHOME}" or "${POOL_SERVICER_TENANT}".` });
+        }
+        await setPoolServicer(id, val);
+      }
+      if (hasNote) await setPoolServicerNote(id, String(b.note || ''));
       return res.status(200).json({ ok: true });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });

@@ -680,6 +680,7 @@ export default function VendorManagement() {
 interface PoolRow {
   id: string; address: string; city: string; state: string; zip: string;
   locality: string; region: string; status: string; poolFee: number; poolServicer: string;
+  poolServicerNote?: string;
   // Server-classified (tolerant "tenant"/"resident" match) — matches exactly how
   // generation excludes, so grouping here can't drift from the real behavior.
   isTenant?: boolean;
@@ -691,8 +692,12 @@ function PoolsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [openSecs, setOpenSecs] = useState<{ resident: boolean; resihome: boolean }>({ resident: true, resihome: true });
+  // STAGED edits: id → { resident?: boolean; note?: string }. Nothing is written
+  // to HubSpot until Save — so a card stays in its CURRENT section while editing.
+  const [edits, setEdits] = useState<Record<string, { resident?: boolean; note?: string }>>({});
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const SNAP = 'resiwalk_pools_v1';
 
   async function load(refresh = false) {
@@ -702,7 +707,7 @@ function PoolsTab() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       const list: PoolRow[] = Array.isArray(d.pools) ? d.pools : [];
-      setPools(list);
+      setPools(list); setEdits({});
       if (d.servicers) setServicers(d.servicers);
       try { localStorage.setItem(SNAP, JSON.stringify(list)); } catch { /* quota */ }
     } catch (e: any) { setError(String(e?.message || e)); }
@@ -716,63 +721,108 @@ function PoolsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function setServicer(p: PoolRow, value: string) {
-    if (p.poolServicer === value || (!p.poolServicer && value === servicers.resihome)) return;
-    setBusyId(p.id);
-    const prev = p.poolServicer; const prevTenant = p.isTenant;
-    const nextTenant = /tenant|resident/i.test(value);
-    // Optimistically update the value AND its classification so the card jumps
-    // to the right section immediately (regroups on the tolerant match).
-    setPools((cur) => cur.map((x) => (x.id === p.id ? { ...x, poolServicer: value, isTenant: nextTenant } : x)));
+  const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  // Original (saved) classification — grouping uses THIS so cards don't move
+  // until Save. Prefer the server's tolerant flag; fall back to a client match.
+  const savedResident = (p: PoolRow) => (typeof p.isTenant === 'boolean' ? p.isTenant : /tenant|resident/i.test(p.poolServicer || ''));
+  // Effective (staged) values for the controls.
+  const effResident = (p: PoolRow) => edits[p.id]?.resident ?? savedResident(p);
+  const effNote = (p: PoolRow) => edits[p.id]?.note ?? (p.poolServicerNote || '');
+  const isDirty = (p: PoolRow) => {
+    const e = edits[p.id]; if (!e) return false;
+    if (e.resident !== undefined && e.resident !== savedResident(p)) return true;
+    if (e.note !== undefined && e.note !== (p.poolServicerNote || '')) return true;
+    return false;
+  };
+  const dirtyIds = pools.filter(isDirty).map((p) => p.id);
+  const dirtyCount = dirtyIds.length;
+
+  const stageResident = (p: PoolRow, resident: boolean) => {
+    setSaved(false);
+    setEdits((cur) => {
+      const next = { ...cur };
+      const e = { ...(next[p.id] || {}) };
+      if (resident === savedResident(p)) delete e.resident; else e.resident = resident;
+      if (Object.keys(e).length) next[p.id] = e; else delete next[p.id];
+      return next;
+    });
+  };
+  const stageNote = (p: PoolRow, note: string) => {
+    setSaved(false);
+    setEdits((cur) => {
+      const next = { ...cur };
+      const e = { ...(next[p.id] || {}) };
+      if (note === (p.poolServicerNote || '')) delete e.note; else e.note = note;
+      if (Object.keys(e).length) next[p.id] = e; else delete next[p.id];
+      return next;
+    });
+  };
+
+  async function save() {
+    if (!dirtyCount || saving) return;
+    setSaving(true); setError(null); setSaved(false);
     try {
-      const r = await fetch('/api/admin/pools', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: p.id, poolServicer: value }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-    } catch (e: any) {
-      setPools((cur) => cur.map((x) => (x.id === p.id ? { ...x, poolServicer: prev, isTenant: prevTenant } : x)));
-      void dialog.alert(`Could not update pool servicer: ${e?.message || e}`);
-    } finally { setBusyId(null); }
+      for (const p of pools) {
+        if (!isDirty(p)) continue;
+        const resident = effResident(p);
+        const body: Record<string, any> = { id: p.id, poolServicer: resident ? servicers.tenant : servicers.resihome };
+        // Only send a note for a Resident pool; switching to ResiHome clears it server-side.
+        if (resident) body.note = effNote(p);
+        const r = await fetch('/api/admin/pools', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      }
+      await load(true);   // reload → cards regroup into their new sections
+      setSaved(true); setTimeout(() => setSaved(false), 2500);
+    } catch (e: any) { setError(`Save failed: ${String(e?.message || e)}`); }
+    finally { setSaving(false); }
   }
 
   const q = search.trim().toLowerCase();
   const visible = q
     ? pools.filter((p) => `${p.address} ${p.locality} ${p.region}`.toLowerCase().includes(q))
     : pools;
-  const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-  // Prefer the SERVER's tolerant classification; fall back to a matching
-  // client-side check so an older snapshot (no isTenant) still groups right.
-  const isTenant = (p: PoolRow) => (typeof p.isTenant === 'boolean' ? p.isTenant : /tenant|resident/i.test(p.poolServicer || ''));
-  const resident = visible.filter(isTenant);
-  const resihome = visible.filter((p) => !isTenant(p));
+  const resident = visible.filter(savedResident);
+  const resihome = visible.filter((p) => !savedResident(p));
 
-  const PoolCard = (p: PoolRow) => (
-    <section key={p.id} className={`bg-white border rounded-xl shadow-sm p-3.5 ${busyId === p.id ? 'opacity-60 pointer-events-none' : 'border-gray-200'}`}>
-      <div className="min-w-0">
-        <div className="font-heading font-bold text-[15px] text-ink break-words">{p.address}</div>
-        {p.locality && <div className="text-[12px] text-gray-500">{p.locality}</div>}
-        <div className="text-[11px] text-gray-400 mt-0.5">{p.region || '—'} · Pool fee {money(p.poolFee)}{p.status ? ` · ${p.status}` : ''}</div>
-      </div>
-      <div className="flex items-center justify-between gap-2 mt-2.5">
-        <span className="text-[13px] text-gray-700 shrink-0">Pool Servicer</span>
-        <div className="flex rounded-lg border border-gray-300 overflow-hidden" role="radiogroup" aria-label={`Pool servicer for ${p.address}`}>
-          {[{ val: servicers.resihome, label: 'ResiHome', tenant: false }, { val: servicers.tenant, label: 'Resident', tenant: true }].map((opt) => {
-            const on = opt.tenant ? isTenant(p) : !isTenant(p);
-            return (
-              <button key={opt.label} type="button" role="radio" aria-checked={on} onClick={() => void setServicer(p, opt.val)}
-                className={`px-2.5 py-1.5 text-[11px] font-heading font-bold border-l first:border-l-0 border-gray-300 ${on ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
-                {opt.label}
-              </button>
-            );
-          })}
+  const PoolCard = (p: PoolRow) => {
+    const res = effResident(p);
+    return (
+      <section key={p.id} className={`bg-white border rounded-xl shadow-sm p-3.5 ${isDirty(p) ? 'border-brand/50' : 'border-gray-200'}`}>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <div className="font-heading font-bold text-[15px] text-ink break-words">{p.address}</div>
+            {isDirty(p) && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-brand" />}
+          </div>
+          {p.locality && <div className="text-[12px] text-gray-500">{p.locality}</div>}
+          <div className="text-[11px] text-gray-400 mt-0.5">{p.region || '—'} · Pool fee {money(p.poolFee)}{p.status ? ` · ${p.status}` : ''}</div>
         </div>
-      </div>
-      {isTenant(p) && (
-        <p className="text-[11px] text-amber-600 mt-1.5">Resident handles this pool — excluded from new pool orders. Returns to ResiHome via the HubSpot workflow.</p>
-      )}
-    </section>
-  );
+        <div className="flex items-center justify-between gap-2 mt-2.5">
+          <span className="text-[13px] text-gray-700 shrink-0">Pool Servicer</span>
+          <div className="flex rounded-lg border border-gray-300 overflow-hidden" role="radiogroup" aria-label={`Pool servicer for ${p.address}`}>
+            {[{ label: 'ResiHome', resident: false }, { label: 'Resident', resident: true }].map((opt) => {
+              const on = opt.resident === res;
+              return (
+                <button key={opt.label} type="button" role="radio" aria-checked={on} onClick={() => stageResident(p, opt.resident)}
+                  className={`px-2.5 py-1.5 text-[11px] font-heading font-bold border-l first:border-l-0 border-gray-300 ${on ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {res && (
+          <div className="mt-2.5">
+            <label className="block text-[11px] font-heading font-semibold uppercase tracking-wide text-gray-400 mb-1">Resident Service Note</label>
+            <textarea value={effNote(p)} onChange={(e) => stageNote(p, e.target.value)} rows={2}
+              placeholder="Why the resident services this pool (saved to HubSpot)…"
+              className="focus-brand w-full border border-gray-300 rounded-lg px-2.5 py-2 text-[13px] bg-white text-ink placeholder-gray-400 resize-none" />
+            <p className="text-[11px] text-amber-600 mt-1">Excluded from new pool orders. This note clears automatically if the pool returns to ResiHome.</p>
+          </div>
+        )}
+      </section>
+    );
+  };
 
   const SECTIONS: { key: 'resident' | 'resihome'; title: string; rows: PoolRow[] }[] = [
     { key: 'resident', title: 'Resident Services', rows: resident },
@@ -788,11 +838,11 @@ function PoolsTab() {
       </div>
       {loading ? (
         <div className="text-center py-16"><div className="inline-block w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin" /></div>
-      ) : error ? (
+      ) : error && !pools.length ? (
         <div className="bg-white border border-red-200 rounded-xl p-4 text-sm text-red-700">Could not load pools: {error}</div>
       ) : (
         <>
-          <p className="text-[12px] text-gray-500 mb-2">{visible.length} pool propert{visible.length === 1 ? 'y' : 'ies'}{q ? ' (filtered)' : ''} · fee &gt; $0. Set a pool to <span className="font-heading font-semibold">Resident</span> to hold it out of new pool orders.</p>
+          <p className="text-[12px] text-gray-500 mb-2">{visible.length} pool propert{visible.length === 1 ? 'y' : 'ies'}{q ? ' (filtered)' : ''} · fee &gt; $0. Set a pool to <span className="font-heading font-semibold">Resident</span> to hold it out of new pool orders, then <span className="font-heading font-semibold">Save</span>.</p>
           <div className="space-y-4">
             {SECTIONS.map((s) => {
               const open = openSecs[s.key];
@@ -815,6 +865,17 @@ function PoolsTab() {
                 </section>
               );
             })}
+          </div>
+
+          {/* Save bar — changes stay staged (cards don't move) until saved. */}
+          <div className="sticky bottom-2 mt-4 flex items-center gap-3 bg-white/95 backdrop-blur border border-gray-200 rounded-xl px-3 py-2.5 shadow-md">
+            <button type="button" onClick={() => void save()} disabled={saving || !dirtyCount}
+              className="h-10 px-5 rounded-xl bg-brand text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300">
+              {saving ? 'Saving…' : dirtyCount ? `Save ${dirtyCount} change${dirtyCount === 1 ? '' : 's'}` : 'Save'}
+            </button>
+            {dirtyCount > 0 && !saving && <button type="button" onClick={() => { setEdits({}); setSaved(false); }} className="text-[13px] font-heading font-semibold text-gray-500 hover:text-gray-800">Discard</button>}
+            {saved && <span className="text-emerald-600 text-sm font-heading font-semibold">Saved ✓</span>}
+            {error && pools.length > 0 && <span className="text-red-600 text-[12px]">{error}</span>}
           </div>
         </>
       )}
