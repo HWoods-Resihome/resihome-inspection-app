@@ -43,16 +43,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const hasNote = b.note !== undefined;
     if (!hasServicer && !hasNote) return res.status(400).json({ error: 'Nothing to update.' });
     try {
-      // Servicer FIRST (a switch to ResiHome clears the note in the same write),
-      // then any explicit note (only meaningful for a Resident-serviced pool).
       if (hasServicer) {
         const val = String(b.poolServicer).trim();
         if (val !== POOL_SERVICER_RESIHOME && val !== POOL_SERVICER_TENANT) {
           return res.status(400).json({ error: `poolServicer must be "${POOL_SERVICER_RESIHOME}" or "${POOL_SERVICER_TENANT}".` });
         }
-        await setPoolServicer(id, val);
+        // Servicer + note in ONE HubSpot write (ResiHome clears the note).
+        await setPoolServicer(id, val, hasNote ? String(b.note || '') : undefined);
+      } else if (hasNote) {
+        await setPoolServicerNote(id, String(b.note || ''));
       }
-      if (hasNote) await setPoolServicerNote(id, String(b.note || ''));
       return res.status(200).json({ ok: true });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });

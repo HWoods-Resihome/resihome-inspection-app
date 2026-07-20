@@ -761,21 +761,36 @@ function PoolsTab() {
   async function save() {
     if (!dirtyCount || saving) return;
     setSaving(true); setError(null); setSaved(false);
-    try {
-      for (const p of pools) {
-        if (!isDirty(p)) continue;
-        const resident = effResident(p);
-        const body: Record<string, any> = { id: p.id, poolServicer: resident ? servicers.tenant : servicers.resihome };
-        // Only send a note for a Resident pool; switching to ResiHome clears it server-side.
-        if (resident) body.note = effNote(p);
-        const r = await fetch('/api/admin/pools', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      }
-      await load(true);   // reload → cards regroup into their new sections
-      setSaved(true); setTimeout(() => setSaved(false), 2500);
-    } catch (e: any) { setError(`Save failed: ${String(e?.message || e)}`); }
-    finally { setSaving(false); }
+    const targets = pools.filter(isDirty).map((p) => {
+      const resident = effResident(p);
+      const note = resident ? effNote(p) : '';
+      const body: Record<string, any> = { id: p.id, poolServicer: resident ? servicers.tenant : servicers.resihome };
+      if (resident) body.note = note;
+      return { p, resident, note, body };
+    });
+    // PATCH all dirty pools CONCURRENTLY (was sequential → slow with several).
+    const results = await Promise.all(targets.map(async (t) => {
+      try {
+        const r = await fetch('/api/admin/pools', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t.body) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); return { id: t.p.id, ok: false, error: d.error || `HTTP ${r.status}` }; }
+        return { id: t.p.id, ok: true as const };
+      } catch (e: any) { return { id: t.p.id, ok: false as const, error: String(e?.message || e) }; }
+    }));
+    const failed = results.filter((r) => !r.ok);
+    // Merge saved values into local state IN-PLACE — no full re-scan (that
+    // property re-fetch was the real slow-down). Cards regroup from this.
+    const savedMap = new Map(targets.map((t) => [t.p.id, t]));
+    const okIds = new Set(results.filter((r) => r.ok).map((r) => r.id));
+    setPools((cur) => cur.map((x) => {
+      if (!okIds.has(x.id)) return x;
+      const t = savedMap.get(x.id)!;
+      return { ...x, isTenant: t.resident, poolServicer: t.resident ? servicers.tenant : servicers.resihome, poolServicerNote: t.note };
+    }));
+    // Drop only the successfully-saved edits; keep failed ones staged.
+    setEdits((cur) => { const next = { ...cur }; for (const id of okIds) delete next[id]; return next; });
+    setSaving(false);
+    if (failed.length) setError(`Could not save ${failed.length} of ${targets.length}: ${failed[0].error}`);
+    else { setSaved(true); setTimeout(() => setSaved(false), 2500); }
   }
 
   const q = search.trim().toLowerCase();

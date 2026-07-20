@@ -1124,24 +1124,26 @@ async function poolServicerValues(): Promise<{ resihome: string; tenant: string 
   return _poolServicerOpts;
 }
 
-export async function setPoolServicer(propertyId: string, value: string): Promise<void> {
+/** Set a pool's servicer AND (optionally) its note in ONE HubSpot write.
+ *  Resident → writes the tenant option value + the note; ResiHome → writes the
+ *  resihome value and CLEARS the note (it only applies while a resident services
+ *  the pool). `note === undefined` leaves the note untouched (servicer-only). */
+export async function setPoolServicer(propertyId: string, value: string, note?: string): Promise<void> {
   const id = String(propertyId || '').trim();
   if (!/^\d+$/.test(id)) throw new Error('Invalid property id');
   const { property: typeId } = typeIds();
-  // Map the requested side to the dropdown's REAL option value.
-  const opts = await poolServicerValues();
+  const opts = await poolServicerValues();   // map side → the dropdown's REAL option value (cached)
   const toResident = isTenantServicedPool(value);
   const v = toResident ? opts.tenant : opts.resihome;
-  // Returning to ResiHome clears the servicer note in the same write (the note
-  // only applies while a resident services the pool). Best-effort: the note
-  // prop may not exist yet — dropped from the patch if HubSpot rejects it.
   const props: Record<string, any> = { [POOL_SERVICER_PROPERTY]: v };
+  // ResiHome always clears the note; Resident writes the given note when provided.
   if (!toResident) props[POOL_SERVICER_NOTE_PROPERTY] = '';
+  else if (note !== undefined) props[POOL_SERVICER_NOTE_PROPERTY] = String(note).slice(0, 2000);
   const write = (body: Record<string, any>) => hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: body }) });
   try { await write(props); }
   catch (e: any) {
     if (isMissingPropertyError(e, POOL_SERVICER_PROPERTY)) { await ensurePoolServicerProp(); bustPoolServicerOpts(); await write(props); }
-    else if (isMissingPropertyError(e, POOL_SERVICER_NOTE_PROPERTY)) { await write({ [POOL_SERVICER_PROPERTY]: v }); } // note prop absent → skip clearing it
+    else if (isMissingPropertyError(e, POOL_SERVICER_NOTE_PROPERTY)) { await ensurePoolNoteProp(); await write(props); }
     else {
       // Surface HubSpot's real reason (hubspotFetch sanitizes the message to a
       // bare 400; the detail carries the INVALID_OPTION / allowed-values info).
