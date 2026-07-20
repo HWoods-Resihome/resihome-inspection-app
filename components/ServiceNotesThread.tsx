@@ -96,11 +96,10 @@ export function ServiceNotesThread({ serviceId, viewerRole, viewerEmail }: {
         </div>
       </button>
       {open && (<>
+      {(loading || notes.length > 0) && (
       <div className="p-3 space-y-2 max-h-80 overflow-y-auto">
         {loading ? (
           <p className="text-sm text-gray-400 text-center py-3">Loading notes…</p>
-        ) : notes.length === 0 ? (
-          <p className="text-sm text-gray-400 text-center py-3">No notes yet — start the conversation below.</p>
         ) : notes.map((n) => {
           // MY notes (the exact address I write from) go right in brand pink;
           // every other participant goes left, each with their own stable hue.
@@ -120,6 +119,7 @@ export function ServiceNotesThread({ serviceId, viewerRole, viewerEmail }: {
         })}
         <div ref={endRef} />
       </div>
+      )}
       <div className="border-t border-gray-100 p-3">
         {error && <p className="text-[12px] text-red-600 mb-1.5">Could not send: {error}</p>}
         <div className="flex items-end gap-2">
