@@ -44,7 +44,6 @@ export const CARD_CATALOG: { id: string; title: string }[] = [
   { id: 'passfail', title: 'Pass / Fail' },
   { id: 'roster', title: 'Inspector Performance' },
   { id: 'grass', title: '1099 Grass Condition Fails' },
-  { id: 'completed', title: 'Completed Inspections' },
   { id: 'scope-cost', title: 'Scope Cost' },
   { id: 'scope-approvals', title: 'Scope Approvals' },
   { id: 'ratecard-lines', title: 'Most-Used Rate Card Line Items' },

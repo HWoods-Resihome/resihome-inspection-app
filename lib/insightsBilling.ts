@@ -158,6 +158,14 @@ export async function fetchServiceBillingRows(filters: BillingFilters = {}): Pro
 
   const rows: BillingRow[] = [];
   for (const { id, props: p } of records) {
+    // Bill at the PROPERTY level: exclude the community grass-cut MASTER (it
+    // carries covered_property_ids / a covered count and represents many homes)
+    // and keep its per-property billing-line children (master_service_id set) +
+    // all standalone services. This is the inverse of the vendor-performance
+    // roll-up, which counts the master and drops the children.
+    const coveredCount = Number(String(p.covered_property_count ?? '').trim());
+    const isCommunityMaster = (Number.isFinite(coveredCount) && coveredCount > 0) || String(p.covered_property_ids || '').trim().length > 2;
+    if (isCommunityMaster) continue;
     const prop = p.property_id_ref ? propMap.get(String(p.property_id_ref)) : undefined;
     const region = String(p.region_snapshot || prop?.region || '').trim();
     const portfolio = prop?.portfolio || '';

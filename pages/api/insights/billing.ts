@@ -11,6 +11,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { canViewInsights } from '@/lib/insightsAccess';
 import { fetchBillingRows, billingColumns, billingFacets, type BillingFilters } from '@/lib/insightsBilling';
 import { buildBillingXlsx, billingFilename } from '@/lib/insightsBillingXlsx';
+import { fetchPropertyCoverage } from '@/lib/hubspot';
 
 export const config = { maxDuration: 60 };
 
@@ -43,9 +44,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       res.setHeader('Content-Disposition', `attachment; filename="${billingFilename(object)}"`);
       return res.status(200).send(buf);
     }
-    // Facets from the UNFILTERED set so the dropdowns don't collapse as you filter.
+    // Facets from the UNFILTERED set so the dropdowns don't collapse as you
+    // filter. Region + Portfolio additionally include the FULL property catalog
+    // (excludes sold/not-managed) so an admin can filter on a region/portfolio
+    // that has no completed record yet.
     const all = await fetchBillingRows(object, {});
-    return res.status(200).json({ object, columns: billingColumns(object), rows, facets: billingFacets(all), total: rows.length });
+    const facets = billingFacets(all);
+    const coverage = await fetchPropertyCoverage().catch(() => null);
+    if (coverage) {
+      const covRegions = (coverage.regions || []).map((r: any) => (typeof r === 'string' ? r : r.key)).filter(Boolean);
+      const covPortfolios = (coverage.portfolios || []).map((p: any) => (typeof p === 'string' ? p : p.key)).filter(Boolean);
+      facets.regions = Array.from(new Set([...facets.regions, ...covRegions])).sort((a, b) => a.localeCompare(b));
+      facets.portfolios = Array.from(new Set([...facets.portfolios, ...covPortfolios])).sort((a, b) => a.localeCompare(b));
+    }
+    return res.status(200).json({ object, columns: billingColumns(object), rows, facets, total: rows.length });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
   }

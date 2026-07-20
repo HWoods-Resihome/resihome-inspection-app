@@ -15,7 +15,6 @@ import { FilterRail } from './FilterRail';
 import { KpiTiles } from './cards/KpiTiles';
 import { PassFailBars } from './cards/PassFailBars';
 import { InspectorRoster } from './cards/InspectorRoster';
-import { CompletedTable } from './cards/CompletedTable';
 import { TrendChart } from './cards/TrendChart';
 import { GrassFails } from './cards/GrassFails';
 import { AiOverrides } from './cards/AiOverrides';
@@ -221,9 +220,6 @@ export function InsightsDashboard() {
 
             {/* (5b) 1099 grass-condition fails */}
             <CardSlot id="grass"><GrassFails rows={filtered} /></CardSlot>
-
-            {/* (6) Completed inspections (with CSV export) — last section */}
-            <CardSlot id="completed"><CompletedTable rows={filtered} /></CardSlot>
           </div>
           </CardHost>
         )}

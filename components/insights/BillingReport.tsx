@@ -98,16 +98,24 @@ export function BillingReport({ object }: { object: Obj }) {
     return resolveRange(range);
   }, [range, customFrom, customTo]);
 
+  // DRAFT (the controls above) vs APPLIED (what the table/export/schedule use).
+  // Selections stage in the draft and only take effect on "Apply", so the
+  // dropdowns never re-query / collapse while you're picking.
+  type Applied = { regions: string[]; portfolios: string[]; inspectors: string[]; types: string[]; from?: string; to?: string };
+  const draftApplied: Applied = useMemo(() => ({ regions, portfolios, inspectors: people, types, from: resolved.from, to: resolved.to }), [regions, portfolios, people, types, resolved]);
+  const [applied, setApplied] = useState<Applied>(() => ({ regions: [], portfolios: [], inspectors: [], types: [], ...resolveRange('last_7_days') }));
+  const dirty = useMemo(() => JSON.stringify(draftApplied) !== JSON.stringify(applied), [draftApplied, applied]);
+
   const qs = useMemo(() => {
     const p = new URLSearchParams({ object });
-    if (regions.length) p.set('regions', regions.join(','));
-    if (portfolios.length) p.set('portfolios', portfolios.join(','));
-    if (people.length) p.set('inspectors', people.join(','));
-    if (types.length) p.set('types', types.join(','));
-    if (resolved.from) p.set('from', resolved.from);
-    if (resolved.to) p.set('to', resolved.to);
+    if (applied.regions.length) p.set('regions', applied.regions.join(','));
+    if (applied.portfolios.length) p.set('portfolios', applied.portfolios.join(','));
+    if (applied.inspectors.length) p.set('inspectors', applied.inspectors.join(','));
+    if (applied.types.length) p.set('types', applied.types.join(','));
+    if (applied.from) p.set('from', applied.from);
+    if (applied.to) p.set('to', applied.to);
     return p.toString();
-  }, [object, regions, portfolios, people, types, resolved]);
+  }, [object, applied]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -170,13 +178,17 @@ export function BillingReport({ object }: { object: Obj }) {
             <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className={CTRL} aria-label="To" />
           </>
         )}
+        <button type="button" onClick={() => setApplied(draftApplied)} disabled={!dirty}
+          className={`text-[13px] font-heading font-bold px-3 py-1.5 rounded-lg ${dirty ? 'bg-[#ff0060] text-white hover:opacity-90' : 'bg-[#232329] border border-white/10 text-[#71717a]'}`}>
+          Apply{dirty ? ' •' : ''}
+        </button>
         {(regions.length || portfolios.length || people.length || types.length) > 0 && (
           <button type="button" onClick={() => { setRegions([]); setPortfolios([]); setPeople([]); setTypes([]); }} className="text-[12px] text-[#a1a1aa] hover:text-[#f4f4f5] underline">Reset filters</button>
         )}
       </div>
 
       {error && <div className="mb-2 px-3 py-2 rounded-lg bg-[#ff0060]/10 border border-[#ff0060]/40 text-[13px] text-[#ff0060]">{error}</div>}
-      <div className="text-[12px] text-[#71717a] mb-1.5">{loading ? 'Loading…' : `${rows.length} row${rows.length === 1 ? '' : 's'}`}{resolved.from || resolved.to ? ` · completed ${resolved.from || '…'} → ${resolved.to || '…'}` : ' · all time'}</div>
+      <div className="text-[12px] text-[#71717a] mb-1.5">{loading ? 'Loading…' : `${rows.length} row${rows.length === 1 ? '' : 's'}`}{applied.from || applied.to ? ` · completed ${applied.from || '…'} → ${applied.to || '…'}` : ' · all time'}{dirty ? ' · filters changed — hit Apply' : ''}</div>
 
       <div className="overflow-x-auto rounded-lg border border-white/10 max-h-[460px] overflow-y-auto">
         <table className="w-full text-[12px] whitespace-nowrap">
@@ -196,7 +208,7 @@ export function BillingReport({ object }: { object: Obj }) {
 
       {schedOpen && (
         <ScheduleManager object={object} personLabel={personLabel} facets={facets}
-          current={{ regions, portfolios, inspectors: people, types, range: range === 'custom' ? 'last_7_days' : range }}
+          current={{ regions: applied.regions, portfolios: applied.portfolios, inspectors: applied.inspectors, types: applied.types, range: range === 'custom' ? 'last_7_days' : range }}
           onClose={() => setSchedOpen(false)} />
       )}
     </section>
