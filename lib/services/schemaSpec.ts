@@ -77,6 +77,10 @@ export const SERVICE_OBJECT: ObjectSpec = {
     T('property_id_ref', 'Property Id Ref'),
     T('community_id_ref', 'Community Id Ref'),
     DTIME('submitted_at', 'Submitted At'),
+    // The vendor-entered date the work was actually DONE (from the completion
+    // form's "Service Completed Date"), distinct from submitted_at (when they hit
+    // submit). The recurring-cadence engine anchors the next order on THIS date.
+    DATE('service_completed_date', 'Service Completed Date'),
     SEL('ai_verdict', 'AI Verdict', opt([['Clean', 'clean'], ['Needs Review', 'needs_review']])),
     TA('ai_notes', 'AI Notes'),
     SEL('review_decision', 'Review Decision', opt([['Approved', 'approve'], ['Modified', 'modify'], ['Rejected', 'reject']])),

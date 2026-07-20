@@ -199,7 +199,7 @@ each closing order's `submitted_at` + `due_date` per key — a projection add to
 | # | Topic | Decision |
 |---|---|---|
 | 1 | Late completion | Drift anchor to the new day, and stay there. ✅ |
-| 2 | Anchor timestamp | `submitted_at` (fallback `completed_at`). ✅ |
+| 2 | Anchor timestamp | Vendor-entered **Service Completed Date** (`service_completed_date`, from the completion form) — falls back to `submitted_at` → `completed_at` → `due_date`. So a Friday cut submitted Monday re-anchors from Friday. ✅ |
 | 3 | Community timing | Create day after prior **due**; due = prior due + interval. ✅ |
 | 3b | Community backlog | Never cap; **alert when ≥ 3 open orders of same type** per community (Admin ▸ Error Log). ✅ |
 | 4 | Skip months | Respect by **due-date month**; roll forward to next active month. ✅ |

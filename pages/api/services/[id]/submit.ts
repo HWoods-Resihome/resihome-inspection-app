@@ -172,6 +172,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!okp) return res.status(200).json({ ok: true, preview: true }); // object not configured
     void recordServiceAudit({ serviceId: id, action: 'submit', actorEmail: email, actorName: session?.name, detail: 'Completion submitted' });
 
+    // Persist the vendor-entered "Service Completed Date" as its own property so
+    // the recurring cadence anchors the next order on WHEN THE WORK WAS DONE, not
+    // when it was submitted (a Friday cut submitted Monday still re-anchors to
+    // Friday). Best-effort in its own PATCH: a deploy that hasn't provisioned the
+    // property (run /api/services/admin/provision) must not fail the submit.
+    if (!notCompleted) {
+      const raw = answerFor('svc_completed_date', /service\s*completed\s*date/i);
+      const svcDate = /^\d{4}-\d{2}-\d{2}/.test(String(raw || '')) ? String(raw).slice(0, 10)
+        : (raw ? (() => { const d = new Date(String(raw)); return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10); })() : '');
+      if (svcDate) {
+        try { await patchServiceWorkOrder(id, { service_completed_date: svcDate }); }
+        catch (e: any) { console.warn('[services/submit] service_completed_date not saved (provision the property to enable):', e?.message || e); }
+      }
+    }
+
     // Bid item: the crew flagged additional work. Spawn a NEW Estimated "Bid Item"
     // service — same worktype/property/community/vendor as the parent — carrying
     // the description, photos, and bid cost, for internal review.

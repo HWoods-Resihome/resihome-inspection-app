@@ -376,7 +376,7 @@ export async function runServiceGeneration(
   // Most-recent CLOSED (terminal) order per key — the property self-healing anchor.
   // "Latest" by service date (submitted → completed → due). Only non-open statuses.
   const closedByKey = new Map<string, typeof existing[number]>();
-  const closedAnchor = (o: typeof existing[number]) => dateOnly(o.submittedAt) || dateOnly(o.completedAt) || dateOnly(o.dueDate);
+  const closedAnchor = (o: typeof existing[number]) => dateOnly(o.serviceCompletedDate) || dateOnly(o.submittedAt) || dateOnly(o.completedAt) || dateOnly(o.dueDate);
   for (const e of existing) {
     if (!e.key || OPEN_STATUSES.has(e.status)) continue;
     const cur = closedByKey.get(e.key);
@@ -651,7 +651,8 @@ export async function runServiceGeneration(
     // ── PROPERTY (self-healing): one open order per property. The next order is
     // created immediately after the current CLOSES, due = max(scheduled due,
     // service-completion date) + one cadence step; a late finish re-anchors the
-    // rhythm to when the work actually happened (submitted_at). ──
+    // rhythm to when the work was actually done (vendor-entered service completed
+    // date, falling back to submitted/approved/due). ──
     for (const t of targets) {
       const key = `gen:${ruleId}:${t.id}${t.dealId ? `:${t.dealId}` : ''}`;
       if (stopCountMode && Number.isFinite(stopCount) && stopCount >= 1 && (genCountByKey.get(key) || 0) >= stopCount) continue;
@@ -661,7 +662,10 @@ export async function runServiceGeneration(
       if (!prior) {
         candidate = seedFirstDue(p, cads, todayISO, skipSet);
       } else {
-        const anchor = dateOnly(prior.submittedAt) || dateOnly(prior.completedAt) || dateOnly(prior.dueDate);
+        // Anchor on the date the work was actually DONE (vendor-entered service
+        // completed date), not the submit/approval time — a Friday cut submitted
+        // Monday still re-anchors from Friday.
+        const anchor = dateOnly(prior.serviceCompletedDate) || dateOnly(prior.submittedAt) || dateOnly(prior.completedAt) || dateOnly(prior.dueDate);
         const baseDate = maxISO(dateOnly(prior.dueDate), anchor) || todayISO;
         const cB = cadenceForMonth(cads, monthOf(baseDate)) || cads[0];
         candidate = rollToActiveDue(stepDate(baseDate, cB, 1), cads, skipSet);

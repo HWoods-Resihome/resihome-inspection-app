@@ -2021,10 +2021,11 @@ const HUBSPOT_SEARCH_MAX = 10_000;
  *  null as "not configured" and creating nothing). */
 export interface ServiceWorkOrderKey {
   key: string; status: string; vendor: string;
-  // Cadence anchors for recurring regeneration: submittedAt (the service-completion
-  // date — self-healing anchor), completedAt (approval — fallback), dueDate (the
-  // order's scheduled due). All '' when unset. YYYY-MM-DD or ISO/epoch strings.
-  submittedAt: string; completedAt: string; dueDate: string;
+  // Cadence anchors for recurring regeneration, in priority order:
+  // serviceCompletedDate (vendor-entered date the work was DONE — the self-healing
+  // anchor), submittedAt (when they hit submit — fallback), completedAt (approval —
+  // fallback), dueDate (scheduled due). All '' when unset.
+  serviceCompletedDate: string; submittedAt: string; completedAt: string; dueDate: string;
 }
 export async function readServiceWorkOrderKeys(): Promise<ServiceWorkOrderKey[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
@@ -2033,12 +2034,13 @@ export async function readServiceWorkOrderKeys(): Promise<ServiceWorkOrderKey[] 
   let after: string | undefined;
   do {
     const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-      method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status', 'vendor_name', 'submitted_at', 'completed_at', 'due_date'] }),
+      method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status', 'vendor_name', 'service_completed_date', 'submitted_at', 'completed_at', 'due_date'] }),
     });
     for (const r of resp.results || []) {
       const p = r.properties || {};
       out.push({
         key: String(p.enrollment_key || ''), status: String(p.status || ''), vendor: String(p.vendor_name || ''),
+        serviceCompletedDate: String(p.service_completed_date || ''),
         submittedAt: String(p.submitted_at || ''), completedAt: String(p.completed_at || ''), dueDate: String(p.due_date || ''),
       });
     }
