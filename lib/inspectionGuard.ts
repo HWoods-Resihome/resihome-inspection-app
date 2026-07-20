@@ -32,19 +32,21 @@ export async function vendorInspectionAccess(email: string | null | undefined): 
   return lvl === 'limited' || lvl === 'full';
 }
 
-/** The effective inspections level for an EXTERNAL email: vendor company level
- *  when it's a vendor, else the per-user (1099) level from User Management. */
+/** The effective inspections level for ANY email: vendor company level when
+ *  it's a vendor, else the per-user level from User Management (internal
+ *  defaults to full, external to limited — both overridable, so an internal or
+ *  allowlisted user set to Limited genuinely gets the 1099-style rules). The
+ *  override map is cached 60s, so the fast path (full) stays cheap. */
 async function externalLevel(email: string | null | undefined): Promise<{ level: InspectionAccessLevel; vendor: boolean }> {
   const vLvl = await vendorInspectionLevel(email);
   if (vLvl !== null) return { level: vLvl, vendor: true };
-  return { level: await inspectionAccessLevel(email).catch(() => 'limited' as const), vendor: false };
+  return { level: await inspectionAccessLevel(email).catch(() => isExternalEmail(email) ? 'limited' as const : 'full' as const), vendor: false };
 }
 
 export async function externalWriteDenial(
   email: string | null | undefined,
   inspectionId: string,
 ): Promise<string | null> {
-  if (!isExternalEmail(email)) return null; // internal users: unrestricted, no fetch
   const { level, vendor } = await externalLevel(email);
   if (level === 'full') return null;   // FULL access = unrestricted, like internal
   if (level === 'none') return NO_ACCESS_MSG;
@@ -90,7 +92,6 @@ export async function externalViewDenial(
   email: string | null | undefined,
   inspectionId: string,
 ): Promise<string | null> {
-  if (!isExternalEmail(email)) return null; // internal users: unrestricted, no fetch
   const { level, vendor } = await externalLevel(email);
   if (level === 'full') return null;   // FULL access = unrestricted, like internal
   if (level === 'none') return NO_ACCESS_MSG;
@@ -122,7 +123,6 @@ export async function externalOwnedWriteDenial(
   email: string | null | undefined,
   inspectionId: string,
 ): Promise<string | null> {
-  if (!isExternalEmail(email)) return null;
   const { level, vendor } = await externalLevel(email);
   if (level === 'full') return null;   // FULL access = unrestricted, like internal
   if (level === 'none') return NO_ACCESS_MSG;

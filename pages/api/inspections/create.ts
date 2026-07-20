@@ -4,7 +4,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
 import { externalAccessDenial, isExternalEmail, EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
-import { inspectionsEnabled, inspectionAccessLevel } from '@/lib/userManagement';
+import { inspectionAccessLevel } from '@/lib/userManagement';
 import { vendorInspectionLevel } from '@/lib/inspectionGuard';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
@@ -98,27 +98,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // it the write gate's fail-closed-on-blank-owner rule (which correctly blocks
     // an external user from editing an UNASSIGNED existing inspection) would also
     // block them from starting their own — the "can only edit your own" error.
-    // Tri-state level for externals: FULL creates any template like an internal
-    // user; NONE is blocked; LIMITED keeps the classic 1099-template rule.
-    const extLevel = isExternalEmail(session.email)
-      ? ((await vendorInspectionLevel(session.email).catch(() => null))
-        ?? await inspectionAccessLevel(session.email).catch(() => 'limited' as const))
-      : null;
-    if (extLevel === 'none') {
-      return res.status(403).json({ error: 'Your account does not have Inspections access.' });
+    // Tri-state level for EVERYONE (vendor company level wins for vendor
+    // emails; internal users default full, externals limited — both
+    // overridable): FULL creates any template; NONE is blocked; LIMITED keeps
+    // the classic 1099-template rule regardless of email domain.
+    const level = (await vendorInspectionLevel(session.email).catch(() => null))
+      ?? await inspectionAccessLevel(session.email).catch(() => isExternalEmail(session.email) ? 'limited' as const : 'full' as const);
+    if (level === 'none') {
+      return res.status(403).json({ error: 'Your access to Inspections has been turned off. Contact an admin.' });
     }
-    if (extLevel !== 'full') {
+    if (level !== 'full') {
       const denial = externalAccessDenial(session.email, body.templateType, { write: true, ownerEmail: session.email });
       if (denial) {
         void recordErrorEvent({ kind: 'inspection_start', message: denial, email: session.email, template: body.templateType, source: 'server' });
         return res.status(403).json({ error: denial });
       }
-    }
-    // Internal Inspections access (User Management). External 1099 users keep their
-    // own path above; internal users default to enabled unless an admin toggled it
-    // off — so this only blocks someone explicitly set to Inspections = None.
-    if (!isExternalEmail(session.email) && !(await inspectionsEnabled(session.email).catch(() => true))) {
-      return res.status(403).json({ error: 'Your access to Inspections has been turned off. Contact an admin.' });
     }
 
     // External 1099 walks are only allowed once the property is in a leasing

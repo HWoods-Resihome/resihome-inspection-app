@@ -302,6 +302,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const uLvl = await inspectionAccessLevel(session.email).catch(() => 'limited' as const);
     if (uLvl === 'none') return res.status(403).json({ error: 'Your account does not have Inspections access.' });
     if (uLvl === 'full') externalEmail = null;   // full 1099 → internal-like list
+  } else {
+    // Internal (or allowlisted, e.g. a staffer on a personal Gmail) user: the
+    // tri-state applies to them too — Limited scopes exactly like a 1099.
+    const uLvl = await inspectionAccessLevel(session.email).catch(() => 'full' as const);
+    if (uLvl === 'none') return res.status(403).json({ error: 'Your account does not have Inspections access.' });
+    if (uLvl === 'limited') externalEmail = session.email;
   }
 
   // VENDOR mode: a LIMITED vendor session — or an internal user in the

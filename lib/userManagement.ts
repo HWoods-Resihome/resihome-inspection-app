@@ -70,6 +70,7 @@ export type InspectionAccessLevel = 'none' | 'limited' | 'full';
 export async function inspectionAccessLevel(email: string | null | undefined): Promise<InspectionAccessLevel> {
   const e = norm(email);
   if (!e) return 'none';
+  if (isSeed(e)) return 'full';   // seed admins can never be locked out
   const ov = await getUserOverride(e);
   const v = ov?.inspections;
   if (v === 'none' || v === 'limited' || v === 'full') return v;

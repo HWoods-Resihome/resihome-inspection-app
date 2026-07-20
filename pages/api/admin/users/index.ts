@@ -16,7 +16,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { isInternalEmail } from '@/lib/userAccess';
+import { isInternalEmail, INTERNAL_EMAIL_ALLOWLIST } from '@/lib/userAccess';
 import { readLoginActivity } from '@/lib/loginActivity';
 import { readAppUsers, readAppAdmins, readInsightsUsers, fetchActiveUsers, fetchVendorAdminList, completedInspectorDirectory } from '@/lib/hubspot';
 import { applyUserPatches, isSeedUserEmail, type UserPatch } from '@/lib/userManagement';
@@ -55,9 +55,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const adminSet = new Set(adminList.map((a) => a.email.trim().toLowerCase()));
       const insightsSet = new Set(insightsList.map((u) => u.email.trim().toLowerCase()));
       // Only people we KNOW used the app: signed in, has an override, or has
-      // an inspection completed under their email.
+      // an inspection completed under their email — plus the code-allowlisted
+      // staffers on outside domains (e.g. romack.dustin@gmail.com), so their
+      // access is always visible/editable here even before any activity record.
       const emails = Array.from(new Set(
-        [...Object.keys(activity), ...Object.keys(overrides), ...Object.keys(inspectorDir)]
+        [...Object.keys(activity), ...Object.keys(overrides), ...Object.keys(inspectorDir), ...INTERNAL_EMAIL_ALLOWLIST]
           .map((e) => e.trim().toLowerCase())
           .filter((e) => e && e.includes('@') && !vendorEmails.has(e)),
       ));
