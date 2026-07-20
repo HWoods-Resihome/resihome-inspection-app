@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from 'react';
 import type { ServiceInsights, SvcMetrics, VendorMetrics } from '@/lib/services/insights';
+import { BillingReport } from './BillingReport';
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 const money = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -101,6 +102,7 @@ export function ServicesDashboard() {
 
   return (
     <div>
+      <BillingReport object="services" />
       <KpiTiles m={data.overall} />
       <h3 className="text-[12px] font-heading font-bold uppercase tracking-wide text-[#a1a1aa] mb-2">Per-vendor performance</h3>
       <VendorTable rows={data.perVendor} />

@@ -23,6 +23,7 @@ import { ScopeCost } from './cards/ScopeCost';
 import { ScopeApprovals } from './cards/ScopeApprovals';
 import { RateCardLines } from './cards/RateCardLines';
 import { CardHost, CardSlot, CARD_CATALOG } from './cardHost';
+import { BillingReport } from './BillingReport';
 import {
   EMPTY_FILTERS, applyFilters, computeKpis, countActiveFilters, filterOverrides,
   type InsightsFilters,
@@ -190,6 +191,8 @@ export function InsightsDashboard() {
         ) : (
           <CardHost value={cardHostValue}>
           <div className="flex flex-col gap-4">
+            {/* (0) Billing export/report — filterable table + Excel + scheduling. */}
+            <BillingReport object="inspections" />
             {/* (1) Compact KPI tiles (always shown — the at-a-glance headline) */}
             <KpiTiles kpis={kpis} />
 
