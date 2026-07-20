@@ -12,6 +12,11 @@ import { isNotificationEnabled } from '@/lib/notifications/prefs';
 import { listAdmins } from '@/lib/adminAccess';
 import type { ServiceNote } from '@/lib/services/serviceNotes';
 
+// Shared services inbox: every INBOUND note (a vendor — or anyone — replying to
+// a note email, or posting from their end) is also copied here so the whole team
+// has a record and can jump in. Overridable via env; defaults to the group box.
+const SERVICE_NOTES_INBOX = (process.env.SERVICE_NOTES_INBOX || 'services@resihome.com').trim().toLowerCase();
+
 /** The reply-ingestion token. Kept in the SUBJECT so every reply carries it. */
 export function serviceNoteToken(serviceId: string): string {
   return `[SVC#${serviceId}]`;
@@ -37,13 +42,19 @@ export async function notifyServiceNote(note: ServiceNote, ctx: ServiceNoteEmail
     const v = (ctx.vendorEmail || '').trim().toLowerCase();
     if (v && (await isNotificationEnabled(v, 'service_note').catch(() => true))) recipients = [v];
   } else {
+    // INBOUND note (vendor reply / vendor-side post): notify the admins who
+    // keep the alert on, AND always copy the shared services inbox so the team
+    // has one thread of record. The inbox is included even if no admin wants
+    // the per-user alert.
     const admins = await listAdmins().catch(() => []);
     const checks = await Promise.all(admins.map(async (a) => {
       const e = a.email.trim().toLowerCase();
       if (e === note.byEmail) return null;                              // don't echo to the poster
       return (await isNotificationEnabled(e, 'service_note').catch(() => true)) ? e : null;
     }));
-    recipients = Array.from(new Set(checks.filter((e): e is string => !!e)));
+    const set = new Set(checks.filter((e): e is string => !!e));
+    if (SERVICE_NOTES_INBOX && SERVICE_NOTES_INBOX !== note.byEmail) set.add(SERVICE_NOTES_INBOX);
+    recipients = Array.from(set);
   }
   if (!recipients.length) return [];
 
