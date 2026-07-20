@@ -596,7 +596,10 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   };
   const duplicateRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...rule, id, name: `${rule.name} (copy)`, cadences: rule.cadences.map((c) => ({ ...c, id: ++_cid })) }]);
+    // The copy is a NEW, UNSAVED rule — drop the original's recordId so saving/
+    // editing/deleting/deactivating it targets its OWN HubSpot record (created on
+    // first save), never the original.
+    setRules((rs) => [...rs, { ...rule, id, recordId: undefined, name: `${rule.name} (copy)`, cadences: rule.cadences.map((c) => ({ ...c, id: ++_cid })) }]);
     openRule(id);
   };
   const deleteRule = (id: number) => {
