@@ -297,28 +297,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber, pool_condition: pool.poolCondition, pool_feedback: pool.poolFeedback, pool_photo_urls: pool.poolPhotoUrls });
 
         // Pool fail → PPW dispatch Slack alert (ports the retired HubSpot pool
-        // custom-code action). 1099 only, matching that workflow's enrollment.
+        // custom-code action). Fires for ANY Final-Checklist template with a pool
+        // section — 1099 / Vacancy / Community (this block only runs for those).
         // Own try so a Slack hiccup never masks the stamp result. Gated per
         // inspection (admin table key 'ppw_pool_fail').
-        if ((existing?.templateType || '') === 'leasing_agent_1099_property_inspection') {
-          try {
-            const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
-            const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-            const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
-            const poolAlert = await postPoolFailAlertOnSubmit(
-              {
-                recordId: id,
-                propertyAddressSnapshot: existing?.propertyAddressSnapshot || '',
-                inspectorName: existing?.inspectorName || '',
-                propertyRecordId: existing?.propertyRecordId || null,
-              },
-              pool,
-              { baseUrl },
-            );
-            console.log(`[submit] 1099 pool-fail alert for ${id}: ${poolAlert.posted ? `posted to ${poolAlert.channel}` : `skipped (${poolAlert.reason || poolAlert.error})`}`);
-          } catch (e) {
-            console.warn('[submit] pool-fail alert skipped (continuing):', e);
-          }
+        try {
+          const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
+          const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+          const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
+          const poolAlert = await postPoolFailAlertOnSubmit(
+            {
+              recordId: id,
+              propertyAddressSnapshot: existing?.propertyAddressSnapshot || '',
+              inspectorName: existing?.inspectorName || '',
+              propertyRecordId: existing?.propertyRecordId || null,
+            },
+            pool,
+            { baseUrl },
+          );
+          console.log(`[submit] pool-fail alert for ${id}: ${poolAlert.posted ? `posted to ${poolAlert.channel}` : `skipped (${poolAlert.reason || poolAlert.error})`}`);
+        } catch (e) {
+          console.warn('[submit] pool-fail alert skipped (continuing):', e);
         }
       } catch (e) {
         console.warn('[submit] smart-home field stamp skipped (provision via /admin/setup):', e);

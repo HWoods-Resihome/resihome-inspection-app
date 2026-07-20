@@ -97,7 +97,7 @@ function poolBlocks(c: FailNoteCtx): any[] {
   const mentions = (c.mentions || []).map((u) => `<@${u}>`).join(' ');
   const blocks: any[] = [
     { type: 'section', text: { type: 'mrkdwn', text:
-      `:warning: ${mentions ? mentions + ' ' : ''}a *1099 Agent Inspection* has been submitted and the *Pool* review has *failed*. Please review PPW and submit feedback.` } },
+      `:warning: ${mentions ? mentions + ' ' : ''}an *inspection* has been submitted and the *Pool* review has *failed*. Please review PPW and submit feedback.` } },
     { type: 'section', text: { type: 'mrkdwn', text: [
       `*${c.address || 'Address unavailable'}*`,
       c.inspector ? `Inspector: ${c.inspector}` : null,
