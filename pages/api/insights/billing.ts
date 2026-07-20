@@ -9,7 +9,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { canViewInsights } from '@/lib/insightsAccess';
-import { fetchBillingRows, billingColumns, billingFacets, type BillingFilters } from '@/lib/insightsBilling';
+import { fetchBillingRows, billingColumns, billingFacetsFast, type BillingFilters } from '@/lib/insightsBilling';
 import { buildBillingXlsx, billingFilename } from '@/lib/insightsBillingXlsx';
 import { fetchPropertyCoverage } from '@/lib/hubspot';
 
@@ -45,11 +45,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).send(buf);
     }
     // Facets from the UNFILTERED set so the dropdowns don't collapse as you
-    // filter. Region + Portfolio additionally include the FULL property catalog
-    // (excludes sold/not-managed) so an admin can filter on a region/portfolio
-    // that has no completed record yet.
-    const all = await fetchBillingRows(object, {});
-    const facets = billingFacets(all);
+    // filter — derived cheaply (no second heavy enrichment pass). Region +
+    // Portfolio additionally include the FULL property catalog (excludes sold/
+    // not-managed) so an admin can filter on a region/portfolio that has no
+    // completed record yet.
+    const facets = await billingFacetsFast(object);
     const coverage = await fetchPropertyCoverage().catch(() => null);
     if (coverage) {
       const covRegions = (coverage.regions || []).map((r: any) => (typeof r === 'string' ? r : r.key)).filter(Boolean);

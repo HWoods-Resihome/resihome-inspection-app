@@ -107,7 +107,19 @@ export function billingFacets(rows: BillingRow[]): { regions: string[]; portfoli
 /** Inspections billing rows (completed only), filtered. */
 export async function fetchInspectionBillingRows(filters: BillingFilters = {}): Promise<BillingRow[]> {
   const snap = await readInsightsSnapshot().catch(() => null);
-  const base = (snap?.rows || []).filter((r) => r.status === 'completed' && r.completedAt);
+  // Pre-filter on the CHEAP snapshot fields (completed-date range, inspector, type,
+  // and region when the snapshot already carries one) BEFORE the per-row Property/
+  // Agent enrichment — so a 7-day report only enriches those ~few rows instead of
+  // every completed inspection ever. Portfolio (and region when it's only on the
+  // Property) are still applied after enrichment in the loop below.
+  const base = (snap?.rows || []).filter((r) => {
+    if (r.status !== 'completed' || !r.completedAt) return false;
+    if (!inRange(dateOnly(r.completedAt), filters.from, filters.to)) return false;
+    if (!has(filters.inspectors, (r.inspectorName || '').trim() || INTERNAL_EMPLOYEE)) return false;
+    if (!has(filters.types, templateLabel(r.templateType) || r.templateType)) return false;
+    if (filters.regions?.length && r.region && !filters.regions.includes(r.region)) return false;
+    return true;
+  });
 
   // Enrich Property (entity_id + portfolio) and Agent billing (broker/costs).
   const propIds = base.map((r) => r.propertyId).filter((x): x is string => !!x);
@@ -201,6 +213,24 @@ export async function fetchServiceBillingRows(filters: BillingFilters = {}): Pro
 
 export async function fetchBillingRows(object: 'inspections' | 'services', filters: BillingFilters = {}): Promise<BillingRow[]> {
   return object === 'services' ? fetchServiceBillingRows(filters) : fetchInspectionBillingRows(filters);
+}
+
+/** Filter-dropdown facets WITHOUT the heavy per-row enrichment. Inspections read
+ *  region/inspector/type straight off the banked snapshot (portfolios come from the
+ *  property catalog the API merges in). Services still derive from their one status
+ *  scan. This replaces a second full, unfiltered fetchBillingRows pass. */
+export async function billingFacetsFast(object: 'inspections' | 'services'): Promise<{ regions: string[]; portfolios: string[]; people: string[]; types: string[] }> {
+  if (object === 'services') return billingFacets(await fetchServiceBillingRows({}));
+  const snap = await readInsightsSnapshot().catch(() => null);
+  const regions = new Set<string>(); const people = new Set<string>(); const types = new Set<string>();
+  for (const r of (snap?.rows || [])) {
+    if (r.status !== 'completed' || !r.completedAt) continue;
+    if (r.region) regions.add(r.region);
+    people.add((r.inspectorName || '').trim() || INTERNAL_EMPLOYEE);
+    const t = templateLabel(r.templateType) || r.templateType; if (t) types.add(t);
+  }
+  const sort = (s: Set<string>) => Array.from(s).sort((a, b) => a.localeCompare(b));
+  return { regions: sort(regions), portfolios: [], people: sort(people), types: sort(types) };
 }
 export function billingColumns(object: 'inspections' | 'services'): readonly string[] {
   return object === 'services' ? SERVICE_COLUMNS : INSPECTION_COLUMNS;
