@@ -25,6 +25,7 @@ export const SLACK_NOTIFICATIONS: { key: string; name: string; defaultSandbox?: 
   { key: 'scope_approved', name: 'Scope Review — Approved' },
   { key: 'listing_price', name: '1099 Listing Price Recommendation', defaultSandbox: true, defaultChannel: 'C04K24M3UH5' },
   { key: 'ppw_grass_fail', name: '1099 Grass Fail — PPW Dispatch', defaultChannel: '#1099-agent-ppw-fails' },
+  { key: 'ppw_pool_fail', name: '1099 Pool Fail — PPW Dispatch', defaultChannel: 'C0BBHHQSRQT' },
   // Services — internal coordinator alerts. Ship DARK: the placeholder shows where
   // they'd go, but the caller passes a BLANK intended channel, so nothing posts
   // until an admin types a live channel here (then it goes live).

@@ -4258,46 +4258,53 @@ export async function stampListingPriceAlert(inspectionRecordId: string): Promis
 // Mirrors the listing-price gate: a datetime stamp set once the alert posts so a
 // re-submit doesn't re-post. Self-provisions the property on first write.
 const PPW_FAIL_ALERT_PROP = 'ppw_fail_alert_at';
+// Pool uses its OWN stamp so a grass alert and a pool alert on the SAME
+// inspection don't gate each other (both fail sections can trip on one submit).
+export const PPW_POOL_FAIL_ALERT_PROP = 'ppw_pool_fail_alert_at';
 
-export async function getPpwFailAlertStamp(inspectionRecordId: string): Promise<string | null> {
+export async function getPpwFailAlertStamp(inspectionRecordId: string, prop: string = PPW_FAIL_ALERT_PROP): Promise<string | null> {
   const { inspection } = typeIds();
   try {
-    const resp = await hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}?properties=${PPW_FAIL_ALERT_PROP}`);
-    const v = resp?.properties?.[PPW_FAIL_ALERT_PROP];
+    const resp = await hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}?properties=${prop}`);
+    const v = resp?.properties?.[prop];
     return v ? String(v) : null;
   } catch { return null; }
 }
 
-async function ensurePpwFailAlertProperty(): Promise<void> {
+async function ensurePpwFailAlertProperty(prop: string, label: string): Promise<void> {
   const { inspection } = typeIds();
-  try { await hubspotFetch(`/crm/v3/properties/${inspection}/${PPW_FAIL_ALERT_PROP}`); return; } catch { /* create */ }
+  try { await hubspotFetch(`/crm/v3/properties/${inspection}/${prop}`); return; } catch { /* create */ }
   try {
     await hubspotFetch(`/crm/v3/properties/${inspection}`, {
       method: 'POST',
       body: JSON.stringify({
-        name: PPW_FAIL_ALERT_PROP, label: 'PPW Grass-Fail Alert Posted At', type: 'datetime', fieldType: 'date',
+        name: prop, label, type: 'datetime', fieldType: 'date',
         groupName: 'inspection_1099',
-        description: 'Set once the 1099 grass-fail (PPW dispatch) Slack alert has been posted — gates re-posting on re-submit.',
+        description: 'Set once the PPW-dispatch Slack alert has been posted — gates re-posting on re-submit.',
       }),
     });
   } catch (e: any) {
     const blob = `${String(e?.message || e)} ${String(e?.detail || '')}`;
     if (!(e?.status === 409 || /already exists|PROPERTY_ALREADY_EXISTS/i.test(blob))) {
-      console.warn('[ppw-fail-alert] could not provision ppw_fail_alert_at:', blob.slice(0, 200));
+      console.warn(`[ppw-fail-alert] could not provision ${prop}:`, blob.slice(0, 200));
     }
   }
 }
 
-export async function stampPpwFailAlert(inspectionRecordId: string): Promise<void> {
+export async function stampPpwFailAlert(
+  inspectionRecordId: string,
+  prop: string = PPW_FAIL_ALERT_PROP,
+  label: string = 'PPW Grass-Fail Alert Posted At',
+): Promise<void> {
   const { inspection } = typeIds();
   const doWrite = () => hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}`, {
-    method: 'PATCH', body: JSON.stringify({ properties: { [PPW_FAIL_ALERT_PROP]: Date.now() } }),
+    method: 'PATCH', body: JSON.stringify({ properties: { [prop]: Date.now() } }),
   });
   try {
     await doWrite();
   } catch (e) {
-    if (isMissingPropertyError(e, PPW_FAIL_ALERT_PROP)) {
-      await ensurePpwFailAlertProperty();
+    if (isMissingPropertyError(e, prop)) {
+      await ensurePpwFailAlertProperty(prop, label);
       await doWrite().catch((e2) => console.warn('[ppw-fail-alert] stamp write retry failed:', e2));
     } else {
       console.warn('[ppw-fail-alert] stamp write failed:', e);
