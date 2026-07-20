@@ -390,6 +390,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   // "Starts on" mode — explicit (not derived), so "On a date" / "After N days" can
   // be selected before a value is entered. Synced to the rule on open.
   const [startMode, setStartMode] = useState<'immediate' | 'date' | 'delay'>('immediate');
+  const [confirmDelete, setConfirmDelete] = useState(false);   // Delete-rule confirmation modal
   // Rules-list search / filter / sort (mirrors the Services home).
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -932,9 +933,26 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
               <input value={rule.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Name this rule"
                 className="flex-1 min-w-0 font-heading font-extrabold text-xl text-ink bg-white border border-gray-300 rounded-lg px-3 py-1.5 focus:border-brand focus:outline-none" />
               <button onClick={duplicateRule} className="shrink-0 text-[12px] font-semibold text-gray-500 hover:text-brand border border-gray-300 rounded-lg px-2.5 py-2 bg-white">Duplicate</button>
-              <button onClick={() => deleteRule(rule.id)} className="shrink-0 text-[12px] font-semibold text-gray-500 hover:text-red-600 border border-gray-300 rounded-lg px-2.5 py-2 bg-white">Delete</button>
+              <button onClick={() => setConfirmDelete(true)} className="shrink-0 text-[12px] font-semibold text-gray-500 hover:text-red-600 border border-gray-300 rounded-lg px-2.5 py-2 bg-white">Delete</button>
             </div>
           </div>
+
+          {/* Delete confirmation */}
+          {confirmDelete && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmDelete(false)} />
+              <div className="relative bg-white rounded-2xl shadow-xl max-w-sm w-full p-5">
+                <div className="font-heading font-bold text-[16px] text-ink">Delete this rule?</div>
+                <p className="text-[13px] text-gray-600 mt-1">
+                  Are you sure you want to delete <b className="text-ink">{rule.name || 'this rule'}</b>? This can’t be undone. Open work orders it already created are not affected.
+                </p>
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setConfirmDelete(false)} className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm border border-gray-300 text-gray-700 bg-white">Cancel</button>
+                  <button onClick={() => { const rid = rule.id; setConfirmDelete(false); deleteRule(rid); }} className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-red-600 text-white">Delete Rule</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* SECTION 1 — scope & pricing */}
           <section className={sec}>
