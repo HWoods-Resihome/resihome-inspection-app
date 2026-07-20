@@ -61,7 +61,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const emails = Array.from(new Set(
         [...Object.keys(activity), ...Object.keys(overrides), ...Object.keys(inspectorDir), ...INTERNAL_EMAIL_ALLOWLIST]
           .map((e) => e.trim().toLowerCase())
-          .filter((e) => e && e.includes('@') && !vendorEmails.has(e)),
+          // Allowlisted staffers always show, even if a (test) vendor Company
+          // exists with the same email — the person outranks the company here.
+          .filter((e) => e && e.includes('@') && (!vendorEmails.has(e) || INTERNAL_EMAIL_ALLOWLIST.has(e))),
       ));
       const users = emails.map((email) => {
         const act = activity[email] || {};
