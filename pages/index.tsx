@@ -958,7 +958,7 @@ export default function Home() {
               right without wrapping or horizontal-scrolling on mobile. */}
           <div className="flex items-center gap-2 mb-2 pb-1">
             {/* Inspector filter — tap to filter by one, press & hold for multi-select */}
-            <div className="flex-1 min-w-0 max-w-[160px]">
+            <div className="flex-1 min-w-0 max-w-[160px] sm:max-w-none">
               <ListPicker
                 value={inspectorFilter[0] ?? 'all'}
                 options={[{ value: 'all', label: 'All Inspectors' }, ...inspectorOptions]}
@@ -975,7 +975,7 @@ export default function Home() {
             </div>
 
             {/* Template filter — tap to filter by one, press & hold for multi-select */}
-            <div className="flex-1 min-w-0 max-w-[160px]">
+            <div className="flex-1 min-w-0 max-w-[160px] sm:max-w-none">
               <ListPicker
                 value={templateFilter[0] ?? 'all'}
                 options={[{ value: 'all', label: 'All Templates' }, ...templateOptions]}
@@ -992,7 +992,7 @@ export default function Home() {
             </div>
 
             {/* Region filter — tap to filter by one, press & hold for multi-select */}
-            <div className="flex-1 min-w-0 max-w-[160px]">
+            <div className="flex-1 min-w-0 max-w-[160px] sm:max-w-none">
               <ListPicker
                 value={regionFilter[0] ?? 'all'}
                 options={[{ value: 'all', label: 'All Regions' }, ...regionOptions]}
