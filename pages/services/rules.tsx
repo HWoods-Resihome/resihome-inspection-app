@@ -387,6 +387,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   const [showSkip, setShowSkip] = useState(false);   // No-Service block is added on demand
   // Section 1/2/3 collapse state (reset each time a rule is opened).
   const [openSec, setOpenSec] = useState<Record<1 | 2 | 3, boolean>>({ 1: true, 2: true, 3: true });
+  // "Starts on" mode — explicit (not derived), so "On a date" / "After N days" can
+  // be selected before a value is entered. Synced to the rule on open.
+  const [startMode, setStartMode] = useState<'immediate' | 'date' | 'delay'>('immediate');
   // Rules-list search / filter / sort (mirrors the Services home).
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -466,7 +469,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   const toggleSec = (n: 1 | 2 | 3) => setOpenSec((s) => ({ ...s, [n]: !s[n] }));
   const openRule = (id: number) => {
     setOpenId(id); setOpenSec({ 1: true, 2: true, 3: true }); setPropsOpen(false); setPropSearch('');
-    setShowSkip((rules.find((r) => r.id === id)?.skipMonths.length ?? 0) > 0);
+    const r = rules.find((x) => x.id === id);
+    setShowSkip((r?.skipMonths.length ?? 0) > 0);
+    setStartMode(r?.startDate ? 'date' : (r?.startDelayDays ? 'delay' : 'immediate'));
   };
   const closeRule = () => setOpenId(null);
 
@@ -1176,39 +1181,33 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                  • N days after it meets the criteria: per-property delay — the order
                    isn't created until the target has met the criteria for N days
                    (clock resets if it stops qualifying). Blank delay = immediate. */}
-            {(() => {
-              const startMode: 'immediate' | 'date' | 'delay' = rule.startDate ? 'date' : (rule.startDelayDays !== '' ? 'delay' : 'immediate');
-              const setMode = (m: 'immediate' | 'date' | 'delay') =>
-                patch({ startDate: '', startDelayDays: m === 'delay' ? (rule.startDelayDays || '') : '' });
-              return (
-                <div className="mb-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[13px] text-gray-600">Starts</span>
-                    <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[12px] font-heading font-semibold">
-                      {([['immediate', 'Immediately'], ['date', 'On a date'], ['delay', 'After N days']] as const).map(([m, label]) => (
-                        <button key={m} type="button" onClick={() => setMode(m)}
-                          className={`px-2.5 py-1.5 rounded-md ${startMode === m ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{label}</button>
-                      ))}
-                    </div>
-                    {startMode === 'date' && (
-                      <DatePicker value={rule.startDate} onChange={(v) => patch({ startDate: v, startDelayDays: '' })} placeholder="Pick a date" className={`${ctl} flex items-center justify-between gap-2 min-w-[9rem]`} />
-                    )}
-                    {startMode === 'delay' && (
-                      <span className="inline-flex items-center gap-1.5 text-[13px] text-gray-600">
-                        <input value={rule.startDelayDays} inputMode="numeric" onChange={(e) => patch({ startDelayDays: e.target.value.replace(/\D/g, ''), startDate: '' })} placeholder="—"
-                          className={`${ctl} w-14 text-center tabular-nums`} />
-                        days after it meets the criteria
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-gray-400 mt-1">
-                    {startMode === 'date' ? 'Dormant until this calendar date, then enrolls anything that meets the criteria.'
-                      : startMode === 'delay' ? 'The first order isn’t created until a target has met the criteria for this many days — and only if it still qualifies then. The clock resets if it stops qualifying.'
-                        : 'Creates as soon as a target meets the criteria.'}
-                  </div>
+            <div className="mb-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[13px] text-gray-600">Starts</span>
+                <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[12px] font-heading font-semibold">
+                  {([['immediate', 'Immediately'], ['date', 'On a date'], ['delay', 'After N days']] as const).map(([m, label]) => (
+                    <button key={m} type="button"
+                      onClick={() => { setStartMode(m); if (m !== 'date') patch({ startDate: '' }); if (m !== 'delay') patch({ startDelayDays: '' }); }}
+                      className={`px-2.5 py-1.5 rounded-md ${startMode === m ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{label}</button>
+                  ))}
                 </div>
-              );
-            })()}
+                {startMode === 'date' && (
+                  <DatePicker value={rule.startDate} onChange={(v) => patch({ startDate: v, startDelayDays: '' })} placeholder="Pick a date" className={`${ctl} flex items-center justify-between gap-2 min-w-[9rem]`} />
+                )}
+                {startMode === 'delay' && (
+                  <span className="inline-flex items-center gap-1.5 text-[13px] text-gray-600">
+                    <input value={rule.startDelayDays} inputMode="numeric" onChange={(e) => patch({ startDelayDays: e.target.value.replace(/\D/g, ''), startDate: '' })} placeholder="—"
+                      className={`${ctl} w-14 text-center tabular-nums`} />
+                    days after it meets the criteria
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-gray-400 mt-1">
+                {startMode === 'date' ? 'Dormant until this calendar date, then enrolls anything that meets the criteria.'
+                  : startMode === 'delay' ? 'The first order isn’t created until a target has met the criteria for this many days — and only if it still qualifies then. The clock resets if it stops qualifying.'
+                    : 'Creates as soon as a target meets the criteria.'}
+              </div>
+            </div>
             <div className="space-y-2 mb-4">
               {rule.enrollCriteria.map((c, i) => (
                 <div key={i}>
@@ -1230,9 +1229,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                         onChange={(v) => patchCrit(i, { op: v, ...(!isMultiOp(v) && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      {c.op === 'is known' ? (
-                        <span className="text-[12px] text-gray-500">has any date</span>
-                      ) : c.op === 'is greater than $0' ? (
+                      {c.op === 'is known' ? null : c.op === 'is greater than $0' ? (
                         <span className="text-[12px] text-gray-500">pool fee &gt; $0</span>
                       ) : isMultiOp(c.op) ? (
                         <MultiFilter label="Values" sheet options={enrollValueOptsFor(c.field)} selected={c.vals}
@@ -1284,9 +1281,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                               onChange={(v) => patchStopCrit(i, { op: v, ...(!isMultiOp(v) && c.vals.length > 1 ? { vals: c.vals.slice(0, 1) } : {}) })} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            {c.op === 'is known' ? (
-                              <span className="text-[12px] text-gray-500">has any date</span>
-                            ) : c.op === 'is greater than $0' ? (
+                            {c.op === 'is known' ? null : c.op === 'is greater than $0' ? (
                               <span className="text-[12px] text-gray-500">pool fee &gt; $0</span>
                             ) : isMultiOp(c.op) ? (
                               <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
