@@ -966,7 +966,8 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                 <>
                   {/* Grass cut: the vendor payout is set by the grass height at
                       completion, so pricing is three tiers. Standard also drives the
-                      base vendor/client shown before completion. */}
+                      base vendor/client shown before completion. All five fields
+                      sit on ONE row (scrolls horizontally on a narrow screen). */}
                   <div className="flex flex-nowrap items-end gap-3 sm:justify-start overflow-x-auto">
                     <PriceField label="Standard (<6 in)" adorn="$" minDecimals={2} colClass="shrink-0 w-24"
                       value={rule.grassStandard ?? String(DEFAULT_GRASS_TIERS.standard)} onChange={(v) => patch({ grassStandard: v, vendorCost: v })} />
@@ -974,8 +975,6 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                       value={rule.grassOvergrown ?? String(DEFAULT_GRASS_TIERS.overgrown)} onChange={(v) => patch({ grassOvergrown: v })} />
                     <PriceField label="Heavy (>12 in)" adorn="$" minDecimals={2} colClass="shrink-0 w-24"
                       value={rule.grassHeavy ?? String(DEFAULT_GRASS_TIERS.heavy)} onChange={(v) => patch({ grassHeavy: v })} />
-                  </div>
-                  <div className="flex flex-nowrap items-end gap-4 sm:justify-start mt-3">
                     <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
                     <PriceField label="Client (Standard)" adorn="$" highlight readOnly colClass="shrink-0 w-28" value={clientCost.toFixed(2)} />
                   </div>
