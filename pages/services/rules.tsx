@@ -696,6 +696,26 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   const canSave = saveErrors.length === 0;
 
   // Persist the open rule to HubSpot (create or update), stamp the returned id, close.
+  // Toggle a rule's active/paused from the LIST and PERSIST it. The list toggle
+  // used to only set local state, so pausing a rule reverted on reload. Optimistic
+  // with a revert if the save fails; unsaved rules (no recordId) stay local.
+  const toggleRuleActive = async (r: Rule) => {
+    const next = !r.active;
+    setRules((rs) => rs.map((x) => (x.id === r.id ? { ...x, active: next } : x)));
+    if (!r.recordId) return;
+    try {
+      // PATCH merges — persist ONLY active, so an unsaved edit the user backed out
+      // of in the editor isn't written along with the toggle.
+      const resp = await fetch('/api/services/rules/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordId: r.recordId, props: { active: next ? 'true' : 'false' } }),
+      });
+      if (!resp.ok) throw new Error('save failed');
+    } catch {
+      setRules((rs) => rs.map((x) => (x.id === r.id ? { ...x, active: r.active } : x)));   // revert on failure
+    }
+  };
+
   const saveRule = async () => {
     if (!canSave || !rule) { closeRule(); return; }
     setSavingRule(true);
@@ -878,7 +898,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
-                    <button onClick={(e) => { e.stopPropagation(); setRules((rs) => rs.map((x) => x.id === r.id ? { ...x, active: !x.active } : x)); }}
+                    <button onClick={(e) => { e.stopPropagation(); void toggleRuleActive(r); }}
                       title={r.active ? 'Active — click to pause' : 'Inactive — click to activate'}
                       className={`relative rounded-full transition ${r.active ? 'bg-brand' : 'bg-gray-300'}`} style={{ height: 18, width: 32 }}>
                       <span className="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white transition" style={{ transform: r.active ? 'translateX(14px)' : 'none' }} />
