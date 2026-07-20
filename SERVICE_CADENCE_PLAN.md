@@ -108,17 +108,13 @@ Because the key includes the occurrence's due date, the same scheduled date
 never double-creates, yet last week's still-open order doesn't block this
 week's. No open-status gating at all.
 
-### ⚠️ Open question — unbounded stacking
+### Backlog alert (not a cap) **[DECISION]**
 
-If a community order is **never** closed, this stacks a new order every interval
-forever. Options to decide:
-- **(a) Unlimited** (pure contract — bill regardless).
-- **(b) Safety cap** — stop generating after N consecutive unclosed orders for
-  the community, and surface it in Admin ▸ Error Log.
-- **(c) Alert-only** — keep generating but warn once N unclosed pile up.
-
-**[TO DECIDE — leaning (c): keep the contract honest but make the backlog
-visible.]**
+The contract keeps generating no matter what — we never stop it. But when
+**≥ 3 open orders of the same type** (same worktype + subtype) pile up for a
+single community, raise an alert in **Admin ▸ Error Log** so the backlog is
+visible. Alert-only: generation continues; the count is per
+`(communityId, worktype, subtype)` measured against open (non-terminal) orders.
 
 ---
 
@@ -134,7 +130,7 @@ occurrence is **not generated**; the schedule advances by whole intervals until
 - **Community:** advance `due_date(n+1)` the same way before minting the
   date-keyed order.
 
-**Seasonal-resume timing (minor detail to confirm):** to avoid an order sitting
+**Seasonal-resume timing [DECISION — confirmed]:** to avoid an order sitting
 open all winter, defer *creation* of the post-gap order until the daily run that
 is within one `interval_days` of the resumed due date (rather than creating it
 in October dated to March). Property still respects "one open at a time"; this
@@ -172,9 +168,15 @@ each closing order's `submitted_at` + `due_date` per key — a projection add to
 
 ## 7. UI changes — `pages/services/rules.tsx`
 
-- Cadence editor becomes: **interval (days/weeks) + anchor weekday + active
+- Cadence editor becomes: **"every N days"** (the default and only interval unit
+  — days/weeks/months selector is removed) **+ anchor weekday seed + active
   months.** Remove the per-cadence "due within N days" field for recurring
   rules.
+- **Monthly-on-day-X mode [DECISION]:** a separate, explicit option for
+  date-locked contracts (e.g. "the 1st of every month," "first Friday") — a true
+  calendar-month cadence, **not** a 30-day approximation. Reserved mainly for
+  community contracts that bill on a fixed monthly date; the default everywhere
+  else stays "every N days."
 - Keep the rule-level "first order due" (initial-due) as the anchor seed.
 - Copy/help text: property = "regenerates after each is completed, self-healing
   from the service date"; community = "generates on a fixed contract schedule,
@@ -199,9 +201,10 @@ each closing order's `submitted_at` + `due_date` per key — a projection add to
 | 1 | Late completion | Drift anchor to the new day, and stay there. ✅ |
 | 2 | Anchor timestamp | `submitted_at` (fallback `completed_at`). ✅ |
 | 3 | Community timing | Create day after prior **due**; due = prior due + interval. ✅ |
-| 3b | Community stacking cap | **OPEN** — leaning alert-only (c). |
+| 3b | Community backlog | Never cap; **alert when ≥ 3 open orders of same type** per community (Admin ▸ Error Log). ✅ |
 | 4 | Skip months | Respect by **due-date month**; roll forward to next active month. ✅ |
-| 4b | Seasonal resume timing | Defer create to within one interval of resumed due — **confirm**. |
+| 4b | Seasonal resume timing | Defer create to within one interval of resumed due. ✅ |
+| 5 | Cadence unit | **"Every N days"** default (drop weeks/months) + explicit **monthly-on-day-X** mode for date-locked contracts. ✅ |
 
 ## 10. Suggested phasing
 
