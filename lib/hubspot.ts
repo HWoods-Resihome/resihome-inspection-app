@@ -2032,10 +2032,25 @@ export async function readServiceWorkOrderKeys(): Promise<ServiceWorkOrderKey[] 
   if (!typeId) return null;
   const out: ServiceWorkOrderKey[] = [];
   let after: string | undefined;
+  // service_completed_date is a newer property — a deploy that hasn't run the
+  // Services provisioner yet won't have it, and HubSpot's SEARCH endpoint 400s on
+  // an unknown projected property. So drop it from the projection after the first
+  // failure and carry on (the cadence engine falls back to submitted_at). This
+  // must never break generation just because provisioning hasn't run.
+  let withSvcDate = true;
+  const projection = () => withSvcDate
+    ? ['enrollment_key', 'status', 'vendor_name', 'service_completed_date', 'submitted_at', 'completed_at', 'due_date']
+    : ['enrollment_key', 'status', 'vendor_name', 'submitted_at', 'completed_at', 'due_date'];
   do {
-    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-      method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status', 'vendor_name', 'service_completed_date', 'submitted_at', 'completed_at', 'due_date'] }),
-    });
+    let resp;
+    try {
+      resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST', body: JSON.stringify({ limit: 100, after, properties: projection() }),
+      });
+    } catch (e) {
+      if (withSvcDate) { withSvcDate = false; continue; }   // retry this page without the new prop
+      throw e;
+    }
     for (const r of resp.results || []) {
       const p = r.properties || {};
       out.push({
