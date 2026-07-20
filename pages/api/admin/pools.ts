@@ -11,7 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchPoolProperties, setPoolServicer, POOL_SERVICER_RESIHOME, POOL_SERVICER_TENANT } from '@/lib/hubspot';
+import { fetchPoolProperties, setPoolServicer, isTenantServicedPool, POOL_SERVICER_RESIHOME, POOL_SERVICER_TENANT } from '@/lib/hubspot';
 
 export const config = { maxDuration: 60 };
 
@@ -25,7 +25,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === 'GET') {
     try {
       const force = String(req.query.refresh || '') === '1';
-      const pools = await fetchPoolProperties(force);
+      const raw = await fetchPoolProperties(force);
+      // Attach the SERVER-side classification so the UI groups exactly how
+      // generation excludes (tolerant "tenant"/"resident" match).
+      const pools = raw.map((p) => ({ ...p, isTenant: isTenantServicedPool(p.poolServicer) }));
       return res.status(200).json({ pools, servicers: { resihome: POOL_SERVICER_RESIHOME, tenant: POOL_SERVICER_TENANT } });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });

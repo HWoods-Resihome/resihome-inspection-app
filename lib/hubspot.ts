@@ -986,6 +986,15 @@ export const POOL_SERVICER_RESIHOME = (process.env.POOL_SERVICER_RESIHOME || 'Re
 export const POOL_SERVICER_TENANT = (process.env.POOL_SERVICER_TENANT || 'Tenant Service').trim();
 export const POOL_TENANT_LEASED_STATUS = (process.env.POOL_TENANT_LEASED_STATUS || 'Tenant Leased').trim();
 
+/** A pool is RESIDENT/tenant-serviced (excluded from our generation) when its
+ *  pool_servicer value indicates the tenant/resident handles it — matched
+ *  loosely (case-insensitive "tenant" or "resident") so the exact stored label
+ *  ("Tenant Service", "Resident Service", "Tenant", …) doesn't have to be
+ *  pinned. Everything else — including ResiHome and unset — is ResiHome-serviced. */
+export function isTenantServicedPool(poolServicer: string | null | undefined): boolean {
+  return /tenant|resident/i.test(String(poolServicer || ''));
+}
+
 export interface PoolProperty {
   id: string; address: string; city: string; state: string; zip: string;
   locality: string; region: string; status: string;

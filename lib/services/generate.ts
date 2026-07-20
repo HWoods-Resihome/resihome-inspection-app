@@ -21,7 +21,7 @@
  * follow the active cadence (else First Order Due, else +5); vendors are assigned by
  * equal-volume rotation with sticky-per-address (see ./rotation).
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, POOL_SERVICER_TENANT } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { DEFAULT_GRASS_TIERS } from './grassPricing';
@@ -268,7 +268,7 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
   // leaves Tenant Leased — so ResiWalk simply honors the CURRENT value here.
   const isPools = String(p.worktype || '') === 'pools';
   const poolHeldOut = (prop: EvalProp): boolean =>
-    isPools && prop.poolServicer === POOL_SERVICER_TENANT;
+    isPools && isTenantServicedPool(prop.poolServicer);
 
   const enrolled = candidates
     .map(enrich)

@@ -680,6 +680,9 @@ export default function VendorManagement() {
 interface PoolRow {
   id: string; address: string; city: string; state: string; zip: string;
   locality: string; region: string; status: string; poolFee: number; poolServicer: string;
+  // Server-classified (tolerant "tenant"/"resident" match) — matches exactly how
+  // generation excludes, so grouping here can't drift from the real behavior.
+  isTenant?: boolean;
 }
 function PoolsTab() {
   const dialog = useAppDialog();
@@ -689,6 +692,7 @@ function PoolsTab() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [openSecs, setOpenSecs] = useState<{ resident: boolean; resihome: boolean }>({ resident: true, resihome: true });
   const SNAP = 'resiwalk_pools_v1';
 
   async function load(refresh = false) {
@@ -706,15 +710,20 @@ function PoolsTab() {
   }
   useEffect(() => {
     try { const s = JSON.parse(localStorage.getItem(SNAP) || 'null'); if (Array.isArray(s) && s.length) { setPools(s); setLoading(false); } } catch { /* ignore */ }
-    void load();
+    // Always reconcile against LIVE HubSpot data on open (bypass the server's
+    // 10-min cache) so servicer values set by the workflow/HubSpot show current.
+    void load(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function setServicer(p: PoolRow, value: string) {
     if (p.poolServicer === value || (!p.poolServicer && value === servicers.resihome)) return;
     setBusyId(p.id);
-    const prev = p.poolServicer;
-    setPools((cur) => cur.map((x) => (x.id === p.id ? { ...x, poolServicer: value } : x)));
+    const prev = p.poolServicer; const prevTenant = p.isTenant;
+    const nextTenant = /tenant|resident/i.test(value);
+    // Optimistically update the value AND its classification so the card jumps
+    // to the right section immediately (regroups on the tolerant match).
+    setPools((cur) => cur.map((x) => (x.id === p.id ? { ...x, poolServicer: value, isTenant: nextTenant } : x)));
     try {
       const r = await fetch('/api/admin/pools', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: p.id, poolServicer: value }),
@@ -722,7 +731,7 @@ function PoolsTab() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
     } catch (e: any) {
-      setPools((cur) => cur.map((x) => (x.id === p.id ? { ...x, poolServicer: prev } : x)));
+      setPools((cur) => cur.map((x) => (x.id === p.id ? { ...x, poolServicer: prev, isTenant: prevTenant } : x)));
       void dialog.alert(`Could not update pool servicer: ${e?.message || e}`);
     } finally { setBusyId(null); }
   }
@@ -732,7 +741,43 @@ function PoolsTab() {
     ? pools.filter((p) => `${p.address} ${p.locality} ${p.region}`.toLowerCase().includes(q))
     : pools;
   const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-  const isTenant = (p: PoolRow) => p.poolServicer === servicers.tenant;
+  // Prefer the SERVER's tolerant classification; fall back to a matching
+  // client-side check so an older snapshot (no isTenant) still groups right.
+  const isTenant = (p: PoolRow) => (typeof p.isTenant === 'boolean' ? p.isTenant : /tenant|resident/i.test(p.poolServicer || ''));
+  const resident = visible.filter(isTenant);
+  const resihome = visible.filter((p) => !isTenant(p));
+
+  const PoolCard = (p: PoolRow) => (
+    <section key={p.id} className={`bg-white border rounded-xl shadow-sm p-3.5 ${busyId === p.id ? 'opacity-60 pointer-events-none' : 'border-gray-200'}`}>
+      <div className="min-w-0">
+        <div className="font-heading font-bold text-[15px] text-ink break-words">{p.address}</div>
+        {p.locality && <div className="text-[12px] text-gray-500">{p.locality}</div>}
+        <div className="text-[11px] text-gray-400 mt-0.5">{p.region || '—'} · Pool fee {money(p.poolFee)}{p.status ? ` · ${p.status}` : ''}</div>
+      </div>
+      <div className="flex items-center justify-between gap-2 mt-2.5">
+        <span className="text-[13px] text-gray-700 shrink-0">Pool Servicer</span>
+        <div className="flex rounded-lg border border-gray-300 overflow-hidden" role="radiogroup" aria-label={`Pool servicer for ${p.address}`}>
+          {[{ val: servicers.resihome, label: 'ResiHome', tenant: false }, { val: servicers.tenant, label: 'Resident', tenant: true }].map((opt) => {
+            const on = opt.tenant ? isTenant(p) : !isTenant(p);
+            return (
+              <button key={opt.label} type="button" role="radio" aria-checked={on} onClick={() => void setServicer(p, opt.val)}
+                className={`px-2.5 py-1.5 text-[11px] font-heading font-bold border-l first:border-l-0 border-gray-300 ${on ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {isTenant(p) && (
+        <p className="text-[11px] text-amber-600 mt-1.5">Resident handles this pool — excluded from new pool orders. Returns to ResiHome via the HubSpot workflow.</p>
+      )}
+    </section>
+  );
+
+  const SECTIONS: { key: 'resident' | 'resihome'; title: string; rows: PoolRow[] }[] = [
+    { key: 'resident', title: 'Resident Services', rows: resident },
+    { key: 'resihome', title: 'ResiHome Services', rows: resihome },
+  ];
 
   return (
     <>
@@ -747,39 +792,29 @@ function PoolsTab() {
         <div className="bg-white border border-red-200 rounded-xl p-4 text-sm text-red-700">Could not load pools: {error}</div>
       ) : (
         <>
-          <p className="text-[12px] text-gray-500 mb-2">{visible.length} pool propert{visible.length === 1 ? 'y' : 'ies'}{q ? ' (filtered)' : ''} · fee &gt; $0. Set a pool to <span className="font-heading font-semibold">Tenant Service</span> to hold it out of new pool orders.</p>
-          <div className="space-y-2.5">
-            {visible.map((p) => (
-              <section key={p.id} className={`bg-white border rounded-xl shadow-sm p-3.5 ${busyId === p.id ? 'opacity-60 pointer-events-none' : 'border-gray-200'}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-heading font-bold text-[15px] text-ink break-words">{p.address}</div>
-                    {p.locality && <div className="text-[12px] text-gray-500">{p.locality}</div>}
-                    <div className="text-[11px] text-gray-400 mt-0.5">
-                      {p.region || '—'} · Pool fee {money(p.poolFee)}{p.status ? ` · ${p.status}` : ''}
+          <p className="text-[12px] text-gray-500 mb-2">{visible.length} pool propert{visible.length === 1 ? 'y' : 'ies'}{q ? ' (filtered)' : ''} · fee &gt; $0. Set a pool to <span className="font-heading font-semibold">Resident</span> to hold it out of new pool orders.</p>
+          <div className="space-y-4">
+            {SECTIONS.map((s) => {
+              const open = openSecs[s.key];
+              return (
+                <section key={s.key} className="rounded-xl shadow-md overflow-hidden bg-white border border-gray-200">
+                  <button type="button" onClick={() => setOpenSecs((cur) => ({ ...cur, [s.key]: !cur[s.key] }))} aria-expanded={open}
+                    className="w-full bg-brand/5 hover:bg-brand/10 border-b border-brand/20 px-4 py-3 flex items-center gap-3 text-left transition">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      className={`shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}><polyline points="9 18 15 12 9 6" /></svg>
+                    <h2 className="font-heading font-bold text-lg truncate min-w-0 flex-1 text-ink">{s.title}</h2>
+                    <span className="shrink-0 text-sm bg-brand text-white font-heading font-semibold px-2.5 py-0.5 rounded-full">{s.rows.length}</span>
+                  </button>
+                  {open && (
+                    <div className="p-3 space-y-2.5 bg-gray-50">
+                      {s.rows.length === 0
+                        ? <p className="text-sm text-gray-500 text-center py-4">No pools here{q ? ' (check search)' : ''}.</p>
+                        : s.rows.map((p) => PoolCard(p))}
                     </div>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-2 mt-2.5">
-                  <span className="text-[13px] text-gray-700 shrink-0">Pool Servicer</span>
-                  <div className="flex rounded-lg border border-gray-300 overflow-hidden" role="radiogroup" aria-label={`Pool servicer for ${p.address}`}>
-                    {[servicers.resihome, servicers.tenant].map((val) => {
-                      const on = val === servicers.tenant ? isTenant(p) : !isTenant(p);
-                      return (
-                        <button key={val} type="button" role="radio" aria-checked={on} onClick={() => void setServicer(p, val)}
-                          className={`px-2.5 py-1.5 text-[11px] font-heading font-bold border-l first:border-l-0 border-gray-300 ${on ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
-                          {val}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {isTenant(p) && (
-                  <p className="text-[11px] text-amber-600 mt-1.5">Excluded from new pool orders (tenant handles it). Returns to ResiHome via the HubSpot workflow when it leaves Tenant Leased.</p>
-                )}
-              </section>
-            ))}
-            {visible.length === 0 && <p className="text-sm text-gray-500 text-center py-8">No pool properties{q ? ' match your search' : ' (fee > $0)'}.</p>}
+                  )}
+                </section>
+              );
+            })}
           </div>
         </>
       )}
