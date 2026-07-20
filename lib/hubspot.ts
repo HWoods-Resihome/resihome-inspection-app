@@ -1075,16 +1075,50 @@ async function ensurePoolServicerProp(): Promise<void> {
     throw new Error(`Could not provision the ${POOL_SERVICER_PROPERTY} Property field: ${s.slice(0, 200)} — grant crm.schemas.custom.write (or create a "Pool Servicer" dropdown with ResiHome/Tenant Service manually).`);
   }
 }
+// Resolve the ACTUAL option value the pool_servicer dropdown accepts for each
+// side. HubSpot rejects (400 INVALID_OPTION) a value that isn't a defined
+// option, and the portal's labels may differ from our defaults ("Tenant
+// Service" vs "Resident Service" vs "Tenant", etc.) — so read the property's
+// real options and match: tenant/resident wording → the tenant value; anything
+// resihome/in-house/resi → the resihome value. Cached ~10 min. Falls back to
+// the configured strings when the field isn't an enum (free-text) or unreadable.
+let _poolServicerOpts: { at: number; resihome: string; tenant: string } | null = null;
+export function bustPoolServicerOpts(): void { _poolServicerOpts = null; }
+async function poolServicerValues(): Promise<{ resihome: string; tenant: string }> {
+  if (_poolServicerOpts && Date.now() - _poolServicerOpts.at < 10 * 60 * 1000) return _poolServicerOpts;
+  let resihome = POOL_SERVICER_RESIHOME;
+  let tenant = POOL_SERVICER_TENANT;
+  try {
+    const d = await hubspotFetch(`/crm/v3/properties/${typeIds().property}/${POOL_SERVICER_PROPERTY}`);
+    if (d?.type === 'enumeration' && Array.isArray(d.options) && d.options.length) {
+      const opts = d.options.map((o: any) => ({ value: String(o.value ?? ''), label: String(o.label ?? '') }));
+      const find = (re: RegExp) => opts.find((o: any) => re.test(o.value) || re.test(o.label));
+      const t = find(/tenant|resident/i);
+      const r = find(/resihome|in.?house|\bresi\b/i) || opts.find((o: any) => !/tenant|resident/i.test(o.value + o.label));
+      if (t) tenant = t.value;
+      if (r) resihome = r.value;
+    }
+  } catch { /* not an enum / unreadable → configured defaults */ }
+  _poolServicerOpts = { at: Date.now(), resihome, tenant };
+  return _poolServicerOpts;
+}
+
 export async function setPoolServicer(propertyId: string, value: string): Promise<void> {
   const id = String(propertyId || '').trim();
-  const v = value === POOL_SERVICER_TENANT ? POOL_SERVICER_TENANT : POOL_SERVICER_RESIHOME;
   if (!/^\d+$/.test(id)) throw new Error('Invalid property id');
   const { property: typeId } = typeIds();
+  // Map the requested side to the dropdown's REAL option value.
+  const opts = await poolServicerValues();
+  const v = isTenantServicedPool(value) ? opts.tenant : opts.resihome;
   const write = () => hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: { [POOL_SERVICER_PROPERTY]: v } }) });
   try { await write(); }
   catch (e: any) {
-    if (isMissingPropertyError(e, POOL_SERVICER_PROPERTY)) { await ensurePoolServicerProp(); await write(); }
-    else throw e;
+    if (isMissingPropertyError(e, POOL_SERVICER_PROPERTY)) { await ensurePoolServicerProp(); bustPoolServicerOpts(); await write(); }
+    else {
+      // Surface HubSpot's real reason (hubspotFetch sanitizes the message to a
+      // bare 400; the detail carries the INVALID_OPTION / allowed-values info).
+      throw new Error(`${String(e?.message || e)}${e?.detail ? ` — ${String(e.detail).slice(0, 240)}` : ''}`.trim());
+    }
   }
   bustPoolPropertiesCache();
 }
