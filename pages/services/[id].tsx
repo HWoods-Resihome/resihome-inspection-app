@@ -11,7 +11,7 @@ import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricin
 import { DEFAULT_SERVICE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SERVICE_STATUS_STYLE, serviceStatusText, easternTodayISO, type ServiceStatus, type ServiceRecord } from '@/lib/services/model';
 import { serviceVisibleTo } from '@/lib/services/scope';
-import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, fetchPropertyLockInfo, fetchPropertyMoveInDate, readServiceForms } from '@/lib/hubspot';
 import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
 import type { AuditEvent } from '@/lib/auditLog';
 import { CameraCapture } from '@/components/CameraCapture';
@@ -33,6 +33,7 @@ interface ServiceView {
   address: string; locality: string; vendor: string | null; dueDate: string;
   petStations: boolean; status: string; propertyRecordId: string; isBidItem: boolean;
   estimatedAt: string;
+  moveInDate?: string | null;   // property scope: tenant lease start (Listing → Deal → lease_start_date)
   vendorCost: number | null; markupPct: number | null; clientCost: number | null;
   vendorCostAdjustment: number | null; adjustmentReason: string;
   grassTiers: { standard: number; overgrown: number; heavy: number };
@@ -139,7 +140,14 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   let unlock: { propertyId: string; address: string; ring: LockRing } | null = null;
   let propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null = null;
   if (svc.live && svc.scope === 'property' && svc.propertyRecordId) {
-    const info = await fetchPropertyLockInfo(svc.propertyRecordId).catch(() => null);
+    // Property brief + the tenant's Move-In (lease start) date, resolved together.
+    // Move-In uses the same Property → Listing → Deal → lease_start_date lookup as
+    // inspections; property scope only (a community master covers many homes).
+    const [info, moveIn] = await Promise.all([
+      fetchPropertyLockInfo(svc.propertyRecordId).catch(() => null),
+      fetchPropertyMoveInDate(svc.propertyRecordId).catch(() => null),
+    ]);
+    svc.moveInDate = moveIn;
     if (info) {
       propMeta = { bedrooms: info.bedrooms, bathrooms: info.bathrooms, sqft: info.squareFootage, region: info.region };
       if (svc.worktype === 'cleaning' && info.status && info.status !== 'Tenant Leased') {
@@ -1186,6 +1194,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
               {svc.status === 'estimated'
                 ? <> · <span className="font-semibold text-gray-600">Estimated{(svc.estimatedAt || svc.dueDate) ? ` ${fmtMDY(svc.estimatedAt || svc.dueDate)}` : ''}</span></>
                 : svc.dueDate && <> · <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtMDY(svc.dueDate)}</span></>}
+              {svc.scope !== 'community' && svc.moveInDate && <> · <span className="text-gray-600">Move-In: {svc.moveInDate}</span></>}
             </div>
           </div>
         </div>

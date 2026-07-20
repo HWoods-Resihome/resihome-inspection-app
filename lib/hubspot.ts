@@ -5072,6 +5072,27 @@ async function fetchListingMoveInDate(listingRecordId: string): Promise<string |
   }
 }
 
+/** Move-in date for a PROPERTY — the tenant's lease start on the associated
+ *  listing's leasing deal, via Property → Listing → Deal → lease_start_date. Same
+ *  lookup the inspections record uses; returns the short date (M-D-YY) or null. */
+export async function fetchPropertyMoveInDate(propertyRecordId: string): Promise<string | null> {
+  if (!propertyRecordId) return null;
+  try {
+    const { property } = typeIds();
+    const lid = listingTypeId();
+    const la = await hubspotFetch(`/crm/v4/objects/${property}/${propertyRecordId}/associations/${lid}?limit=100`);
+    const listingIds: string[] = (la.results || []).map((r: any) => String(r.toObjectId ?? r.id)).filter(Boolean);
+    for (const listingId of listingIds) {
+      const d = await fetchListingMoveInDate(listingId);
+      if (d) return d;
+    }
+    return null;
+  } catch (e) {
+    console.warn('[property] move-in lookup failed:', e);
+    return null;
+  }
+}
+
 // ── Rules Engine "Deal Stage" criterion (leasing pipeline) ──────────────────
 // The stages of the LEASING deal pipeline, for the enroll/stop stage dropdowns.
 // Cached ~10 min. Value = HubSpot stage id (matches a deal's `dealstage`).
