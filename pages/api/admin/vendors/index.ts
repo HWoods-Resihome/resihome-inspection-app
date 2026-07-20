@@ -143,11 +143,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(409).json({ error: 'A vendor with this email already has ResiWalk access.' });
       }
       const eligibleForRecurring = b.eligibleForRecurring !== false;   // default Yes
+      // Inspections: tri-state, default NONE for new vendors.
+      const inspectionLevel = (b.inspectionLevel === 'limited' || b.inspectionLevel === 'full')
+        ? b.inspectionLevel
+        : (b.inspectionAccess === true ? 'limited' : 'none');
       const id = await createVendorCompany({
         name, email, regionsServiced,
         eligibleForRecurring,
         afterHoursService: b.afterHoursService === true,
-        inspectionAccess: b.inspectionAccess === true,            // default No
+        inspectionAccess: inspectionLevel !== 'none',
+        inspectionFull: inspectionLevel === 'full',
       });
       // Welcome email — ONLY for newly created vendors with recurring on (never
       // mass-sent to existing vendors; those get the per-card resend button).

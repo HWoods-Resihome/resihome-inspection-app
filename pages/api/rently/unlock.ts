@@ -11,7 +11,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isExternalEmail, externalAccessDenial, ownsInspection } from '@/lib/userAccess';
-import { vendorInspectionAccess } from '@/lib/inspectionGuard';
+import { vendorInspectionLevel } from '@/lib/inspectionGuard';
+import { inspectionAccessLevel } from '@/lib/userManagement';
 import { fetchInspectionById } from '@/lib/hubspot';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -54,6 +55,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let targetPropertyId = propertyId || '';
   let targetAddress = address || '';
   if (isExternalEmail(session.email)) {
+    // Tri-state level: FULL externals (vendor or 1099) unlock like internal
+    // users; NONE is denied outright; LIMITED applies the ownership rules below.
+    const vLvl = await vendorInspectionLevel(session.email).catch(() => null);
+    const level = vLvl ?? await inspectionAccessLevel(session.email).catch(() => 'limited' as const);
+    if (level === 'none') { denied(); return; }
+    if (level !== 'full') {
     const inspId = String(inspectionId || '').trim();
     if (!inspId) { denied(); return; }
     let insp = null;
@@ -62,10 +69,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Must be the user's OWN 1099 walk, and not yet completed. externalAccessDenial
     // with write:true fails CLOSED on a blank owner — an unassigned inspection is
     // not unlockable by any external user who merely has view access to it.
-    // Vendors granted Inspections access may unlock for ANY template type they're
-    // assigned to (same fail-closed ownership rule) — they need door access to
-    // work e.g. an assigned Scope.
-    if (await vendorInspectionAccess(session.email)) {
+    // LIMITED vendors may unlock for ANY template type they're assigned to
+    // (same fail-closed ownership rule) — they need door access to work e.g. an
+    // assigned Scope.
+    if (vLvl === 'limited') {
       if (!(insp.inspectorEmail || '').trim() || !ownsInspection(session.email, insp.inspectorEmail)) { denied(); return; }
     } else {
       const denial = externalAccessDenial(session.email, insp.templateType, {
@@ -79,6 +86,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!inspPropId || (propertyId && String(propertyId).trim() !== inspPropId)) { denied(); return; }
     targetPropertyId = inspPropId;
     targetAddress = insp.propertyAddressSnapshot || '';
+    }
   }
 
   // Don't hang the inspector forever on a slow door call.

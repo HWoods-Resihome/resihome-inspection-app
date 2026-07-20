@@ -47,7 +47,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     if (typeof b.eligibleForRecurring === 'boolean') patch.eligibleForRecurring = b.eligibleForRecurring;
     if (typeof b.afterHoursService === 'boolean') patch.afterHoursService = b.afterHoursService;
-    if (typeof b.inspectionAccess === 'boolean') patch.inspectionAccess = b.inspectionAccess;
+    // Inspections access is TRI-STATE: none / limited / full — encoded on the
+    // Company as two Yes/No flags (access + full). Boolean inspectionAccess is
+    // the legacy client shape (true = limited).
+    if (b.inspectionLevel === 'none' || b.inspectionLevel === 'limited' || b.inspectionLevel === 'full') {
+      patch.inspectionAccess = b.inspectionLevel !== 'none';
+      patch.inspectionFull = b.inspectionLevel === 'full';
+    } else if (typeof b.inspectionAccess === 'boolean') {
+      patch.inspectionAccess = b.inspectionAccess;
+      if (!b.inspectionAccess) patch.inspectionFull = false;
+    }
     if (typeof b.resiwalkAccess === 'boolean') patch.resiwalkAccess = b.resiwalkAccess;
     // Dependency rule: only an ACTIVE vendor can be recurring-eligible or hold
     // Inspections access. Deactivating force-clears both (in the same HubSpot
@@ -56,6 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (patch.resiwalkAccess === false) {
       patch.eligibleForRecurring = false;
       patch.inspectionAccess = false;
+      patch.inspectionFull = false;
     }
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
     try {

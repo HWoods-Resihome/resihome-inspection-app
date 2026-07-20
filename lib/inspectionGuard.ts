@@ -8,16 +8,36 @@
 
 import { fetchInspectionById, externalUnlockedView, findVendorForAuth } from '@/lib/hubspot';
 import { isExternalEmail, externalAccessDenial, externalCanEditTemplate, ownsInspection } from '@/lib/userAccess';
+import { inspectionAccessLevel, type InspectionAccessLevel } from '@/lib/userManagement';
 import { recordErrorEvent } from '@/lib/errorLog';
 
-/** True when this email is an ACTIVE vendor company granted Inspections access
- *  (admin toggle in Vendor Management). Such a vendor may work EVERY template
- *  type — but only inspections assigned to them (ownership below). Backed by the
- *  60s-cached auth lookup, so per-request gating stays cheap. */
-export async function vendorInspectionAccess(email: string | null | undefined): Promise<boolean> {
-  if (!isExternalEmail(email)) return false;   // internal users don't need it
+const NO_ACCESS_MSG = 'Your account does not have Inspections access.';
+
+/** A vendor COMPANY's inspections level (null = this email isn't a vendor):
+ *    'none'    — no Inspections app,
+ *    'limited' — every template type, but ONLY inspections assigned to them,
+ *    'full'    — unrestricted, like an internal user.
+ *  Backed by the 60s-cached auth lookup, so per-request gating stays cheap. */
+export async function vendorInspectionLevel(email: string | null | undefined): Promise<InspectionAccessLevel | null> {
+  if (!isExternalEmail(email)) return null;   // internal users don't need it
   const v = await findVendorForAuth(email).catch(() => null);
-  return !!(v && v.inspectionAccess);
+  if (!v) return null;
+  if (!v.inspectionAccess) return 'none';
+  return v.inspectionFull ? 'full' : 'limited';
+}
+
+/** Back-compat: any vendor inspections access at all (limited or full). */
+export async function vendorInspectionAccess(email: string | null | undefined): Promise<boolean> {
+  const lvl = await vendorInspectionLevel(email);
+  return lvl === 'limited' || lvl === 'full';
+}
+
+/** The effective inspections level for an EXTERNAL email: vendor company level
+ *  when it's a vendor, else the per-user (1099) level from User Management. */
+async function externalLevel(email: string | null | undefined): Promise<{ level: InspectionAccessLevel; vendor: boolean }> {
+  const vLvl = await vendorInspectionLevel(email);
+  if (vLvl !== null) return { level: vLvl, vendor: true };
+  return { level: await inspectionAccessLevel(email).catch(() => 'limited' as const), vendor: false };
 }
 
 export async function externalWriteDenial(
@@ -25,16 +45,20 @@ export async function externalWriteDenial(
   inspectionId: string,
 ): Promise<string | null> {
   if (!isExternalEmail(email)) return null; // internal users: unrestricted, no fetch
+  const { level, vendor } = await externalLevel(email);
+  if (level === 'full') return null;   // FULL access = unrestricted, like internal
+  if (level === 'none') return NO_ACCESS_MSG;
   const insp = await fetchInspectionById(inspectionId);
   if (!insp) return null; // not found → let the endpoint return its own 404
-  // Vendor with Inspections access: every template type is editable, but ONLY
-  // their own assigned work — fail closed on a blank inspector.
-  if (await vendorInspectionAccess(email)) {
+  // LIMITED vendor: every template type is editable, but ONLY their own
+  // assigned work — fail closed on a blank inspector.
+  if (vendor) {
     if (!(insp.inspectorEmail || '').trim() || !ownsInspection(email, insp.inspectorEmail)) {
       return 'You can only edit inspections assigned to you.';
     }
     return null;
   }
+  // LIMITED 1099 user: the classic rule (own 1099 template only).
   const denial = externalAccessDenial(email, insp.templateType, { write: true, status: insp.status, ownerEmail: insp.inspectorEmail });
   if (denial) {
     // Capture the exact mismatch for the Admin Error Log — this is what turns an
@@ -67,10 +91,13 @@ export async function externalViewDenial(
   inspectionId: string,
 ): Promise<string | null> {
   if (!isExternalEmail(email)) return null; // internal users: unrestricted, no fetch
+  const { level, vendor } = await externalLevel(email);
+  if (level === 'full') return null;   // FULL access = unrestricted, like internal
+  if (level === 'none') return NO_ACCESS_MSG;
   const insp = await fetchInspectionById(inspectionId);
   if (!insp) return null; // not found → let the endpoint return its own 404
-  // Vendor with Inspections access: may view any template type of THEIR OWN work.
-  if (await vendorInspectionAccess(email)) {
+  // LIMITED vendor: may view any template type of THEIR OWN work.
+  if (vendor) {
     return ownsInspection(email, insp.inspectorEmail) ? null : 'You can only view inspections assigned to you.';
   }
   const { states } = await externalUnlockedView(email);
@@ -96,10 +123,13 @@ export async function externalOwnedWriteDenial(
   inspectionId: string,
 ): Promise<string | null> {
   if (!isExternalEmail(email)) return null;
+  const { level, vendor } = await externalLevel(email);
+  if (level === 'full') return null;   // FULL access = unrestricted, like internal
+  if (level === 'none') return NO_ACCESS_MSG;
   const insp = await fetchInspectionById(inspectionId);
   if (!insp) return null; // not found → let the endpoint return its own 404
-  // Vendor with Inspections access: all template types (ownership still applies below).
-  if (!(await vendorInspectionAccess(email)) && !externalCanEditTemplate(insp.templateType)) {
+  // LIMITED vendor: all template types (ownership still applies below).
+  if (!vendor && !externalCanEditTemplate(insp.templateType)) {
     return 'Your account has view-only access to this inspection type.';
   }
   if (!(insp.inspectorEmail || '').trim() || !ownsInspection(email, insp.inspectorEmail)) {

@@ -11,13 +11,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isInternalEmail } from '@/lib/userAccess';
 
 type CapKey = 'active' | 'inspections' | 'services' | 'insights' | 'admin';
-const CAPS: { key: CapKey; label: string }[] = [
-  { key: 'active', label: 'ResiWalk Active' },
-  { key: 'inspections', label: 'Inspections' },
-  { key: 'services', label: 'Services' },
-  { key: 'insights', label: 'Insights' },
-  { key: 'admin', label: 'Admin' },
-];
+type BoolCap = 'active' | 'services' | 'insights' | 'admin';
+// Inspections access is TRI-STATE: none / limited (own 1099-scoped work) /
+// full (unrestricted, like internal). Everything else stays a Yes/No toggle.
+type InspLevel = 'none' | 'limited' | 'full';
+const normInsp = (v: unknown): InspLevel =>
+  v === 'none' || v === 'limited' || v === 'full' ? v : v ? 'full' : 'none';
 const SECTION_CAPS: CapKey[] = ['inspections', 'services', 'insights'];
 // Instant repaint on reopen: cache the last roster in localStorage; the fresh
 // fetch reconciles behind it.
@@ -25,7 +24,7 @@ const SNAP_KEY = 'resiwalk_users_admin_v1';
 
 interface UserRow {
   email: string; name: string; lastLogin: string | null; loginCount: number; seed: boolean;
-  access: Record<CapKey, boolean>;
+  access: { active: boolean; inspections: InspLevel | boolean; services: boolean; insights: boolean; admin: boolean };
 }
 
 function Chevron({ open }: { open: boolean }) {
@@ -56,8 +55,9 @@ export function InternalUsersManager() {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // Staged edits: email → { cap: bool }. Effective value = edit ?? row.access[cap].
-  const [edits, setEdits] = useState<Record<string, Partial<Record<CapKey, boolean>>>>({});
+  // Staged edits: email → { cap: bool } (+ inspections: level). Effective value
+  // = edit ?? row.access[cap].
+  const [edits, setEdits] = useState<Record<string, Partial<Record<BoolCap, boolean>> & { inspections?: InspLevel }>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   // Search / filter / sort.
@@ -95,11 +95,15 @@ export function InternalUsersManager() {
     void load();
   }, [open, users, load]);
 
-  const eff = (row: UserRow, cap: CapKey): boolean => {
+  const eff = (row: UserRow, cap: BoolCap): boolean => {
     const e = edits[row.email];
-    return e && typeof e[cap] === 'boolean' ? (e[cap] as boolean) : row.access[cap];
+    return e && typeof e[cap] === 'boolean' ? (e[cap] as boolean) : (row.access[cap] as boolean);
   };
-  const setCap = (row: UserRow, cap: CapKey, val: boolean) => {
+  const effInsp = (row: UserRow): InspLevel => {
+    const e = edits[row.email];
+    return e?.inspections ?? normInsp(row.access.inspections);
+  };
+  const setCap = (row: UserRow, cap: BoolCap, val: boolean) => {
     if (row.seed && (cap === 'active' || cap === 'admin')) return; // seed admins locked on
     setSaved(false);
     setEdits((prev) => {
@@ -116,6 +120,16 @@ export function InternalUsersManager() {
       return next;
     });
   };
+  const setInsp = (row: UserRow, lvl: InspLevel) => {
+    setSaved(false);
+    setEdits((prev) => {
+      const next = { ...prev };
+      const cur = { ...(next[row.email] || {}) };
+      if (lvl === normInsp(row.access.inspections)) delete cur.inspections; else cur.inspections = lvl;
+      if (Object.keys(cur).length) next[row.email] = cur; else delete next[row.email];
+      return next;
+    });
+  };
 
   const dirtyCount = Object.keys(edits).length;
 
@@ -125,7 +139,7 @@ export function InternalUsersManager() {
     if (needle) list = list.filter((u) => `${u.name} ${u.email}`.toLowerCase().includes(needle));
     if (fActive !== 'any') list = list.filter((u) => eff(u, 'active') === (fActive === 'yes'));
     if (fAdmin !== 'any') list = list.filter((u) => eff(u, 'admin') === (fAdmin === 'yes'));
-    if (fSections.length) list = list.filter((u) => fSections.every((c) => eff(u, c)));
+    if (fSections.length) list = list.filter((u) => fSections.every((c) => c === 'inspections' ? effInsp(u) !== 'none' : eff(u, c as BoolCap)));
     list.sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1;
       if (sortKey === 'name') return (a.name || a.email).localeCompare(b.name || b.email) * dir;
@@ -274,28 +288,48 @@ export function InternalUsersManager() {
                           <div className="text-[11px] text-gray-400">Last active {fmtLogin(u.lastLogin)}</div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {CAPS.map((c) => (
-                            <span key={c.key} title={c.label}
-                              className={`w-6 h-6 grid place-items-center rounded text-[9px] font-heading font-bold ${eff(u, c.key) ? 'bg-brand/10 text-brand' : 'bg-gray-100 text-gray-300'}`}>
-                              {c.key === 'active' ? 'A' : c.key === 'inspections' ? 'IN' : c.key === 'services' ? 'SV' : c.key === 'insights' ? 'IQ' : 'AD'}
-                            </span>
-                          ))}
+                          <span title="ResiWalk Active" className={`w-6 h-6 grid place-items-center rounded text-[9px] font-heading font-bold ${eff(u, 'active') ? 'bg-brand/10 text-brand' : 'bg-gray-100 text-gray-300'}`}>A</span>
+                          {/* IN chip carries the level: pink = full, amber = limited, gray = none. */}
+                          <span title={`Inspections: ${effInsp(u)}`} className={`w-6 h-6 grid place-items-center rounded text-[9px] font-heading font-bold ${effInsp(u) === 'full' ? 'bg-brand/10 text-brand' : effInsp(u) === 'limited' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-300'}`}>IN</span>
+                          <span title="Services" className={`w-6 h-6 grid place-items-center rounded text-[9px] font-heading font-bold ${eff(u, 'services') ? 'bg-brand/10 text-brand' : 'bg-gray-100 text-gray-300'}`}>SV</span>
+                          <span title="Insights" className={`w-6 h-6 grid place-items-center rounded text-[9px] font-heading font-bold ${eff(u, 'insights') ? 'bg-brand/10 text-brand' : 'bg-gray-100 text-gray-300'}`}>IQ</span>
+                          <span title="Admin" className={`w-6 h-6 grid place-items-center rounded text-[9px] font-heading font-bold ${eff(u, 'admin') ? 'bg-brand/10 text-brand' : 'bg-gray-100 text-gray-300'}`}>AD</span>
                           <Chevron open={isOpen} />
                         </div>
                       </button>
                       {isOpen && (
                         <div className="px-3.5 pb-3 pt-1 border-t border-gray-100 divide-y divide-gray-100">
-                          {CAPS.map((c) => {
-                            const locked = u.seed && (c.key === 'active' || c.key === 'admin');
+                          {([['active', 'ResiWalk Active'], ['inspections', 'Inspections'], ['services', 'Services'], ['insights', 'Insights'], ['admin', 'Admin']] as const).map(([key, label]) => {
+                            const locked = u.seed && (key === 'active' || key === 'admin');
+                            if (key === 'inspections') {
+                              // Tri-state: None / Limited (own work, 1099 rules) / Full (like internal).
+                              const lvl = effInsp(u);
+                              return (
+                                <div key={key} className="flex items-center justify-between gap-2 py-2.5">
+                                  <div>
+                                    <div className="text-[13px] font-heading font-semibold text-ink">{label}</div>
+                                    <div className="text-[11px] text-gray-400">{lvl === 'full' ? 'Everything, any type' : lvl === 'limited' ? 'Own inspections · 1099 type only' : 'No Inspections app'}</div>
+                                  </div>
+                                  <div className="flex rounded-lg border border-gray-300 overflow-hidden" role="radiogroup" aria-label={`${u.email} Inspections access`}>
+                                    {(['none', 'limited', 'full'] as const).map((v) => (
+                                      <button key={v} type="button" role="radio" aria-checked={lvl === v} onClick={() => setInsp(u, v)}
+                                        className={`px-2.5 py-1.5 text-[11px] font-heading font-bold capitalize border-l first:border-l-0 border-gray-300 ${lvl === v ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                                        {v}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            }
                             return (
-                              <div key={c.key} className="flex items-center justify-between py-2.5">
+                              <div key={key} className="flex items-center justify-between py-2.5">
                                 <div>
-                                  <div className="text-[13px] font-heading font-semibold text-ink">{c.label}</div>
+                                  <div className="text-[13px] font-heading font-semibold text-ink">{label}</div>
                                   {locked && <div className="text-[11px] text-gray-400">Built-in admin — always on</div>}
                                 </div>
                                 <label className="flex items-center gap-2 text-[12px] text-gray-500 cursor-pointer">
-                                  <span>{eff(u, c.key) ? 'Yes' : 'No'}</span>
-                                  <Toggle on={eff(u, c.key)} disabled={locked} label={`${u.email} ${c.label}`} onClick={() => setCap(u, c.key, !eff(u, c.key))} />
+                                  <span>{eff(u, key) ? 'Yes' : 'No'}</span>
+                                  <Toggle on={eff(u, key)} disabled={locked} label={`${u.email} ${label}`} onClick={() => setCap(u, key, !eff(u, key))} />
                                 </label>
                               </div>
                             );

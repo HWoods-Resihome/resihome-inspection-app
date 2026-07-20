@@ -6,7 +6,9 @@ import {
   inspectionFacets,
   externalUnlockedView,
   communityLocationMap,
+  findVendorForAuth,
 } from '@/lib/hubspot';
+import { inspectionAccessLevel } from '@/lib/userManagement';
 import type {
   InspectionQuery,
   InspectionStatusKey,
@@ -283,24 +285,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // (so it MUST be part of the cache key — external lists are no longer global).
   // It can't be widened by crafting a query param; they may still narrow within
   // the allowed set via the template facet (a disallowed selection is ignored).
-  const externalEmail = isExternalEmail(session.email) ? session.email : null;
+  let externalEmail = isExternalEmail(session.email) ? session.email : null;
   const templates = templatesRaw;
 
-  // VENDOR mode: a vendor session — or an internal user in the View-As-Vendor
-  // preview — sees ONLY the inspections assigned to that vendor's email (every
-  // template type). No 1099-wide template rule and no unlocked completed
-  // Scope/QC view group. Checked BEFORE the 1099 path: a vendor's company email
-  // can be on an external domain, and the session flag must win. The preview
-  // branch is internal-only (session.vendor false + internal email), so a 1099
-  // setting the cookie can't widen or redirect their own scope. A preview with
-  // no picked vendor scopes to a sentinel that matches nothing (fail closed).
+  // TRI-STATE access level (none / limited / full):
+  //  • A FULL-access 1099 sees the app like an internal user (no scoping).
+  //  • A FULL-access vendor likewise sees everything.
+  //  • NONE → 403 (the tab is hidden client-side; this is the backstop).
+  //  • LIMITED keeps the classic behavior below.
+  let vendorLevel: 'none' | 'limited' | 'full' | null = null;
+  if (session.vendor) {
+    const v = await findVendorForAuth(session.email).catch(() => null);
+    vendorLevel = !v || !v.inspectionAccess ? 'none' : v.inspectionFull ? 'full' : 'limited';
+    if (vendorLevel === 'none') return res.status(403).json({ error: 'Your account does not have Inspections access.' });
+  } else if (externalEmail) {
+    const uLvl = await inspectionAccessLevel(session.email).catch(() => 'limited' as const);
+    if (uLvl === 'none') return res.status(403).json({ error: 'Your account does not have Inspections access.' });
+    if (uLvl === 'full') externalEmail = null;   // full 1099 → internal-like list
+  }
+
+  // VENDOR mode: a LIMITED vendor session — or an internal user in the
+  // View-As-Vendor preview — sees ONLY the inspections assigned to that vendor's
+  // email (every template type). No 1099-wide template rule and no unlocked
+  // completed Scope/QC view group. Checked BEFORE the 1099 path: a vendor's
+  // company email can be on an external domain, and the session flag must win.
+  // The preview branch is internal-only (session.vendor false + internal email),
+  // so a 1099 setting the cookie can't widen or redirect their own scope. A
+  // preview with no picked vendor scopes to a sentinel that matches nothing
+  // (fail closed). FULL vendors skip the scoping entirely.
   const vendorScopeEmail = session.vendor
-    ? session.email
-    : (!externalEmail && isViewingAsVendor(req))
+    ? (vendorLevel === 'full' ? null : session.email)
+    : (!externalEmail && !isExternalEmail(session.email) && isViewingAsVendor(req))
       ? (viewAsVendorEmail(req) || '__no-vendor-picked__@resiwalk.invalid')
       : null;
   const ownInspectionsOnly = vendorScopeEmail != null;
-  const effectiveEmail = ownInspectionsOnly ? vendorScopeEmail : externalEmail;
+  const effectiveEmail = ownInspectionsOnly ? vendorScopeEmail : (session.vendor ? null : externalEmail);
 
   // State gate (1099 external only): the view-only completed Scope/QC set is
   // limited to the regions in states where this user has an inspection of their

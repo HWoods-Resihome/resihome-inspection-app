@@ -18,6 +18,7 @@
  */
 import { readAppUsers, mutateAppUsers, type AppUserRecord, type AppUsersMap } from '@/lib/hubspot';
 import { AI_KNOWLEDGE_ADMINS } from '@/lib/aiKnowledgeAccess';
+import { isInternalEmail } from '@/lib/userAccess';
 
 const SEED = new Set(AI_KNOWLEDGE_ADMINS.map((e) => e.trim().toLowerCase()));
 const isSeed = (email: string) => SEED.has(email);
@@ -56,18 +57,29 @@ export async function isResiwalkActive(email: string | null | undefined): Promis
   return ov?.active !== false; // default active unless explicitly turned off
 }
 
-/** Inspections access. Explicit override wins; otherwise the legacy default —
- *  TRUE for everyone who can sign in (inspections was never gated before).
- *  NOTE this flag only gates app entry/creation for internal users; external
- *  1099 users are constrained by the 1099 guards regardless (own-template
- *  writes, own-inspection edits, region-unlocked completed views) — those
- *  never consult this flag, so turning it on can't widen a 1099's access. */
-export async function inspectionsEnabled(email: string | null | undefined): Promise<boolean> {
+/** Inspections access is TRI-STATE:
+ *    'none'    — no Inspections app at all,
+ *    'limited' — the classic external gating: only their OWN inspections,
+ *                only the 1099 template type, completed Scope/QC views only in
+ *                regions they've unlocked,
+ *    'full'    — unrestricted, like an internal user (any template type, full
+ *                visibility).
+ *  Defaults (no override): internal users → full; external (1099) → limited.
+ *  Legacy boolean overrides: false → none; true → the domain default. */
+export type InspectionAccessLevel = 'none' | 'limited' | 'full';
+export async function inspectionAccessLevel(email: string | null | undefined): Promise<InspectionAccessLevel> {
   const e = norm(email);
-  if (!e) return false;
+  if (!e) return 'none';
   const ov = await getUserOverride(e);
-  if (ov && typeof ov.inspections === 'boolean') return ov.inspections;
-  return true;
+  const v = ov?.inspections;
+  if (v === 'none' || v === 'limited' || v === 'full') return v;
+  if (v === false) return 'none';
+  return isInternalEmail(e) ? 'full' : 'limited';
+}
+
+/** Convenience: any inspections access at all (tab visibility / create gate). */
+export async function inspectionsEnabled(email: string | null | undefined): Promise<boolean> {
+  return (await inspectionAccessLevel(email)) !== 'none';
 }
 
 /** Persist a set of per-user overrides (bulk-safe, concurrency-safe). `updates`
@@ -77,7 +89,7 @@ export async function inspectionsEnabled(email: string | null | undefined): Prom
 export type UserPatch = {
   name?: string;
   active?: boolean | null;
-  inspections?: boolean | null;
+  inspections?: boolean | InspectionAccessLevel | null;
   services?: boolean | null;
   insights?: boolean | null;
   admin?: boolean | null;
@@ -101,7 +113,13 @@ export async function applyUserPatches(updates: Record<string, UserPatch>, byEma
       };
       if (typeof patch.name === 'string' && patch.name.trim()) rec.name = patch.name.trim();
       setFlag('active', patch.active);
-      setFlag('inspections', patch.inspections);
+      // Inspections is tri-state: accept the level strings (or boolean/null
+      // through the generic path for back-compat).
+      if (patch.inspections === 'none' || patch.inspections === 'limited' || patch.inspections === 'full') {
+        rec.inspections = patch.inspections;
+      } else {
+        setFlag('inspections', patch.inspections as boolean | null | undefined);
+      }
       setFlag('services', patch.services);
       setFlag('insights', patch.insights);
       setFlag('admin', patch.admin);

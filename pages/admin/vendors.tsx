@@ -34,9 +34,14 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 
 interface VendorRow {
   id: string; name: string; email: string; regionsServiced: string;
-  resiwalkAccess: boolean; eligibleForRecurring: boolean; afterHoursService: boolean; inspectionAccess: boolean; hasPassword: boolean;
+  resiwalkAccess: boolean; eligibleForRecurring: boolean; afterHoursService: boolean;
+  inspectionAccess: boolean; inspectionFull: boolean; hasPassword: boolean;
   lastActive?: string | null;   // most recent sign-in (ISO), null if never
 }
+
+type InspLevel = 'none' | 'limited' | 'full';
+const inspLevelOf = (v: { inspectionAccess: boolean; inspectionFull?: boolean }): InspLevel =>
+  !v.inspectionAccess ? 'none' : v.inspectionFull ? 'full' : 'limited';
 
 // Last-active date, M-D-YY (e.g. 7-9-26). "Never" until the vendor first logs in.
 const fmtActive = (iso?: string | null): string => {
@@ -108,7 +113,7 @@ export default function VendorManagement() {
   const [newRegions, setNewRegions] = useState<string[]>([]);
   const [newRecurring, setNewRecurring] = useState(true);
   const [newAfterHours, setNewAfterHours] = useState(false);
-  const [newInspAccess, setNewInspAccess] = useState(false);
+  const [newInspLevel, setNewInspLevel] = useState<InspLevel>('none');   // default: no Inspections
   const [adding, setAdding] = useState(false);
 
   // Inline name/email edit (pencil).
@@ -218,15 +223,27 @@ export default function VendorManagement() {
   const mutateLocal = (id: string, patch: Partial<VendorRow>) =>
     setVendors((cur) => cur.map((x) => (x.id === id ? { ...x, ...patch } : x)));
 
-  function toggleFlag(v: VendorRow, key: 'eligibleForRecurring' | 'afterHoursService' | 'inspectionAccess') {
-    // Recurring + Inspections require an ACTIVE vendor (dependency rule).
-    if (!v.resiwalkAccess && (key === 'eligibleForRecurring' || key === 'inspectionAccess')) {
-      void dialog.alert('Reactivate this vendor first — a deactivated vendor can’t be recurring-eligible or access Inspections.');
+  function toggleFlag(v: VendorRow, key: 'eligibleForRecurring' | 'afterHoursService') {
+    // Recurring requires an ACTIVE vendor (dependency rule).
+    if (!v.resiwalkAccess && key === 'eligibleForRecurring') {
+      void dialog.alert('Reactivate this vendor first — a deactivated vendor can’t be recurring-eligible.');
       return;
     }
     const next = !v[key];
     mutateLocal(v.id, { [key]: next } as Partial<VendorRow>);
     void patchVendor(v.id, { [key]: next });
+  }
+
+  // Tri-state Inspections access: none / limited (own work, any type) / full
+  // (everything, like internal). Requires an ACTIVE vendor for limited/full.
+  function setInspLevel(v: VendorRow, lvl: InspLevel) {
+    if (lvl !== 'none' && !v.resiwalkAccess) {
+      void dialog.alert('Reactivate this vendor first — a deactivated vendor can’t access Inspections.');
+      return;
+    }
+    if (inspLevelOf(v) === lvl) return;
+    mutateLocal(v.id, { inspectionAccess: lvl !== 'none', inspectionFull: lvl === 'full' });
+    void patchVendor(v.id, { inspectionLevel: lvl });
   }
 
   async function toggleStatus(v: VendorRow) {
@@ -239,7 +256,7 @@ export default function VendorManagement() {
     }
     // Dependency rule: deactivating force-clears recurring + inspections (the
     // server enforces the same in one HubSpot patch).
-    mutateLocal(v.id, next ? { resiwalkAccess: true } : { resiwalkAccess: false, eligibleForRecurring: false, inspectionAccess: false });
+    mutateLocal(v.id, next ? { resiwalkAccess: true } : { resiwalkAccess: false, eligibleForRecurring: false, inspectionAccess: false, inspectionFull: false });
     void patchVendor(v.id, { resiwalkAccess: next });
   }
 
@@ -279,7 +296,7 @@ export default function VendorManagement() {
     try {
       const r = await fetch('/api/admin/vendors', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim(), email: newEmail.trim(), regionsServiced: joinRegions(newRegions), eligibleForRecurring: newRecurring, afterHoursService: newAfterHours, inspectionAccess: newInspAccess }),
+        body: JSON.stringify({ name: newName.trim(), email: newEmail.trim(), regionsServiced: joinRegions(newRegions), eligibleForRecurring: newRecurring, afterHoursService: newAfterHours, inspectionLevel: newInspLevel }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
@@ -290,11 +307,11 @@ export default function VendorManagement() {
         id: String(d.id), name: newName.trim(), email: newEmail.trim().toLowerCase(),
         regionsServiced: joinRegions(newRegions), resiwalkAccess: true,
         eligibleForRecurring: newRecurring, afterHoursService: newAfterHours,
-        inspectionAccess: newInspAccess, hasPassword: false,
+        inspectionAccess: newInspLevel !== 'none', inspectionFull: newInspLevel === 'full', hasPassword: false,
       };
       setVendors((cur) => [...cur.filter((x) => x.id !== row.id), row]);
       writePendingCreates([...readPendingCreates(), { row, at: Date.now() }]);
-      setAddOpen(false); setNewName(''); setNewEmail(''); setNewRegions([]); setNewRecurring(true); setNewAfterHours(false); setNewInspAccess(false);
+      setAddOpen(false); setNewName(''); setNewEmail(''); setNewRegions([]); setNewRecurring(true); setNewAfterHours(false); setNewInspLevel('none');
       void dialog.alert(`${row.name} created${d.welcomeSent ? ' — welcome email sent.' : '.'}`);
       await load(true);
     } catch (e: any) { void dialog.alert(`Could not add vendor: ${e?.message || e}`); }
@@ -459,9 +476,22 @@ export default function VendorManagement() {
               <span className="text-[13px] text-gray-700">Eligible For Recurring</span>
               <button type="button" onClick={() => toggleFlag(v, 'eligibleForRecurring')} className={toggleCls(v.eligibleForRecurring)} aria-pressed={v.eligibleForRecurring} title={v.resiwalkAccess ? 'Can be assigned recurring services' : 'Reactivate the vendor first'}><span className={knobCls(v.eligibleForRecurring)} /></button>
             </div>
-            <div className={`flex items-center justify-between ${v.resiwalkAccess ? '' : 'opacity-50'}`}>
-              <span className="text-[13px] text-gray-700">Access To Inspections</span>
-              <button type="button" onClick={() => toggleFlag(v, 'inspectionAccess')} className={toggleCls(v.inspectionAccess)} aria-pressed={v.inspectionAccess} title={v.resiwalkAccess ? 'On sign-in they also get the Inspections app — every inspection type, scoped to work assigned to them' : 'Reactivate the vendor first'}><span className={knobCls(v.inspectionAccess)} /></button>
+            <div className={`flex items-center justify-between gap-2 ${v.resiwalkAccess ? '' : 'opacity-50'}`}>
+              <span className="text-[13px] text-gray-700 shrink-0">Access To Inspections</span>
+              {/* Tri-state: None (no Inspections app) / Limited (their assigned
+                  work only, any type) / Full (everything, like internal). */}
+              <div className="flex rounded-lg border border-gray-300 overflow-hidden" role="radiogroup" aria-label="Access to Inspections">
+                {(['none', 'limited', 'full'] as const).map((lvl) => {
+                  const on = inspLevelOf(v) === lvl;
+                  return (
+                    <button key={lvl} type="button" role="radio" aria-checked={on} onClick={() => setInspLevel(v, lvl)}
+                      title={lvl === 'none' ? 'No Inspections access' : lvl === 'limited' ? 'Only inspections assigned to them (any type)' : 'Full access — like an internal user'}
+                      className={`px-2.5 py-1.5 text-[11px] font-heading font-bold capitalize border-l first:border-l-0 border-gray-300 ${on ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                      {lvl}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-700">After-Hours Service</span>
@@ -568,9 +598,16 @@ export default function VendorManagement() {
                   <span className="text-sm font-heading font-semibold text-ink">Eligible For Recurring</span>
                   <button type="button" onClick={() => setNewRecurring((v) => !v)} className={toggleCls(newRecurring)} aria-pressed={newRecurring}><span className={knobCls(newRecurring)} /></button>
                 </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-sm font-heading font-semibold text-ink">Access To Inspections</span>
-                  <button type="button" onClick={() => setNewInspAccess((v) => !v)} className={toggleCls(newInspAccess)} aria-pressed={newInspAccess}><span className={knobCls(newInspAccess)} /></button>
+                <div className="flex items-center justify-between gap-2 py-1">
+                  <span className="text-sm font-heading font-semibold text-ink shrink-0">Access To Inspections</span>
+                  <div className="flex rounded-lg border border-gray-300 overflow-hidden" role="radiogroup" aria-label="Access to Inspections">
+                    {(['none', 'limited', 'full'] as const).map((lvl) => (
+                      <button key={lvl} type="button" role="radio" aria-checked={newInspLevel === lvl} onClick={() => setNewInspLevel(lvl)}
+                        className={`px-2.5 py-1.5 text-[11px] font-heading font-bold capitalize border-l first:border-l-0 border-gray-300 ${newInspLevel === lvl ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                        {lvl}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm font-heading font-semibold text-ink">After-Hours Service</span>

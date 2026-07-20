@@ -6503,7 +6503,9 @@ async function mutateAgentJson<T>(prop: string, label: string, mutator: (cur: T 
 export interface AppUserRecord {
   name?: string;
   active?: boolean;        // ResiWalk Active (login/app access)
-  inspections?: boolean;
+  // Inspections is TRI-STATE ('none' | 'limited' | 'full'); legacy records may
+  // hold a boolean (false → none; true → the domain default).
+  inspections?: boolean | 'none' | 'limited' | 'full';
   services?: boolean;
   insights?: boolean;
   admin?: boolean;
@@ -7825,35 +7827,40 @@ export interface VendorAdminRow {
   resiwalkAccess: boolean;
   eligibleForRecurring: boolean;
   afterHoursService: boolean;
-  inspectionAccess: boolean;        // may sign in to the Inspections app (all types, own work)
+  inspectionAccess: boolean;        // may sign in to the Inspections app (limited: own work only)
+  inspectionFull: boolean;          // FULL inspections access (see/do everything, like internal)
   hasPassword: boolean;             // has set their ResiWalk login password
 }
 
-const VENDOR_ADMIN_PROPS = ['name', 'email', 'regions_serviced', 'resiwalk_access', 'eligible_for_recurring', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_password'];
+const VENDOR_ADMIN_PROPS = ['name', 'email', 'regions_serviced', 'resiwalk_access', 'eligible_for_recurring', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_inspection_full', 'resiwalk_password'];
 // Properties that may not exist in a portal — dropped (with a warning) instead of
 // failing the whole list, mirroring the resiwalk_password fallback above.
-const VENDOR_ADMIN_OPTIONAL = ['regions_serviced', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_password'];
+const VENDOR_ADMIN_OPTIONAL = ['regions_serviced', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_inspection_full', 'resiwalk_password'];
 
-/** Provision the resiwalk_inspection_access Company property (idempotent):
- *  check-first, then create — trying the two checkbox encodings HubSpot accepts
- *  (type bool, else enumeration). Throws a DESCRIPTIVE error on failure (e.g.
- *  missing crm.schemas scope) so the admin UI shows the real cause. Runs at most
- *  once per instance once it succeeds. */
-let _inspPropEnsured = false;
-export async function ensureInspectionAccessProp(): Promise<void> {
-  if (_inspPropEnsured) return;
+/** Provision the vendor inspection Company properties (idempotent): check-first,
+ *  then create — trying the two checkbox encodings HubSpot accepts (type bool,
+ *  else enumeration). Throws a DESCRIPTIVE error on failure (e.g. missing
+ *  crm.schemas scope) so the admin UI shows the real cause. Runs at most once
+ *  per instance once every property succeeds. */
+const INSPECTION_PROPS_TO_ENSURE: { name: string; label: string }[] = [
+  { name: 'resiwalk_inspection_access', label: 'ResiWalk Inspection Access' },
+  { name: 'resiwalk_inspection_full', label: 'ResiWalk Inspection Full Access' },
+];
+const _inspPropEnsuredSet = new Set<string>();
+async function ensureOneVendorBoolProp(propName: string, label: string): Promise<void> {
+  if (_inspPropEnsuredSet.has(propName)) return;
   // Already exists? Done.
   try {
-    await hubspotFetch(`/crm/v3/properties/companies/resiwalk_inspection_access`);
-    _inspPropEnsured = true;
+    await hubspotFetch(`/crm/v3/properties/companies/${propName}`);
+    _inspPropEnsuredSet.add(propName);
     return;
   } catch { /* 404 → check archived, then create below */ }
   // Exists but ARCHIVED (deleted in HubSpot)? Creation 409s while writes still
   // fail — the API can't restore it, so tell the admin exactly what to do.
   try {
-    const arch = await hubspotFetch(`/crm/v3/properties/companies/resiwalk_inspection_access?archived=true`);
+    const arch = await hubspotFetch(`/crm/v3/properties/companies/${propName}?archived=true`);
     if (arch?.name) {
-      throw new Error('The resiwalk_inspection_access Company property exists but is ARCHIVED (deleted). Restore it in HubSpot: Settings → Properties → Companies → filter Archived → restore "ResiWalk Inspection Access" — then retry.');
+      throw new Error(`The ${propName} Company property exists but is ARCHIVED (deleted). Restore it in HubSpot: Settings → Properties → Companies → filter Archived → restore "${label}" — then retry.`);
     }
   } catch (e: any) {
     if (/ARCHIVED \(deleted\)/.test(String(e?.message || ''))) throw e;
@@ -7862,8 +7869,8 @@ export async function ensureInspectionAccessProp(): Promise<void> {
   const create = (type: string) => hubspotFetch(`/crm/v3/properties/companies`, {
     method: 'POST',
     body: JSON.stringify({
-      name: 'resiwalk_inspection_access',
-      label: 'ResiWalk Inspection Access',
+      name: propName,
+      label,
       type, fieldType: 'booleancheckbox',
       groupName: 'companyinformation',
       options: [{ label: 'Yes', value: 'true' }, { label: 'No', value: 'false' }],
@@ -7873,16 +7880,22 @@ export async function ensureInspectionAccessProp(): Promise<void> {
     try { await create('bool'); }
     catch (e: any) {
       const s = `${e?.message || ''} ${e?.detail || ''}`;
-      if (/409|already exists|PROPERTY_EXISTS/i.test(s)) { _inspPropEnsured = true; return; }
+      if (/409|already exists|PROPERTY_EXISTS/i.test(s)) { _inspPropEnsuredSet.add(propName); return; }
       if (/VALIDATION|invalid|type/i.test(s)) await create('enumeration');   // portal wants the enum encoding
       else throw e;
     }
-    _inspPropEnsured = true;
+    _inspPropEnsuredSet.add(propName);
   } catch (e: any) {
     const s = `${e?.message || ''} ${e?.detail || ''}`;
-    if (/409|already exists|PROPERTY_EXISTS/i.test(s)) { _inspPropEnsured = true; return; }
-    throw new Error(`Could not create the ResiWalk Inspection Access company property: ${s.slice(0, 200)} — if this mentions scopes, grant the HubSpot private app the crm.schemas.companies.write scope, or create a Yes/No checkbox property named resiwalk_inspection_access on Companies manually.`);
+    if (/409|already exists|PROPERTY_EXISTS/i.test(s)) { _inspPropEnsuredSet.add(propName); return; }
+    throw new Error(`Could not create the ${label} company property: ${s.slice(0, 200)} — if this mentions scopes, grant the HubSpot private app the crm.schemas.companies.write scope, or create a Yes/No checkbox property named ${propName} on Companies manually.`);
   }
+}
+export async function ensureInspectionAccessProp(): Promise<void> {
+  const results = await Promise.allSettled(INSPECTION_PROPS_TO_ENSURE.map((p) => ensureOneVendorBoolProp(p.name, p.label)));
+  const errs = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+    .map((r) => String((r.reason as any)?.message || r.reason));
+  if (errs.length) throw new Error(errs.join(' · '));
 }
 // Explicit "No" encodings — a company whose resiwalk_access is SET to a negative
 // value is a DEACTIVATED vendor (shown for reactivation). Companies with the
@@ -7939,6 +7952,7 @@ export async function fetchVendorAdminList(force = false): Promise<VendorAdminRo
         eligibleForRecurring: vendorTruthy(p.eligible_for_recurring),
         afterHoursService: vendorTruthy(p.after_hours_service),
         inspectionAccess: vendorTruthy(p.resiwalk_inspection_access),
+        inspectionFull: vendorTruthy(p.resiwalk_inspection_full),
         hasPassword: isVendorPasswordSet(p.resiwalk_password),
       });
     }
@@ -7956,6 +7970,7 @@ export interface VendorWritePatch {
   eligibleForRecurring?: boolean;
   afterHoursService?: boolean;
   inspectionAccess?: boolean;
+  inspectionFull?: boolean;
 }
 
 // The Yes/No flags may be booleancheckbox ('true') OR a Yes/No enum ('Yes')
@@ -7968,6 +7983,7 @@ const VENDOR_FLAG_PROPS: { key: keyof VendorWritePatch; prop: string }[] = [
   { key: 'eligibleForRecurring', prop: 'eligible_for_recurring' },
   { key: 'afterHoursService', prop: 'after_hours_service' },
   { key: 'inspectionAccess', prop: 'resiwalk_inspection_access' },
+  { key: 'inspectionFull', prop: 'resiwalk_inspection_full' },
 ];
 // DETERMINISTIC flag values: read each property's real definition from HubSpot
 // (bool vs enumeration + its option VALUES) and write exactly what it accepts —
@@ -8079,10 +8095,14 @@ async function vendorWrite(url: string, method: 'POST' | 'PATCH', patch: VendorW
         bustVendorFlagDefs();
         continue;
       }
-      const trulyMissing = p.inspectionAccess != null
-        && blob.includes('resiwalk_inspection_access')
-        && (/PROPERTY_DOESNT_EXIST/i.test(blob) || /property .{0,60}does(?:n.t| not) exist/i.test(blob));
-      if (trulyMissing) {
+      // Either inspection property missing from the portal → provision once,
+      // then drop the offending field(s) so the rest of the patch isn't blocked.
+      const missingProp = ['resiwalk_inspection_access', 'resiwalk_inspection_full'].find((prop) => {
+        const key = prop === 'resiwalk_inspection_access' ? 'inspectionAccess' : 'inspectionFull';
+        return (p as any)[key] != null && blob.includes(prop)
+          && (/PROPERTY_DOESNT_EXIST/i.test(blob) || /property .{0,60}does(?:n.t| not) exist/i.test(blob));
+      });
+      if (missingProp) {
         if (!provisionTried) {
           provisionTried = true;
           try { await ensureInspectionAccessProp(); bustVendorFlagDefs(); continue; }   // provisioned → retry
@@ -8090,8 +8110,9 @@ async function vendorWrite(url: string, method: 'POST' | 'PATCH', patch: VendorW
         }
         // Provisioning failed (or the property is archived and still unwritable):
         // drop the field so the rest of the patch isn't blocked.
-        console.warn('[vendor-admin] writing without resiwalk_inspection_access:', dropReason.slice(0, 200));
-        const { inspectionAccess: _drop, ...rest } = p;
+        console.warn(`[vendor-admin] writing without ${missingProp}:`, dropReason.slice(0, 200));
+        const rest: VendorWritePatch = { ...p };
+        if (missingProp === 'resiwalk_inspection_access') delete rest.inspectionAccess; else delete rest.inspectionFull;
         p = rest;
         if (Object.keys(p).length === 0) throw new Error(dropReason);   // the toggle itself → real reason
         continue;   // restart with the reduced patch
@@ -8136,7 +8157,7 @@ export async function findApprovedVendorByEmail(email: string | null | undefined
  *  recurring assignments), plus the inspection-access flag for the session
  *  claim. Falls back to the recurring-approved list when the direct search
  *  fails. Tiny per-email cache to keep per-request gating cheap. */
-export interface VendorAuthCompany extends VendorCompany { inspectionAccess: boolean }
+export interface VendorAuthCompany extends VendorCompany { inspectionAccess: boolean; inspectionFull: boolean }
 const _vendorAuthCache = new Map<string, { at: number; v: VendorAuthCompany | null }>();
 export async function findVendorForAuth(email: string | null | undefined): Promise<VendorAuthCompany | null> {
   const e = String(email || '').trim().toLowerCase();
@@ -8144,7 +8165,7 @@ export async function findVendorForAuth(email: string | null | undefined): Promi
   const hit = _vendorAuthCache.get(e);
   if (hit && Date.now() - hit.at < 60_000) return hit.v;
   let out: VendorAuthCompany | null = null;
-  let properties = ['name', 'email', 'resiwalk_access', 'eligible_for_recurring', 'resiwalk_inspection_access', 'resiwalk_password'];
+  let properties = ['name', 'email', 'resiwalk_access', 'eligible_for_recurring', 'resiwalk_inspection_access', 'resiwalk_inspection_full', 'resiwalk_password'];
   const run = () => hubspotFetch(`/crm/v3/objects/companies/search`, {
     method: 'POST',
     body: JSON.stringify({
@@ -8159,7 +8180,7 @@ export async function findVendorForAuth(email: string | null | undefined): Promi
     let resp;
     try { resp = await run(); }
     catch (err: any) {
-      const missing = ['resiwalk_inspection_access', 'resiwalk_password'].find((p) => properties.includes(p) && isMissingPropertyError(err, p));
+      const missing = ['resiwalk_inspection_access', 'resiwalk_inspection_full', 'resiwalk_password'].find((p) => properties.includes(p) && isMissingPropertyError(err, p));
       if (!missing) throw err;
       properties = properties.filter((p) => p !== missing);
       resp = await run();
@@ -8172,13 +8193,14 @@ export async function findVendorForAuth(email: string | null | undefined): Promi
           id: String(r.id), name: String(p.name).trim(), email: String(p.email).trim(),
           passwordHash: String(p.resiwalk_password || ''), hasPassword: isVendorPasswordSet(p.resiwalk_password),
           inspectionAccess: vendorTruthy(p.resiwalk_inspection_access),
+          inspectionFull: vendorTruthy(p.resiwalk_inspection_full),
         };
       }
     }
   } catch (err) {
     console.warn('[vendor-auth] direct lookup failed — falling back to the approved list:', String((err as any)?.message || err).slice(0, 160));
     const v = await findApprovedVendorByEmail(e);
-    out = v ? { ...v, inspectionAccess: false } : null;
+    out = v ? { ...v, inspectionAccess: false, inspectionFull: false } : null;
   }
   _vendorAuthCache.set(e, { at: Date.now(), v: out });
   if (_vendorAuthCache.size > 2000) _vendorAuthCache.clear();
