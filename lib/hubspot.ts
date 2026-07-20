@@ -6647,6 +6647,66 @@ async function resolveOwnerIdByEmail(email: string): Promise<string | null> {
   }
 }
 
+/** Batched agent-billing lookup for a set of inspector EMAILS → per-email
+ *  { brokerCode, vendorCost, clientCost } (raw strings; '' when unknown). Resolves
+ *  each distinct email to its HubSpot owner, then that owner's Agent record.
+ *  Both stages are cached per-process so a report over many inspections only
+ *  pays one round-trip per distinct inspector. Missing agent → null entry. */
+const _ownerIdByEmail = new Map<string, string | null>();
+const _agentBillingByOwner = new Map<string, { brokerCode: string; vendorCost: string; clientCost: string } | null>();
+export async function fetchAgentBillingByEmails(
+  emails: string[],
+): Promise<Map<string, { brokerCode: string; vendorCost: string; clientCost: string } | null>> {
+  const out = new Map<string, { brokerCode: string; vendorCost: string; clientCost: string } | null>();
+  const distinct = Array.from(new Set(emails.map((e) => (e || '').trim().toLowerCase()).filter(Boolean)));
+  // Bounded concurrency so a big report doesn't fan out hundreds of calls at once.
+  const CONC = 6;
+  for (let i = 0; i < distinct.length; i += CONC) {
+    await Promise.all(distinct.slice(i, i + CONC).map(async (email) => {
+      try {
+        let ownerId = _ownerIdByEmail.get(email);
+        if (ownerId === undefined) { ownerId = await resolveOwnerIdByEmail(email); _ownerIdByEmail.set(email, ownerId); }
+        if (!ownerId) { out.set(email, null); return; }
+        let billing = _agentBillingByOwner.get(ownerId);
+        if (billing === undefined) { billing = await fetchAgentBillingByOwner(ownerId); _agentBillingByOwner.set(ownerId, billing); }
+        out.set(email, billing);
+      } catch { out.set(email, null); }
+    }));
+  }
+  return out;
+}
+export function bustAgentBillingCache(): void { _ownerIdByEmail.clear(); _agentBillingByOwner.clear(); }
+
+/** Batched Property billing fields by record id → { entityId, portfolio, region,
+ *  address }. Chunked batch/read (100/req). Unknown ids are simply absent. */
+export async function fetchPropertyBillingByIds(
+  ids: string[],
+): Promise<Map<string, { entityId: string; portfolio: string; region: string; address: string }>> {
+  const out = new Map<string, { entityId: string; portfolio: string; region: string; address: string }>();
+  const distinct = Array.from(new Set(ids.map((s) => String(s || '').trim()).filter(Boolean)));
+  if (!distinct.length) return out;
+  const { property: typeId } = typeIds();
+  for (let i = 0; i < distinct.length; i += 100) {
+    const chunk = distinct.slice(i, i + 100);
+    try {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/batch/read`, {
+        method: 'POST',
+        body: JSON.stringify({ properties: ['entity_id', 'portfolio', 'region', 'address', 'city', 'state_code', 'zip_code', 'zip'], inputs: chunk.map((id) => ({ id })) }),
+      });
+      for (const rec of resp.results || []) {
+        const p = rec.properties || {};
+        out.set(String(rec.id), {
+          entityId: String(p.entity_id || '').trim(),
+          portfolio: String(p.portfolio || '').trim(),
+          region: String(p.region || '').trim(),
+          address: String(p.address || '').trim(),
+        });
+      }
+    } catch (e) { console.warn('[billing] property batch read failed:', String((e as any)?.message || e).slice(0, 120)); }
+  }
+  return out;
+}
+
 /** Find the Agent record owned by `ownerId` and read its billing fields. */
 async function fetchAgentBillingByOwner(ownerId: string): Promise<{ brokerCode: string; vendorCost: string; clientCost: string } | null> {
   if (!ownerId) return null;
@@ -6854,6 +6914,13 @@ export async function readAppUsers(): Promise<AppUsersMap> {
 }
 export async function mutateAppUsers(mutator: (cur: AppUsersMap) => AppUsersMap): Promise<boolean> {
   return mutateAgentJson<AppUsersMap>(APP_USERS_PROP, 'App Users (JSON)', (cur) => mutator(cur || {}));
+}
+
+/** Billing report SCHEDULES (array). Stored on the Agent record. Null when unset. */
+const REPORT_SCHEDULES_PROP = 'report_schedules_json';
+export function readReportSchedulesRaw<T = any[]>(): Promise<T | null> { return readAgentJson<T>(REPORT_SCHEDULES_PROP); }
+export function mutateReportSchedulesRaw<T = any[]>(mutator: (cur: T | null) => T): Promise<boolean> {
+  return mutateAgentJson<T>(REPORT_SCHEDULES_PROP, 'Report Schedules (JSON)', mutator);
 }
 
 /** Service completion forms, keyed by `worktype:subtype` → question array. Null when unset/unreachable. */

@@ -36,6 +36,9 @@
     "pages/api/cron/notes-inbox.ts": {
       "maxDuration": 60
     },
+    "pages/api/cron/report-schedules.ts": {
+      "maxDuration": 300
+    },
     "pages/api/admin/training-guide/deploy.ts": {
       "maxDuration": 120
     },
@@ -83,6 +86,10 @@
     {
       "path": "/api/cron/notes-inbox",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/report-schedules",
+      "schedule": "0 * * * *"
     },
     {
       "path": "/api/cron/services-generate",
