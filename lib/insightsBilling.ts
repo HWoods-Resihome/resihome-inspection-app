@@ -60,7 +60,11 @@ export interface BillingRow {
 }
 
 const num = (v: unknown): number | null => {
-  const n = Number(String(v ?? '').replace(/[$,]/g, '').trim());
+  // Blank/absent → null (so the caller's default applies). Number('') is 0, which
+  // would otherwise mask a missing value as a real $0.
+  const s = String(v ?? '').replace(/[$,]/g, '').trim();
+  if (!s) return null;
+  const n = Number(s);
   return Number.isFinite(n) ? n : null;
 };
 const dateOnly = (iso: string | null | undefined): string => {
