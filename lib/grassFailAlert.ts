@@ -13,10 +13,11 @@
  * never blocks the submission.
  */
 import {
-  getPpwFailAlertStamp, stampPpwFailAlert, type SavedAnswer,
+  getPpwFailAlertStamp, stampPpwFailAlert, resolveInspectionPropertyId, type SavedAnswer,
 } from '@/lib/hubspot';
 import { postSlackMessage } from '@/lib/slack';
 import { resolveSlackTarget } from '@/lib/slackNotifications';
+import { buildFailAttachment, type FailNoteCtx } from '@/lib/slackFailAlerts';
 
 // Live destination (override via SLACK_PPW_FAILS_CHANNEL). A channel NAME works
 // with chat.postMessage as long as the bot is a member; prefer the ID in prod.
@@ -37,6 +38,9 @@ export interface GrassFailInspectionRef {
   recordId: string;
   propertyAddressSnapshot: string;
   inspectorName?: string;
+  /** property_id_ref, when the caller already has it — else resolved server-side
+   *  so the "Leave Note on Property" action can write the note. */
+  propertyRecordId?: string | null;
 }
 
 export function findGrassAnswer(answers: SavedAnswer[]): SavedAnswer | undefined {
@@ -70,32 +74,30 @@ export async function postGrassFailAlertOnSubmit(
     if (stamp) return { posted: false, reason: 'gated (already posted)' };
   }
 
-  // 3) Build the message.
+  // 3) Resolve the property (for the "Leave Note" write) + build the PINK card.
   const base = (opts?.baseUrl || 'https://resiwalk.com').replace(/\/+$/, '');
   const inspectionUrl = `${base}/inspection/${inspection.recordId}`;
   const address = (inspection.propertyAddressSnapshot || '').trim() || '(address n/a)';
   const response = (ans.answerValue || '').trim() || 'Fail';
   const note = (ans.note || '').trim();
   const photos = (ans.photoUrls || []).filter(Boolean);
+  const propertyId = (inspection.propertyRecordId || '').trim()
+    || (await resolveInspectionPropertyId(inspection.recordId).catch(() => null)) || '';
 
+  const ctx: FailNoteCtx = {
+    reviewType: 'Grass', inspectionId: inspection.recordId, propertyId,
+    address, inspector: inspection.inspectorName || '', response,
+    inspectorNote: note, openUrl: inspectionUrl, photosCount: photos.length,
+  };
   const text = `Grass fail — ${address} (dispatch PPW)`;
-  const blocks: any[] = [
-    { type: 'header', text: { type: 'plain_text', text: '🌱 Grass Fail — PPW Dispatch', emoji: true } },
-    { type: 'section', fields: [
-      { type: 'mrkdwn', text: `*Property:*\n${address}` },
-      { type: 'mrkdwn', text: `*Grass condition:*\n🔻 ${response}` },
-      { type: 'mrkdwn', text: `*Inspector:*\n${inspection.inspectorName || '—'}` },
-      { type: 'mrkdwn', text: `*Photos:*\n${photos.length ? `${photos.length} attached (see thread)` : 'none'}` },
-    ] },
-  ];
-  if (note) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Inspector note:*\n>${note.replace(/\n/g, '\n>')}` } });
-  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `<${inspectionUrl}|Open inspection ↗>` } });
+  const attachments = buildFailAttachment(ctx);
+  // Optional @-mentions ride along as a leading line inside the pink card.
   if (ALERT_MENTIONS.length) {
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: ALERT_MENTIONS.map((u) => `<@${u}>`).join(' ') } });
+    attachments[0].blocks.unshift({ type: 'section', text: { type: 'mrkdwn', text: ALERT_MENTIONS.map((u) => `<@${u}>`).join(' ') } });
   }
 
   // 4) Post the parent; stamp on success; thread the photo links (keeps parent compact).
-  const res = await postSlackMessage(channel, { text, blocks });
+  const res = await postSlackMessage(channel, { text, attachments });
   if (res.ok) {
     if (GATE_ACTIVE) await stampPpwFailAlert(inspection.recordId);
     if (res.ts && photos.length) {

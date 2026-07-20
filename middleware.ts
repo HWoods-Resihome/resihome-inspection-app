@@ -75,6 +75,9 @@ const PUBLIC_PATHS = new Set<string>([
   // replay window) and answers the url_verification handshake. Must be public or
   // Slack's requests get redirected to /login and never reach the endpoint.
   '/api/slack/events',
+  // Slack interactivity (PPW fail "Leave Note" button + modal). Same signature
+  // self-auth as events; must be public so Slack's POSTs reach the handler.
+  '/api/slack/interactivity',
   // Insights snapshot rebuild: reached by Vercel Cron (no session cookie) and by
   // admins. Self-enforces CRON_SECRET bearer / app-admin session in the handler.
   '/api/insights/rebuild',

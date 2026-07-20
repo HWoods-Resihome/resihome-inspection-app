@@ -4010,11 +4010,47 @@ export async function resolveInspectionPropertyId(inspectionRecordId: string, kn
 }
 
 /**
- * Re-upload a stored photo URL to HubSpot Files and return its File ID, so it can
- * be attached to a ticket note (hs_attachment_ids needs File IDs, not URLs — our
- * answers only keep URLs). RETURN_EXISTING dedupes on re-submit (same name+folder
- * returns the existing file id, no duplicate, no 409). null on any failure.
+ * Recurring-services "leave a note" write: create a HubSpot Note and associate it
+ * to the PROPERTY and to each of its associated LISTING records. Powers the grass/
+ * pool fail Slack "Leave Note on Property" action (the note the Recurring Team
+ * leaves lands on the property + the active listing). Best-effort per association;
+ * returns the note id + how many listings were linked. Uses the v4 "default"
+ * association (same primary/unlabeled link the file-note path uses).
  */
+export async function createFailReviewNote(args: { propertyId: string; body: string }): Promise<{ noteId: string | null; listingCount: number }> {
+  const propertyId = (args.propertyId || '').trim();
+  const body = (args.body || '').slice(0, 60000);
+  if (!propertyId || !body) return { noteId: null, listingCount: 0 };
+  const { property } = typeIds();
+  const lid = listingTypeId();
+
+  const created = await hubspotFetch('/crm/v3/objects/notes', {
+    method: 'POST',
+    body: JSON.stringify({ properties: { hs_timestamp: new Date().toISOString(), hs_note_body: body } }),
+  });
+  const noteId = String(created?.id || '');
+  if (!noteId) return { noteId: null, listingCount: 0 };
+
+  // Associate to the property.
+  try {
+    await hubspotFetch(`/crm/v4/objects/notes/${noteId}/associations/default/${property}/${propertyId}`, { method: 'PUT' });
+  } catch (e) { console.warn('[fail-note] property association failed:', e); }
+
+  // Associate to each listing linked to the property (usually the active one).
+  let listingCount = 0;
+  try {
+    const resp = await hubspotFetch(`/crm/v4/objects/${property}/${propertyId}/associations/${lid}?limit=100`);
+    const ids = (resp?.results || []).map((r: any) => String(r.toObjectId ?? r.id)).filter(Boolean);
+    for (const id of ids) {
+      try {
+        await hubspotFetch(`/crm/v4/objects/notes/${noteId}/associations/default/${lid}/${id}`, { method: 'PUT' });
+        listingCount++;
+      } catch (e) { console.warn(`[fail-note] listing ${id} association failed:`, e); }
+    }
+  } catch (e) { console.warn('[fail-note] listing lookup failed:', e); }
+
+  return { noteId, listingCount };
+}
 export async function uploadPhotoUrlForAttachment(photoUrl: string): Promise<string | null> {
   const u = (photoUrl || '').trim();
   if (!u) return null;

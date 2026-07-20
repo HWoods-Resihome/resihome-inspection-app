@@ -239,6 +239,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               recordId: id,
               propertyAddressSnapshot: existing?.propertyAddressSnapshot || '',
               inspectorName: existing?.inspectorName || '',
+              propertyRecordId: existing?.propertyRecordId || null,
             },
             answers,
             { baseUrl },
