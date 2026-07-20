@@ -1055,6 +1055,21 @@ export async function fetchPoolProperties(force = false): Promise<PoolProperty[]
   return out;
 }
 
+// A valid property GROUP name for the Property object — custom objects don't
+// have HubSpot's built-in 'propertyinformation' group, so we must use one that
+// actually exists (property creation requires a real groupName). Read the
+// object's groups once and use the first; cached for the process.
+let _propertyGroupName: string | null = null;
+async function propertyGroupName(): Promise<string> {
+  if (_propertyGroupName) return _propertyGroupName;
+  try {
+    const resp = await hubspotFetch(`/crm/v3/properties/${typeIds().property}/groups`);
+    const first = (resp?.results || []).find((g: any) => g?.name)?.name;
+    _propertyGroupName = String(first || 'information');
+  } catch { _propertyGroupName = 'information'; }
+  return _propertyGroupName;
+}
+
 /** Set a Property's pool_servicer (ResiHome | Tenant Service). Provisions the
  *  property if missing, then busts the pools cache. Throws on failure. */
 let _poolServicerPropEnsured = false;
@@ -1067,7 +1082,7 @@ async function ensurePoolServicerProp(): Promise<void> {
       method: 'POST',
       body: JSON.stringify({
         name: POOL_SERVICER_PROPERTY, label: 'Pool Servicer', type: 'enumeration', fieldType: 'select',
-        groupName: 'propertyinformation',
+        groupName: await propertyGroupName(),
         options: [
           { label: POOL_SERVICER_RESIHOME, value: POOL_SERVICER_RESIHOME, displayOrder: 0 },
           { label: POOL_SERVICER_TENANT, value: POOL_SERVICER_TENANT, displayOrder: 1 },
@@ -1146,7 +1161,7 @@ async function ensurePoolNoteProp(): Promise<void> {
   try {
     await hubspotFetch(`/crm/v3/properties/${typeIds().property}`, {
       method: 'POST',
-      body: JSON.stringify({ name: POOL_SERVICER_NOTE_PROPERTY, label: 'Pool Servicer Note', type: 'string', fieldType: 'textarea', groupName: 'propertyinformation' }),
+      body: JSON.stringify({ name: POOL_SERVICER_NOTE_PROPERTY, label: 'Pool Servicer Note', type: 'string', fieldType: 'textarea', groupName: await propertyGroupName() }),
     });
     _poolNotePropEnsured = true;
   } catch (e: any) {
