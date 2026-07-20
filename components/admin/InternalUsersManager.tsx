@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isInternalEmail } from '@/lib/userAccess';
+import { useAppDialog } from '@/components/AppDialog';
 
 type CapKey = 'active' | 'inspections' | 'services' | 'insights' | 'admin';
 type BoolCap = 'active' | 'services' | 'insights' | 'admin';
@@ -49,11 +50,13 @@ const fmtLogin = (iso: string | null): string => {
 type Tri = 'any' | 'yes' | 'no';
 
 export function InternalUsersManager() {
+  const dialog = useAppDialog();
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState<UserRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [removingEmail, setRemovingEmail] = useState<string | null>(null);
 
   // Staged edits: email → { cap: bool } (+ inspections: level). Effective value
   // = edit ?? row.access[cap].
@@ -87,6 +90,29 @@ export function InternalUsersManager() {
       try { localStorage.setItem(SNAP_KEY, JSON.stringify(list)); } catch { /* quota */ }
     } catch (e: any) { setError(String(e?.message || e)); }
   }, []);
+  // Hard-remove a user: archives their HubSpot seat + drops them off the roster
+  // and revokes all access. Confirmed; seed admins/self are blocked server-side.
+  async function removeUser(u: UserRow) {
+    const ok = await dialog.confirm(
+      `Remove ${u.name || u.email}?\n\nThey'll be archived in HubSpot and lose all ResiWalk access. Every internal user is auto-granted access, so removal is the only way to fully revoke it. This drops them from this list.`,
+      { confirmLabel: 'Remove User' });
+    if (!ok) return;
+    setRemovingEmail(u.email);
+    try {
+      const r = await fetch('/api/admin/users', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: u.email }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setUsers((cur) => (cur || []).filter((x) => x.email !== u.email));
+      setEdits((prev) => { const { [u.email]: _gone, ...rest } = prev; return rest; });
+      if (d.hubspotArchived === false) {
+        void dialog.alert(`${u.name || u.email} was removed from ResiWalk, but the HubSpot seat wasn't archived: ${d.hubspotReason || 'unknown'}. They no longer have app access regardless.`);
+      }
+    } catch (e: any) { void dialog.alert(`Could not remove the user: ${e?.message || e}`); }
+    finally { setRemovingEmail(null); }
+  }
+
   // Paint the last snapshot instantly on open (no spinner on reopen), then
   // reconcile in the background — mirrors the vendor management page.
   useEffect(() => {
@@ -338,6 +364,16 @@ export function InternalUsersManager() {
                               </div>
                             );
                           })}
+                          {/* Remove — archives the HubSpot seat + revokes all
+                              access. Hidden for seed admins (can't be removed). */}
+                          {!u.seed && (
+                            <div className="pt-2.5">
+                              <button type="button" onClick={() => void removeUser(u)} disabled={removingEmail === u.email}
+                                className="text-[13px] font-heading font-semibold text-red-600 hover:underline disabled:opacity-50">
+                                {removingEmail === u.email ? 'Removing…' : 'Remove User'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

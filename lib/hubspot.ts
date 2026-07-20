@@ -3075,6 +3075,26 @@ export async function fetchUsers(): Promise<HubSpotUser[]> {
   return out;
 }
 
+/** Archive (remove) a HubSpot settings user by email. Looks up their user id,
+ *  then DELETEs the user seat (/settings/v3/users/{id}). Requires the
+ *  settings.users.write scope. Returns { archived, reason }: archived=false with
+ *  a reason when the user isn't found or the API rejects it (e.g. missing scope)
+ *  — so the caller can still apply the app-level removal and surface why HubSpot
+ *  didn't take. Best-effort; never throws. */
+export async function archiveHubspotUser(email: string | null | undefined): Promise<{ archived: boolean; reason?: string }> {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return { archived: false, reason: 'no email' };
+  try {
+    const users = await fetchUsers();
+    const u = users.find((x) => x.email.trim().toLowerCase() === e);
+    if (!u?.id) return { archived: false, reason: 'not a HubSpot user (no seat to archive)' };
+    await hubspotFetch(`/settings/v3/users/${encodeURIComponent(u.id)}`, { method: 'DELETE' });
+    return { archived: true };
+  } catch (err: any) {
+    return { archived: false, reason: String(err?.message || err).slice(0, 200) };
+  }
+}
+
 // Active HubSpot users only. A user that's deactivated/removed has their OWNER
 // record archived, so the set of non-archived owners is the authoritative
 // "currently active" list. The owner record ALSO carries the person's
@@ -6509,6 +6529,11 @@ export interface AppUserRecord {
   services?: boolean;
   insights?: boolean;
   admin?: boolean;
+  // Hard-removed by an admin (archived in HubSpot): drops off the roster AND
+  // loses all access, even though login-activity/inspector records still list
+  // the email. Distinct from active:false (a shown-but-deactivated user).
+  removed?: boolean;
+  removedAt?: string;
   updatedAt?: string;
   updatedByEmail?: string;
 }

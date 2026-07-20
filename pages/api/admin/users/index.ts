@@ -18,8 +18,8 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { isInternalEmail, INTERNAL_EMAIL_ALLOWLIST } from '@/lib/userAccess';
 import { readLoginActivity } from '@/lib/loginActivity';
-import { readAppUsers, readAppAdmins, readInsightsUsers, fetchActiveUsers, fetchVendorAdminList, completedInspectorDirectory } from '@/lib/hubspot';
-import { applyUserPatches, isSeedUserEmail, type UserPatch } from '@/lib/userManagement';
+import { readAppUsers, readAppAdmins, readInsightsUsers, fetchActiveUsers, fetchVendorAdminList, completedInspectorDirectory, archiveHubspotUser } from '@/lib/hubspot';
+import { applyUserPatches, removeUser, isSeedUserEmail, type UserPatch } from '@/lib/userManagement';
 
 // The roster fans out ~7 HubSpot reads (login activity, overrides, the active-
 // users allowlist, vendor list, admins, insights, completed-inspector scan).
@@ -63,7 +63,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           .map((e) => e.trim().toLowerCase())
           // Allowlisted staffers always show, even if a (test) vendor Company
           // exists with the same email — the person outranks the company here.
-          .filter((e) => e && e.includes('@') && (!vendorEmails.has(e) || INTERNAL_EMAIL_ALLOWLIST.has(e))),
+          // Hard-REMOVED users (archived by an admin) drop off the roster.
+          .filter((e) => e && e.includes('@') && !overrides[e]?.removed && (!vendorEmails.has(e) || INTERNAL_EMAIL_ALLOWLIST.has(e))),
       ));
       const users = emails.map((email) => {
         const act = activity[email] || {};
@@ -111,6 +112,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  res.setHeader('Allow', 'GET, POST');
+  // DELETE { email } → hard-remove a user: archive their HubSpot seat AND mark
+  // them removed in the override store (drops off the roster + loses all access
+  // — since every internal user is otherwise auto-granted, removal is the only
+  // way to fully revoke). Seed admins are protected. The HubSpot archive is
+  // best-effort: the app-level removal takes effect regardless, and any HubSpot
+  // failure reason is surfaced so the admin knows a seat may linger.
+  if (req.method === 'DELETE') {
+    const email = String((req.body || {}).email || '').trim().toLowerCase();
+    if (!email || !email.includes('@')) return res.status(400).json({ error: 'A valid email is required.' });
+    if (isSeedUserEmail(email)) return res.status(400).json({ error: 'Built-in admins cannot be removed.' });
+    if (email === String(session.email).trim().toLowerCase()) return res.status(400).json({ error: 'You cannot remove yourself.' });
+    try {
+      const ok = await removeUser(email, session.email);
+      if (!ok) return res.status(500).json({ error: 'Could not remove the user.' });
+      const hs = await archiveHubspotUser(email);   // best-effort seat archive
+      return res.status(200).json({ ok: true, hubspotArchived: hs.archived, hubspotReason: hs.reason || null });
+    } catch (e: any) {
+      return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
+    }
+  }
+
+  res.setHeader('Allow', 'GET, POST, DELETE');
   return res.status(405).json({ error: 'Method not allowed' });
 }

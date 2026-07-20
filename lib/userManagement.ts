@@ -54,7 +54,37 @@ export async function isResiwalkActive(email: string | null | undefined): Promis
   if (!e) return false;
   if (isSeed(e)) return true;
   const ov = await getUserOverride(e);
+  if (ov?.removed) return false;   // hard-removed → no access at all
   return ov?.active !== false; // default active unless explicitly turned off
+}
+
+/** Has an admin hard-removed this user (archived)? Removed users are hidden from
+ *  the roster and denied everywhere. Seed admins can never be removed. */
+export async function isUserRemoved(email: string | null | undefined): Promise<boolean> {
+  const e = norm(email);
+  if (!e || isSeed(e)) return false;
+  return (await getUserOverride(e))?.removed === true;
+}
+
+/** Hard-remove a user: mark them removed (drops off the roster + loses access).
+ *  The HubSpot-seat archive is done by the caller (API) so this stays pure to
+ *  the override store. Seed admins are protected. */
+export async function removeUser(email: string | null | undefined, byEmail?: string | null): Promise<boolean> {
+  const e = norm(email);
+  if (!e || isSeed(e)) return false;
+  const by = norm(byEmail);
+  const ok = await mutateAppUsers((cur) => {
+    const next: AppUsersMap = { ...cur };
+    const rec: AppUserRecord = { ...(next[e] || {}) };
+    rec.removed = true;
+    rec.active = false;
+    rec.removedAt = new Date().toISOString();
+    if (by) rec.updatedByEmail = by;
+    next[e] = rec;
+    return next;
+  });
+  bustUserOverridesCache();
+  return ok;
 }
 
 /** Inspections access is TRI-STATE:
