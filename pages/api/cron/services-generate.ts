@@ -12,6 +12,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { runServiceGeneration } from '@/lib/services/generate';
 import { easternTodayISO } from '@/lib/services/time';
 import { recordErrorEvent } from '@/lib/errorLog';
+import { reclaimTenantServicePools } from '@/lib/hubspot';
 
 export const config = { maxDuration: 300 };
 
@@ -24,6 +25,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const today = easternTodayISO();
   try {
+    // Pools upkeep FIRST: any Tenant-Service pool that has left Tenant Leased is
+    // flipped back to ResiHome, so this same run re-enrolls it into pool orders.
+    const poolsReclaimed = await reclaimTenantServicePools().catch((e) => {
+      console.warn('[cron/services-generate] pool reclaim failed:', String(e?.message || e).slice(0, 160));
+      return 0;
+    });
     const report = await runServiceGeneration(true, today);
     if (report === null) return res.status(200).json({ ok: true, skipped: true, reason: 'Service objects not configured.' });
     console.log('[cron/services-generate]', JSON.stringify({ created: report.created, skipped: report.skippedExisting, errors: report.errors, backlog: report.communityBacklogAlerts.length }));
@@ -52,7 +59,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         meta: { created: report.created, skippedExisting: report.skippedExisting, errors: report.errors, today },
       });
     }
-    return res.status(200).json({ ok: true, created: report.created, skippedExisting: report.skippedExisting, errors: report.errors });
+    return res.status(200).json({ ok: true, created: report.created, skippedExisting: report.skippedExisting, errors: report.errors, poolsReclaimed });
   } catch (e: any) {
     console.error('[cron/services-generate] failed:', e);
     // A hard failure of the whole run → Admin ▸ Error Log (best-effort).

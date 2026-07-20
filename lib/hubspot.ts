@@ -928,7 +928,7 @@ export async function fetchPropertyStatusOptions(): Promise<{ label: string; val
  */
 export async function searchPropertiesForCoverage(
   opts: { portfolios?: string[]; regions?: string[]; statuses?: string[]; limit?: number } = {},
-): Promise<{ id: string; address: string; locality: string; region: string; portfolio: string; status: string; rrqcPassDate: string }[]> {
+): Promise<{ id: string; address: string; locality: string; region: string; portfolio: string; status: string; rrqcPassDate: string; poolFee: number; poolServicer: string }[]> {
   const { property: typeId } = typeIds();
   const limit = Math.min(Math.max(opts.limit || 1000, 1), 2000);
   const filters: any[] = [];
@@ -938,8 +938,10 @@ export async function searchPropertiesForCoverage(
   if (PROPERTY_EXCLUDE_STATUSES.length) filters.push({ propertyName: PROPERTY_STATUS_PROPERTY, operator: 'NOT_IN', values: PROPERTY_EXCLUDE_STATUSES });
   // rrqc_pass_date is projected so enrollment criteria like "RRQC Pass Date is
   // known" can be evaluated per property (Rules Engine). Optional field — absent → ''.
-  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'portfolio', PROPERTY_STATUS_PROPERTY, 'rrqc_pass_date'];
-  const out: { id: string; address: string; locality: string; region: string; portfolio: string; status: string; rrqcPassDate: string }[] = [];
+  // pool_fee + pool_servicer support the "Pool Fee > $0" enrollment criterion
+  // and the Tenant-Service exclusion in generation.
+  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'portfolio', PROPERTY_STATUS_PROPERTY, 'rrqc_pass_date', 'pool_fee', POOL_SERVICER_PROPERTY];
+  const out: { id: string; address: string; locality: string; region: string; portfolio: string; status: string; rrqcPassDate: string; poolFee: number; poolServicer: string }[] = [];
   try {
     let after: string | undefined;
     do {
@@ -955,12 +957,15 @@ export async function searchPropertiesForCoverage(
         const city = String(p.city || '').trim();
         const st = String(p.state_code || p.state || '').trim();
         const zip = String(p.zip_code || p.zip || '').trim();
+        const feeN = Number(String(p.pool_fee ?? '').trim());
         out.push({
           id: String(r.id), address: address || `(Property ${r.id})`,
           locality: [city, st, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
           region: String(p.region || '').trim(), portfolio,
           status,
           rrqcPassDate: String(p.rrqc_pass_date || '').trim(),
+          poolFee: Number.isFinite(feeN) ? feeN : 0,
+          poolServicer: String(p[POOL_SERVICER_PROPERTY] || '').trim(),
         });
         if (out.length >= limit) return out;
       }
@@ -968,6 +973,126 @@ export async function searchPropertiesForCoverage(
     } while (after);
   } catch (e) { console.warn('[coverage] property search failed:', e); }
   return out;
+}
+
+// ── Pools ──────────────────────────────────────────────────────────────────
+// The `pool_servicer` Property field decides who services a pool: 'ResiHome'
+// (in-house — our rules generate pool work orders) or 'Tenant Service' (the
+// tenant handles it — excluded from generation WHILE the home is Tenant Leased;
+// flipped back to 'ResiHome' automatically once it leaves that status). Name +
+// values are env-overridable in case the portal uses different labels.
+export const POOL_SERVICER_PROPERTY = (process.env.POOL_SERVICER_PROPERTY || 'pool_servicer').trim();
+export const POOL_SERVICER_RESIHOME = (process.env.POOL_SERVICER_RESIHOME || 'ResiHome').trim();
+export const POOL_SERVICER_TENANT = (process.env.POOL_SERVICER_TENANT || 'Tenant Service').trim();
+export const POOL_TENANT_LEASED_STATUS = (process.env.POOL_TENANT_LEASED_STATUS || 'Tenant Leased').trim();
+
+export interface PoolProperty {
+  id: string; address: string; city: string; state: string; zip: string;
+  locality: string; region: string; status: string;
+  poolFee: number; poolServicer: string;   // '' when unset → treated as ResiHome (in-house)
+}
+
+/** Every Property with a pool_fee > 0, projecting the pool_servicer + address
+ *  parts + region/status — the Pools tab roster. Cached ~10 min; a pool_servicer
+ *  write busts it. Fail-open → []. */
+let _poolPropsCache: { at: number; list: PoolProperty[] } | null = null;
+export function bustPoolPropertiesCache(): void { _poolPropsCache = null; }
+export async function fetchPoolProperties(force = false): Promise<PoolProperty[]> {
+  if (!force && _poolPropsCache && Date.now() - _poolPropsCache.at < 10 * 60 * 1000) return _poolPropsCache.list;
+  const { property: typeId } = typeIds();
+  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', PROPERTY_STATUS_PROPERTY, 'pool_fee', POOL_SERVICER_PROPERTY];
+  const out: PoolProperty[] = [];
+  try {
+    let after: string | undefined;
+    do {
+      const body: any = {
+        // pool_fee is set (has a value) — the >0 test is applied in JS since the
+        // field may be stored as a string in some portals.
+        filterGroups: [{ filters: [{ propertyName: 'pool_fee', operator: 'HAS_PROPERTY' }] }],
+        properties: projection, limit: 100, sorts: [{ propertyName: 'address', direction: 'ASCENDING' }],
+      };
+      if (after) body.after = after;
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, { method: 'POST', body: JSON.stringify(body) });
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        const fee = Number(String(p.pool_fee ?? '').trim());
+        if (!Number.isFinite(fee) || fee <= 0) continue;
+        const status = String(p[PROPERTY_STATUS_PROPERTY] || '').trim();
+        if (EXCLUDE_STATUS_SET.has(status)) continue;   // hide sold/not-managed
+        const city = String(p.city || '').trim();
+        const state = String(p.state_code || p.state || '').trim();
+        const zip = String(p.zip_code || p.zip || '').trim();
+        out.push({
+          id: String(r.id),
+          address: String(p.address || '').trim() || `(Property ${r.id})`,
+          city, state, zip,
+          locality: [city, state, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
+          region: String(p.region || '').trim(),
+          status,
+          poolFee: fee,
+          poolServicer: String(p[POOL_SERVICER_PROPERTY] || '').trim(),
+        });
+      }
+      after = resp.paging?.next?.after;
+    } while (after && out.length < 5000);
+  } catch (e) { console.warn('[pools] property search failed:', e); if (!out.length) return _poolPropsCache?.list || []; }
+  _poolPropsCache = { at: Date.now(), list: out };
+  return out;
+}
+
+/** Set a Property's pool_servicer (ResiHome | Tenant Service). Provisions the
+ *  property if missing, then busts the pools cache. Throws on failure. */
+let _poolServicerPropEnsured = false;
+async function ensurePoolServicerProp(): Promise<void> {
+  if (_poolServicerPropEnsured) return;
+  try { await hubspotFetch(`/crm/v3/properties/${typeIds().property}/${POOL_SERVICER_PROPERTY}`); _poolServicerPropEnsured = true; return; }
+  catch { /* create below */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${typeIds().property}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: POOL_SERVICER_PROPERTY, label: 'Pool Servicer', type: 'enumeration', fieldType: 'select',
+        groupName: 'propertyinformation',
+        options: [
+          { label: POOL_SERVICER_RESIHOME, value: POOL_SERVICER_RESIHOME, displayOrder: 0 },
+          { label: POOL_SERVICER_TENANT, value: POOL_SERVICER_TENANT, displayOrder: 1 },
+        ],
+      }),
+    });
+    _poolServicerPropEnsured = true;
+  } catch (e: any) {
+    const s = `${e?.message || ''} ${e?.detail || ''}`;
+    if (/409|already exists|PROPERTY_EXISTS/i.test(s)) { _poolServicerPropEnsured = true; return; }
+    throw new Error(`Could not provision the ${POOL_SERVICER_PROPERTY} Property field: ${s.slice(0, 200)} — grant crm.schemas.custom.write (or create a "Pool Servicer" dropdown with ResiHome/Tenant Service manually).`);
+  }
+}
+export async function setPoolServicer(propertyId: string, value: string): Promise<void> {
+  const id = String(propertyId || '').trim();
+  const v = value === POOL_SERVICER_TENANT ? POOL_SERVICER_TENANT : POOL_SERVICER_RESIHOME;
+  if (!/^\d+$/.test(id)) throw new Error('Invalid property id');
+  const { property: typeId } = typeIds();
+  const write = () => hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: { [POOL_SERVICER_PROPERTY]: v } }) });
+  try { await write(); }
+  catch (e: any) {
+    if (isMissingPropertyError(e, POOL_SERVICER_PROPERTY)) { await ensurePoolServicerProp(); await write(); }
+    else throw e;
+  }
+  bustPoolPropertiesCache();
+}
+
+/** Cron helper: any pool marked Tenant Service that has LEFT Tenant Leased is
+ *  flipped back to ResiHome, so the pool rule picks it up on its next run.
+ *  Returns the count flipped. Bounded per run; best-effort. */
+export async function reclaimTenantServicePools(cap = 200): Promise<number> {
+  const pools = await fetchPoolProperties(true).catch(() => [] as PoolProperty[]);
+  const stale = pools.filter((p) => p.poolServicer === POOL_SERVICER_TENANT && p.status !== POOL_TENANT_LEASED_STATUS).slice(0, cap);
+  let flipped = 0;
+  for (const p of stale) {
+    try { await setPoolServicer(p.id, POOL_SERVICER_RESIHOME); flipped++; }
+    catch (e) { console.warn(`[pools] reclaim flip failed for ${p.id}:`, String((e as any)?.message || e).slice(0, 120)); }
+  }
+  if (flipped) { bustPoolPropertiesCache(); console.log(`[pools] reclaimed ${flipped} pool(s) back to ${POOL_SERVICER_RESIHOME}`); }
+  return flipped;
 }
 
 /**

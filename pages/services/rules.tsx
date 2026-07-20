@@ -70,6 +70,9 @@ const PROPERTY_FIELDS: { field: string; options: string[] }[] = [
   // value options are the leasing pipeline stages, loaded live (see dealStages).
   // e.g. enroll when the deal enters "Pre-Lease Compliance" → a move-in clean.
   { field: 'Deal Stage', options: [] },
+  // Numeric gate on the property's pool_fee — "is greater than $0" enrolls homes
+  // that carry a pool fee (i.e. have a pool we service). No enum values.
+  { field: 'Pool Fee', options: [] },
 ];
 const FIELD_NAMES = PROPERTY_FIELDS.map((f) => f.field);
 const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field)?.options ?? [];
@@ -79,9 +82,13 @@ const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field
 // (no field history at generation time). Showing only field-valid operators keeps
 // a rule from being built on an operator the generator won't actually evaluate.
 const opsFor = (field: string): string[] =>
-  field === 'RRQC Pass Date' ? ['is known'] : ['is', 'is any of', 'is not', 'is not any of'];
+  field === 'RRQC Pass Date' ? ['is known']
+    : field === 'Pool Fee' ? ['is greater than $0']
+      : ['is', 'is any of', 'is not', 'is not any of'];
 // Operators that select a SET of values (multi-select UI + JSON array value).
 const isMultiOp = (op: string): boolean => op === 'is any of' || op === 'is not any of';
+// Operators that take NO value (self-contained gates).
+const NO_VALUE_OPS = new Set(['is known', 'is greater than $0']);
 interface EnrollCriterion { field: string; op: string; vals: string[] }
 // Community + Landscaping + Grass Cut defaults its enrollment to "RRQC Pass Date
 // is known" (the per-house eligibility gate). Admin can add/change criteria after.
@@ -657,10 +664,10 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
     if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
     // Enrollment criteria are OPTIONAL — with none, every applicable property
     // enrolls immediately. Any criterion that IS present still needs a value.
-    if (rule.enrollCriteria.some((c) => c.op !== 'is known' && !c.vals.length)) saveErrors.push('Every enrollment criterion needs a value.');
+    if (rule.enrollCriteria.some((c) => !NO_VALUE_OPS.has(c.op) && !c.vals.length)) saveErrors.push('Every enrollment criterion needs a value.');
     if (rule.stopEnabled && rule.stopMode === 'condition') {
       if (!rule.stopCriteria.length) saveErrors.push('Add at least one stop criterion.');
-      if (rule.stopCriteria.some((c) => c.op !== 'is known' && !c.vals.length)) saveErrors.push('Every stop criterion needs a value.');
+      if (rule.stopCriteria.some((c) => !NO_VALUE_OPS.has(c.op) && !c.vals.length)) saveErrors.push('Every stop criterion needs a value.');
     }
     if (rule.stopEnabled && rule.stopMode === 'date' && !rule.stopDate) saveErrors.push('Set a stop date.');
     if (rule.stopEnabled && rule.stopMode === 'count' && (!rule.stopCount || Number(rule.stopCount) < 1)) saveErrors.push('Set the number of services before stopping.');
@@ -1164,6 +1171,8 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                     <div className="flex-1 min-w-0">
                       {c.op === 'is known' ? (
                         <span className="text-[12px] text-gray-500">has any date</span>
+                      ) : c.op === 'is greater than $0' ? (
+                        <span className="text-[12px] text-gray-500">pool fee &gt; $0</span>
                       ) : isMultiOp(c.op) ? (
                         <MultiFilter label="Values" sheet options={enrollValueOptsFor(c.field)} selected={c.vals}
                           onChange={(next) => patchCrit(i, { vals: next })} className={`${pick} w-full`} />
@@ -1216,6 +1225,8 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                           <div className="flex-1 min-w-0">
                             {c.op === 'is known' ? (
                               <span className="text-[12px] text-gray-500">has any date</span>
+                            ) : c.op === 'is greater than $0' ? (
+                              <span className="text-[12px] text-gray-500">pool fee &gt; $0</span>
                             ) : isMultiOp(c.op) ? (
                               <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
                                 onChange={(next) => patchStopCrit(i, { vals: next })} className={`${pick} w-full`} />

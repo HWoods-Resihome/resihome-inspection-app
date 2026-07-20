@@ -88,6 +88,9 @@ export default function VendorManagement() {
   const [inspPropError, setInspPropError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Vendors | Pools tab toggle.
+  const [tab, setTab] = useState<'vendors' | 'pools'>('vendors');
+
   // Search / filters / sort (mirrors the inspections home controls).
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -525,6 +528,17 @@ export default function VendorManagement() {
               <span className="font-heading font-bold">Vendor field provisioning: </span>{inspPropError}
             </div>
           )}
+          {/* Vendors | Pools tab toggle. */}
+          <div className="flex rounded-lg border border-gray-300 overflow-hidden mb-3 max-w-xs">
+            {(['vendors', 'pools'] as const).map((t) => (
+              <button key={t} type="button" onClick={() => setTab(t)} aria-pressed={tab === t}
+                className={`flex-1 px-4 py-2 text-[13px] font-heading font-bold capitalize border-l first:border-l-0 border-gray-300 transition-colors ${tab === t ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'pools' ? <PoolsTab /> : (<>
           {/* Search · Filters · Sort · Add — mirrors the inspections home row. */}
           <div className="flex items-center gap-2 mb-2">
             <div className="relative flex-1 min-w-0">
@@ -651,8 +665,128 @@ export default function VendorManagement() {
               })}
             </div>
           )}
+          </>)}
         </div>
       </main>
+    </>
+  );
+}
+
+// ── Pools tab ────────────────────────────────────────────────────────────────
+// Full property list where pool_fee > 0: address · city/st/zip · region, the
+// pool fee, and the pool_servicer (ResiHome vs Tenant Service). Marking a pool
+// "Tenant Service" removes it from new pool work orders while the home is Tenant
+// Leased; it's auto-flipped back to ResiHome once it leaves that status.
+interface PoolRow {
+  id: string; address: string; city: string; state: string; zip: string;
+  locality: string; region: string; status: string; poolFee: number; poolServicer: string;
+}
+function PoolsTab() {
+  const dialog = useAppDialog();
+  const [pools, setPools] = useState<PoolRow[]>([]);
+  const [servicers, setServicers] = useState<{ resihome: string; tenant: string }>({ resihome: 'ResiHome', tenant: 'Tenant Service' });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const SNAP = 'resiwalk_pools_v1';
+
+  async function load(refresh = false) {
+    setError(null);
+    try {
+      const r = await fetch(`/api/admin/pools${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      const list: PoolRow[] = Array.isArray(d.pools) ? d.pools : [];
+      setPools(list);
+      if (d.servicers) setServicers(d.servicers);
+      try { localStorage.setItem(SNAP, JSON.stringify(list)); } catch { /* quota */ }
+    } catch (e: any) { setError(String(e?.message || e)); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => {
+    try { const s = JSON.parse(localStorage.getItem(SNAP) || 'null'); if (Array.isArray(s) && s.length) { setPools(s); setLoading(false); } } catch { /* ignore */ }
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function setServicer(p: PoolRow, value: string) {
+    if (p.poolServicer === value || (!p.poolServicer && value === servicers.resihome)) return;
+    setBusyId(p.id);
+    const prev = p.poolServicer;
+    setPools((cur) => cur.map((x) => (x.id === p.id ? { ...x, poolServicer: value } : x)));
+    try {
+      const r = await fetch('/api/admin/pools', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: p.id, poolServicer: value }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    } catch (e: any) {
+      setPools((cur) => cur.map((x) => (x.id === p.id ? { ...x, poolServicer: prev } : x)));
+      void dialog.alert(`Could not update pool servicer: ${e?.message || e}`);
+    } finally { setBusyId(null); }
+  }
+
+  const q = search.trim().toLowerCase();
+  const visible = q
+    ? pools.filter((p) => `${p.address} ${p.locality} ${p.region}`.toLowerCase().includes(q))
+    : pools;
+  const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  const isTenant = (p: PoolRow) => p.poolServicer === servicers.tenant;
+
+  return (
+    <>
+      <div className="relative mb-3">
+        <input type="text" placeholder="Search address, city, or zip…" value={search} onChange={(e) => setSearch(e.target.value)}
+          className="w-full text-sm border border-gray-300 rounded-lg pl-3 pr-9 py-2.5 bg-white focus:outline-none focus:border-brand" />
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+      </div>
+      {loading ? (
+        <div className="text-center py-16"><div className="inline-block w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin" /></div>
+      ) : error ? (
+        <div className="bg-white border border-red-200 rounded-xl p-4 text-sm text-red-700">Could not load pools: {error}</div>
+      ) : (
+        <>
+          <p className="text-[12px] text-gray-500 mb-2">{visible.length} pool propert{visible.length === 1 ? 'y' : 'ies'}{q ? ' (filtered)' : ''} · fee &gt; $0. Set a pool to <span className="font-heading font-semibold">Tenant Service</span> to hold it out of new pool orders while Tenant Leased.</p>
+          <div className="space-y-2.5">
+            {visible.map((p) => (
+              <section key={p.id} className={`bg-white border rounded-xl shadow-sm p-3.5 ${busyId === p.id ? 'opacity-60 pointer-events-none' : 'border-gray-200'}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-heading font-bold text-[15px] text-ink break-words">{p.address}</div>
+                    {p.locality && <div className="text-[12px] text-gray-500">{p.locality}</div>}
+                    <div className="text-[11px] text-gray-400 mt-0.5">
+                      {p.region || '—'} · Pool fee {money(p.poolFee)}{p.status ? ` · ${p.status}` : ''}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-2.5">
+                  <span className="text-[13px] text-gray-700 shrink-0">Pool Servicer</span>
+                  <div className="flex rounded-lg border border-gray-300 overflow-hidden" role="radiogroup" aria-label={`Pool servicer for ${p.address}`}>
+                    {[servicers.resihome, servicers.tenant].map((val) => {
+                      const on = val === servicers.tenant ? isTenant(p) : !isTenant(p);
+                      return (
+                        <button key={val} type="button" role="radio" aria-checked={on} onClick={() => void setServicer(p, val)}
+                          className={`px-2.5 py-1.5 text-[11px] font-heading font-bold border-l first:border-l-0 border-gray-300 ${on ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                          {val}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {isTenant(p) && (
+                  <p className="text-[11px] text-amber-600 mt-1.5">
+                    {p.status === 'Tenant Leased'
+                      ? 'Held out of new pool orders while Tenant Leased.'
+                      : 'Not Tenant Leased — will auto-return to ResiHome on the next generation run.'}
+                  </p>
+                )}
+              </section>
+            ))}
+            {visible.length === 0 && <p className="text-sm text-gray-500 text-center py-8">No pool properties{q ? ' match your search' : ' (fee > $0)'}.</p>}
+          </div>
+        </>
+      )}
     </>
   );
 }

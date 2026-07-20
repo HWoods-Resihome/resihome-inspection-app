@@ -21,7 +21,7 @@
  * follow the active cadence (else First Order Due, else +5); vendors are assigned by
  * equal-volume rotation with sticky-per-address (see ./rotation).
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, POOL_SERVICER_TENANT, POOL_TENANT_LEASED_STATUS } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { DEFAULT_GRASS_TIERS } from './grassPricing';
@@ -55,7 +55,7 @@ function parseCriteria(p: Record<string, any>): Criterion[] {
   const f = String(p.enroll_field || '');
   return f ? [{ field: f, op: String(p.enroll_op || 'is'), vals: parseVals(p.enroll_value) }] : [];
 }
-interface EvalProp { rrqcPassDate: string; status: string; dealStages?: string[] }
+interface EvalProp { rrqcPassDate: string; status: string; dealStages?: string[]; poolFee?: number; poolServicer?: string }
 // A property's leasing deals + their current stage id (for per-deal enrollment).
 interface DealEntry { dealId: string; stage: string }
 // Negating operators — the value set is a membership test, and these invert it.
@@ -67,6 +67,8 @@ function isNegatingOp(op: string): boolean {
 function matchCriterion(prop: EvalProp, c: Criterion): boolean {
   const field = c.field.toLowerCase();
   if (/rrqc/.test(field)) return c.op === 'is known' ? !!prop.rrqcPassDate : true;
+  // Pool Fee > $0 — enrolls homes that carry a pool fee (a pool we service).
+  if (/pool\s*fee/.test(field)) return (prop.poolFee ?? 0) > 0;
   // Deal Stage — the property's associated leasing deal(s) current stage id(s).
   // vals hold stage ids; membership match, negated for "is not"/"is not any of".
   if (/deal/.test(field)) {
@@ -260,10 +262,19 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
   );
   const perDeal = oneTime && dealTriggerStages.size > 0;
 
+  // Pools worktype: a pool set to "Tenant Service" is held out of new orders
+  // WHILE the home is Tenant Leased (the tenant handles it then). It's flipped
+  // back to ResiHome automatically once the home leaves that status (the
+  // reclaim step in the services-generate cron), so it re-enrolls next run.
+  const isPools = String(p.worktype || '') === 'pools';
+  const poolHeldOut = (prop: EvalProp): boolean =>
+    isPools && prop.poolServicer === POOL_SERVICER_TENANT && prop.status === POOL_TENANT_LEASED_STATUS;
+
   const enrolled = candidates
     .map(enrich)
     .filter((prop) => enrollOk(prop))
-    .filter((prop) => !stopHit(prop));   // stop condition met → exclude
+    .filter((prop) => !stopHit(prop))    // stop condition met → exclude
+    .filter((prop) => !poolHeldOut(prop));   // Tenant-Service pool, still Tenant Leased → hold out
 
   const out: Target[] = [];
   for (const prop of enrolled) {
@@ -289,6 +300,7 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
 function isEvaluableCriterion(c: Criterion): boolean {
   const f = (c.field || '').toLowerCase();
   if (/rrqc/.test(f)) return c.op === 'is known'; // only "is known" is evaluable for the date field
+  if (/pool\s*fee/.test(f)) return true;          // "is greater than $0" — self-contained gate
   if (/deal/.test(f)) return c.vals.some((v) => v.trim() !== '');
   if (/status/.test(f)) return c.vals.some((v) => v.trim() !== '');
   return false;

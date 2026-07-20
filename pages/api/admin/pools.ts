@@ -1,0 +1,53 @@
+/**
+ * /api/admin/pools  (app-admin only)
+ *
+ *  GET   → { pools } — every Property with pool_fee > 0 (address/city/st/zip,
+ *          region, status, pool fee, and the pool_servicer field).
+ *  PATCH { id, poolServicer: 'ResiHome' | 'Tenant Service' } → set the servicer.
+ *          Marking a pool "Tenant Service" excludes it from new pool work
+ *          orders WHILE the home is Tenant Leased; it's auto-flipped back to
+ *          ResiHome once it leaves that status (services-generate cron).
+ */
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { getSessionFromRequest } from '@/lib/auth';
+import { isAppAdmin } from '@/lib/adminAccess';
+import { fetchPoolProperties, setPoolServicer, POOL_SERVICER_RESIHOME, POOL_SERVICER_TENANT } from '@/lib/hubspot';
+
+export const config = { maxDuration: 60 };
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const session = await getSessionFromRequest(req).catch(() => null);
+  if (!session?.email) return res.status(401).json({ error: 'Not authenticated' });
+  if (!(await isAppAdmin(session.realEmail || session.email).catch(() => false))) {
+    return res.status(403).json({ error: 'Admin only.' });
+  }
+
+  if (req.method === 'GET') {
+    try {
+      const force = String(req.query.refresh || '') === '1';
+      const pools = await fetchPoolProperties(force);
+      return res.status(200).json({ pools, servicers: { resihome: POOL_SERVICER_RESIHOME, tenant: POOL_SERVICER_TENANT } });
+    } catch (e: any) {
+      return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
+    }
+  }
+
+  if (req.method === 'PATCH') {
+    const b = req.body || {};
+    const id = String(b.id || '').trim();
+    const val = String(b.poolServicer || '').trim();
+    if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'A valid property id is required.' });
+    if (val !== POOL_SERVICER_RESIHOME && val !== POOL_SERVICER_TENANT) {
+      return res.status(400).json({ error: `poolServicer must be "${POOL_SERVICER_RESIHOME}" or "${POOL_SERVICER_TENANT}".` });
+    }
+    try {
+      await setPoolServicer(id, val);
+      return res.status(200).json({ ok: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
+    }
+  }
+
+  res.setHeader('Allow', 'GET, PATCH');
+  return res.status(405).json({ error: 'Method not allowed' });
+}
