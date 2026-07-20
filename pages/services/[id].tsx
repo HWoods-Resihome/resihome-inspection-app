@@ -1060,15 +1060,15 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const costDetail = svc.vendorCost != null ? (
     <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">
       <div className="flex justify-between gap-2">
-        <span className="text-gray-500">Vendor Cost</span>
-        <span className="font-semibold text-ink tabular-nums text-right">
-          {money(svc.vendorCost)}
-          {/* Community grass-cut master: the per-home math, inline to the right.
+        <span className="text-gray-500">
+          Vendor Cost
+          {/* Community grass-cut master: the per-home math beside the label.
               Shown to everyone — vendors and internal both see it. */}
           {svc.isMaster && svc.coveredCount != null && svc.perRate != null && (
-            <span className="ml-1.5 font-normal text-[12px] text-gray-400">({svc.coveredCount.toLocaleString()} Home{svc.coveredCount === 1 ? '' : 's'} × {money(svc.perRate)}/home)</span>
+            <span className="ml-1.5 text-[12px] text-gray-400">({svc.coveredCount.toLocaleString()} Home{svc.coveredCount === 1 ? '' : 's'} × {money(svc.perRate)}/home)</span>
           )}
         </span>
+        <span className="font-semibold text-ink tabular-nums text-right shrink-0">{money(svc.vendorCost)}</span>
       </div>
       {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
       {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
@@ -1113,13 +1113,13 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const editableCostDetail = svc.vendorCost != null ? (
     <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">
       <div className="flex justify-between gap-2">
-        <span className="text-gray-500">Vendor Cost</span>
-        <span className="font-semibold text-ink tabular-nums text-right">
-          {money(liveCost.vendor)}
+        <span className="text-gray-500">
+          Vendor Cost
           {svc.isMaster && svc.coveredCount != null && svc.perRate != null && (
-            <span className="ml-1.5 font-normal text-[12px] text-gray-400">({svc.coveredCount.toLocaleString()} Home{svc.coveredCount === 1 ? '' : 's'} × {money(svc.perRate)}/home)</span>
+            <span className="ml-1.5 text-[12px] text-gray-400">({svc.coveredCount.toLocaleString()} Home{svc.coveredCount === 1 ? '' : 's'} × {money(svc.perRate)}/home)</span>
           )}
         </span>
+        <span className="font-semibold text-ink tabular-nums text-right shrink-0">{money(liveCost.vendor)}</span>
       </div>
       {isInternal && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{liveCost.markup}%</span></div>}
       {isInternal && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(liveCost.client)}</span></div>}
