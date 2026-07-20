@@ -1060,6 +1060,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const costDetail = svc.vendorCost != null ? (
     <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">
       <div className="flex justify-between"><span className="text-gray-500">Vendor Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.vendorCost)}</span></div>
+      {/* Community grass-cut master: how the vendor cost is built (properties × rate).
+          Shown to everyone — vendors and internal both see the per-home math. */}
+      {svc.isMaster && svc.coveredCount != null && svc.perRate != null && (
+        <div className="text-[12px] text-gray-400 pl-0">{svc.coveredCount.toLocaleString()} propert{svc.coveredCount === 1 ? 'y' : 'ies'} × {money(svc.perRate)}/home</div>
+      )}
       {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
       {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
     </CollapsibleSection>
@@ -1103,6 +1108,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const editableCostDetail = svc.vendorCost != null ? (
     <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">
       <div className="flex justify-between"><span className="text-gray-500">Vendor Cost</span><span className="font-semibold text-ink tabular-nums">{money(liveCost.vendor)}</span></div>
+      {svc.isMaster && svc.coveredCount != null && svc.perRate != null && (
+        <div className="text-[12px] text-gray-400 pl-0">{svc.coveredCount.toLocaleString()} propert{svc.coveredCount === 1 ? 'y' : 'ies'} × {money(svc.perRate)}/home</div>
+      )}
       {isInternal && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{liveCost.markup}%</span></div>}
       {isInternal && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(liveCost.client)}</span></div>}
       {liveCost.changed && liveCost.reason && (
