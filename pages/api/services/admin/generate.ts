@@ -21,12 +21,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const ok = (await servicesEnabled(email).catch(() => false)) && (await isAppAdmin(email).catch(() => false));
   if (!ok) return res.status(403).json({ error: 'Admin only' });
 
-  const apply = req.query.apply === '1' || req.query.apply === 'true';
-  const onlyRuleId = typeof req.query.ruleId === 'string' && req.query.ruleId.trim() ? req.query.ruleId.trim() : undefined;
+  // POST = live PREVIEW dry-run of an unsaved rule config (body.ruleProps).
+  // Always read-only, never applies — an apply must go through the saved record.
+  const isPreview = req.method === 'POST';
+  const apply = !isPreview && (req.query.apply === '1' || req.query.apply === 'true');
+  const onlyRuleId = isPreview
+    ? (String((req.body || {}).ruleId || '').trim() || 'preview')
+    : (typeof req.query.ruleId === 'string' && req.query.ruleId.trim() ? req.query.ruleId.trim() : undefined);
+  const overrideProps = isPreview && (req.body || {}).ruleProps && typeof req.body.ruleProps === 'object'
+    ? req.body.ruleProps as Record<string, any> : undefined;
   const today = typeof req.query.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.today)
     ? req.query.today : easternTodayISO();
   try {
-    const report = await runServiceGeneration(apply, today, onlyRuleId);
+    const report = await runServiceGeneration(apply, today, onlyRuleId, overrideProps);
     if (report === null) return res.status(200).json({ configured: false, mode: apply ? 'apply' : 'dry-run', note: 'Service Work Order / Service Rule object type ids not set — nothing to generate.' });
     return res.status(200).json(report);
   } catch (e: any) {

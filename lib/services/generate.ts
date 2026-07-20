@@ -21,7 +21,7 @@
  * follow the active cadence (else First Order Due, else +5); vendors are assigned by
  * equal-volume rotation with sticky-per-address (see ./rotation).
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, POOL_SERVICER_TENANT, POOL_TENANT_LEASED_STATUS } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, POOL_SERVICER_TENANT } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { DEFAULT_GRASS_TIERS } from './grassPricing';
@@ -262,19 +262,19 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
   );
   const perDeal = oneTime && dealTriggerStages.size > 0;
 
-  // Pools worktype: a pool set to "Tenant Service" is held out of new orders
-  // WHILE the home is Tenant Leased (the tenant handles it then). It's flipped
-  // back to ResiHome automatically once the home leaves that status (the
-  // reclaim step in the services-generate cron), so it re-enrolls next run.
+  // Pools worktype exception list: a pool whose pool_servicer is "Tenant Service"
+  // is held out of new pool orders (the tenant handles it). HubSpot owns the
+  // lifecycle of that field — a workflow flips it back to ResiHome when the home
+  // leaves Tenant Leased — so ResiWalk simply honors the CURRENT value here.
   const isPools = String(p.worktype || '') === 'pools';
   const poolHeldOut = (prop: EvalProp): boolean =>
-    isPools && prop.poolServicer === POOL_SERVICER_TENANT && prop.status === POOL_TENANT_LEASED_STATUS;
+    isPools && prop.poolServicer === POOL_SERVICER_TENANT;
 
   const enrolled = candidates
     .map(enrich)
     .filter((prop) => enrollOk(prop))
     .filter((prop) => !stopHit(prop))    // stop condition met → exclude
-    .filter((prop) => !poolHeldOut(prop));   // Tenant-Service pool, still Tenant Leased → hold out
+    .filter((prop) => !poolHeldOut(prop));   // Tenant-Service pool → excluded
 
   const out: Target[] = [];
   for (const prop of enrolled) {
@@ -346,13 +346,24 @@ export interface GenerateResult {
  * Compute (and, when apply, create) the Service Work Orders the active rules call
  * for. Returns null when the Service Work Order object isn't configured yet.
  */
-export async function runServiceGeneration(apply: boolean, todayISO: string, onlyRuleId?: string): Promise<GenerateResult | null> {
+export async function runServiceGeneration(
+  apply: boolean, todayISO: string, onlyRuleId?: string,
+  // PREVIEW: dry-run the rule as the admin has it CONFIGURED RIGHT NOW (unsaved
+  // edits), without persisting. When provided these props replace the matching
+  // persisted rule (or stand in as a synthetic rule when it's brand-new). Only
+  // honored in dry-run — an apply must go through the saved record.
+  overrideProps?: Record<string, any>,
+): Promise<GenerateResult | null> {
   const allRules = await searchServiceRuleRecords();
   const existing = await readServiceWorkOrderKeys();
   if (allRules === null || existing === null) return null; // objects not configured
   // Ad-hoc: run a single rule (the "generate missing now" button) vs. the whole
   // set (nightly). Either way the enrollment-key dedup below prevents duplicates.
-  const rules = onlyRuleId ? allRules.filter((r) => r.id === onlyRuleId) : allRules;
+  let rules = onlyRuleId ? allRules.filter((r) => r.id === onlyRuleId) : allRules;
+  if (!apply && overrideProps && onlyRuleId) {
+    const base = allRules.find((r) => r.id === onlyRuleId);
+    rules = [{ id: onlyRuleId, props: { ...(base?.props || {}), ...overrideProps } }];
+  }
 
   // Enrollment keys with a currently-open (non-terminal) order — dedup set.
   const openKeys = new Set(existing.filter((e) => OPEN_STATUSES.has(e.status)).map((e) => e.key).filter(Boolean));

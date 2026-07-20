@@ -747,7 +747,7 @@ function PoolsTab() {
         <div className="bg-white border border-red-200 rounded-xl p-4 text-sm text-red-700">Could not load pools: {error}</div>
       ) : (
         <>
-          <p className="text-[12px] text-gray-500 mb-2">{visible.length} pool propert{visible.length === 1 ? 'y' : 'ies'}{q ? ' (filtered)' : ''} · fee &gt; $0. Set a pool to <span className="font-heading font-semibold">Tenant Service</span> to hold it out of new pool orders while Tenant Leased.</p>
+          <p className="text-[12px] text-gray-500 mb-2">{visible.length} pool propert{visible.length === 1 ? 'y' : 'ies'}{q ? ' (filtered)' : ''} · fee &gt; $0. Set a pool to <span className="font-heading font-semibold">Tenant Service</span> to hold it out of new pool orders.</p>
           <div className="space-y-2.5">
             {visible.map((p) => (
               <section key={p.id} className={`bg-white border rounded-xl shadow-sm p-3.5 ${busyId === p.id ? 'opacity-60 pointer-events-none' : 'border-gray-200'}`}>
@@ -775,11 +775,7 @@ function PoolsTab() {
                   </div>
                 </div>
                 {isTenant(p) && (
-                  <p className="text-[11px] text-amber-600 mt-1.5">
-                    {p.status === 'Tenant Leased'
-                      ? 'Held out of new pool orders while Tenant Leased.'
-                      : 'Not Tenant Leased — will auto-return to ResiHome on the next generation run.'}
-                  </p>
+                  <p className="text-[11px] text-amber-600 mt-1.5">Excluded from new pool orders (tenant handles it). Returns to ResiHome via the HubSpot workflow when it leaves Tenant Leased.</p>
                 )}
               </section>
             ))}

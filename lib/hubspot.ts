@@ -1080,20 +1080,9 @@ export async function setPoolServicer(propertyId: string, value: string): Promis
   bustPoolPropertiesCache();
 }
 
-/** Cron helper: any pool marked Tenant Service that has LEFT Tenant Leased is
- *  flipped back to ResiHome, so the pool rule picks it up on its next run.
- *  Returns the count flipped. Bounded per run; best-effort. */
-export async function reclaimTenantServicePools(cap = 200): Promise<number> {
-  const pools = await fetchPoolProperties(true).catch(() => [] as PoolProperty[]);
-  const stale = pools.filter((p) => p.poolServicer === POOL_SERVICER_TENANT && p.status !== POOL_TENANT_LEASED_STATUS).slice(0, cap);
-  let flipped = 0;
-  for (const p of stale) {
-    try { await setPoolServicer(p.id, POOL_SERVICER_RESIHOME); flipped++; }
-    catch (e) { console.warn(`[pools] reclaim flip failed for ${p.id}:`, String((e as any)?.message || e).slice(0, 120)); }
-  }
-  if (flipped) { bustPoolPropertiesCache(); console.log(`[pools] reclaimed ${flipped} pool(s) back to ${POOL_SERVICER_RESIHOME}`); }
-  return flipped;
-}
+// NOTE: flipping pool_servicer back to ResiHome when a home leaves Tenant Leased
+// is handled by a HubSpot WORKFLOW (owner's choice), not ResiWalk. ResiWalk only
+// READS pool_servicer as the generation exception list (see generate.ts).
 
 /**
  * Fetch a single Property's stored coordinates by record id. Used to validate

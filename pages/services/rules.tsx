@@ -712,18 +712,30 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
     finally { setGenBusy(false); }
   };
 
-  // Fetch the accurate would-create count for the open (saved) rule.
+  // LIVE would-create count for the rule AS CONFIGURED RIGHT NOW (unsaved edits
+  // included). We POST the current rule's props to the dry-run — it never
+  // applies, so it's safe to re-run on every edit. Debounced so typing/toggling
+  // doesn't spam the server. For a saved rule the real recordId is sent so the
+  // "missing only" dedup against existing orders stays accurate; a brand-new
+  // rule uses a 'preview' id (nothing exists yet → all targets are new).
+  const rulePreviewKey = useMemo(() => (rule ? JSON.stringify(ruleToProps(rule)) : ''), [rule]);
   useEffect(() => {
-    if (!canGenerate || !rule?.recordId) { setWouldCreate(null); return; }
+    if (!canGenerate || !rule) { setWouldCreate(null); return; }
     let alive = true;
     setWouldCreate(null);
-    fetch(`/api/services/admin/generate?ruleId=${encodeURIComponent(rule.recordId)}`)
-      .then((r) => r.json())
-      .then((d) => { if (alive) { setWouldCreate(typeof d.wouldCreate === 'number' ? d.wouldCreate : 0); setMasterCoverage(typeof d.masterCoverage === 'number' ? d.masterCoverage : null); } })
-      .catch(() => { if (alive) { setWouldCreate(null); setMasterCoverage(null); } });
-    return () => { alive = false; };
+    const ctrl = new AbortController();
+    const t = window.setTimeout(() => {
+      fetch('/api/services/admin/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
+        body: JSON.stringify({ ruleId: rule.recordId || 'preview', ruleProps: ruleToProps(rule) }),
+      })
+        .then((r) => r.json())
+        .then((d) => { if (alive) { setWouldCreate(typeof d.wouldCreate === 'number' ? d.wouldCreate : 0); setMasterCoverage(typeof d.masterCoverage === 'number' ? d.masterCoverage : null); } })
+        .catch((e) => { if (alive && e?.name !== 'AbortError') { setWouldCreate(null); setMasterCoverage(null); } });
+    }, 600);
+    return () => { alive = false; ctrl.abort(); window.clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rule?.recordId, canGenerate, wcReload]);
+  }, [rulePreviewKey, canGenerate, wcReload]);
 
   const sec = 'bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm';
   const lbl = FIELD_LABEL;
