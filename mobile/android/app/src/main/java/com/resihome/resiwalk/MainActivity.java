@@ -5,6 +5,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.autofill.AutofillManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 
@@ -46,14 +48,14 @@ public class MainActivity extends BridgeActivity {
         WebView webView = this.bridge.getWebView();
 
         // Suppress the Android autofill bar (the "passwords / addresses / payment
-        // methods" row that floats above the keyboard) for every field in the
-        // webview. On number fields like the Rate Card Quantity it's pure noise,
-        // and ResiWALK signs in via Google OAuth in the SYSTEM browser — there is
-        // no in-webview password field that benefits from autofill — so turning it
-        // off webview-wide is safe. Marks the WebView and all its web inputs as
-        // not-important-for-autofill (API 26+; older devices just keep default).
+        // methods" chip row that floats above the keyboard) for the webview's fields
+        // — pure noise on search/number/text inputs. ROUTE-AWARE: default OFF, but
+        // the web app re-enables it ONLY on the login screen (via
+        // AndroidAutofill.setEnabled(true) from lib/disableAutofill) so credential
+        // autofill still works there. API 26+; older devices keep the default.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             webView.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+            webView.addJavascriptInterface(new AutofillBridge(webView), "AndroidAutofill");
         }
 
         webView.setWebViewClient(
@@ -79,6 +81,36 @@ public class MainActivity extends BridgeActivity {
                 }
             }
         );
+    }
+
+    /**
+     * JS ↔ native bridge for route-aware autofill. The web app calls
+     * `AndroidAutofill.setEnabled(true)` on the login screen and `false` everywhere
+     * else (lib/disableAutofill → syncNativeAutofill), toggling whether the OS
+     * offers autofill (the keyboard chip strip) for the webview's fields.
+     */
+    private class AutofillBridge {
+        private final WebView webView;
+        AutofillBridge(WebView webView) { this.webView = webView; }
+
+        @JavascriptInterface
+        public void setEnabled(final boolean enabled) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+                    webView.setImportantForAutofill(enabled
+                        ? View.IMPORTANT_FOR_AUTOFILL_AUTO
+                        : View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+                    if (!enabled) {
+                        // Drop any in-progress autofill session so the strip goes
+                        // away immediately, not just on the next field focus.
+                        AutofillManager afm = getSystemService(AutofillManager.class);
+                        if (afm != null) afm.cancel();
+                    }
+                }
+            });
+        }
     }
 
     /** True only for the OAuth start path, and only if not already marked native. */
