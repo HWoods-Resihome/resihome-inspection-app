@@ -85,6 +85,21 @@ export async function renderServicePdfBuffer(id: string, opts: { variant: 'vendo
     scope: p.scope === 'community' ? 'Community' : 'SFR', vendor: p.vendor_name || '',
     status: p.status || '', dueDate: normDate(p.due_date), submittedAt: normDate(p.submitted_at), completedAt: normDate(p.completed_at),
     vendorCost: money(p.vendor_cost), markupPct: p.markup_pct != null ? String(p.markup_pct) : '', clientCost: money(p.client_cost),
+    // Community grass-cut master with a common area → the two-line vendor breakdown.
+    ...(() => {
+      const commonArea = Number(p.common_area_cost);
+      const homes = Number(p.covered_property_count);
+      const rate = Number(p.per_property_rate);
+      const isMaster = p.scope === 'community' && worktype === 'landscaping' && subtype === 'cut'
+        && !String(p.master_service_id || '').trim() && !!String(p.covered_property_ids || '').trim();
+      if (!isMaster || !(Number.isFinite(commonArea) && commonArea > 0)) return {};
+      const houseSub = Number.isFinite(homes) && Number.isFinite(rate) ? Math.round(homes * rate * 100) / 100 : NaN;
+      return {
+        houseCuts: Number.isFinite(houseSub) ? money(houseSub) : '',
+        commonArea: money(commonArea),
+        houseCutsLabel: Number.isFinite(homes) && Number.isFinite(rate) ? `House Cuts (${homes} × ${money(rate)})` : 'House Cuts',
+      };
+    })(),
     adjustment: p.vendor_cost_adjustment && Number(p.vendor_cost_adjustment) > 0 ? money(p.vendor_cost_adjustment) : '', adjustmentReason: p.vendor_cost_adjustment_reason || '',
     aiVerdict: p.ai_verdict || '', aiNotes: p.ai_notes || '',
     reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: p.reviewed_by || '',

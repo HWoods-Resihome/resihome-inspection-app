@@ -45,7 +45,7 @@ interface ServiceView {
   before: string[]; after: string[]; petBefore: string[]; petAfter: string[];
   // Community grass-cut billing split: a master carries a covered-property snapshot
   // + per-property rate; a child points back to its master via masterServiceId.
-  isMaster: boolean; coveredCount: number | null; perRate: number | null;
+  isMaster: boolean; coveredCount: number | null; perRate: number | null; commonAreaCost: number | null;
   forBilling: string; masterServiceId: string; splitAt: string;
 }
 
@@ -113,7 +113,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         before: splitUrls(p.before_photo_urls), after: splitUrls(p.after_photo_urls),
         petBefore: splitUrls(p.pet_before_photo_urls), petAfter: splitUrls(p.pet_after_photo_urls),
         isMaster: p.scope === 'community' && p.worktype === 'landscaping' && p.subtype === 'cut' && !String(p.master_service_id || '').trim() && !!String(p.covered_property_ids || '').trim(),
-        coveredCount: num(p.covered_property_count), perRate: num(p.per_property_rate),
+        coveredCount: num(p.covered_property_count), perRate: num(p.per_property_rate), commonAreaCost: num(p.common_area_cost),
         forBilling: p.for_billing || '', masterServiceId: String(p.master_service_id || '').trim(), splitAt: normDate(p.split_at),
       };
     }
@@ -160,6 +160,36 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 };
 
 const money = (n: number | null | undefined) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Vendor-cost row(s) for the Cost Detail. A community grass-cut master WITH a
+// common area shows a two-line breakdown — House Cuts (N × rate) + Common Area —
+// above the total, so the vendor sees exactly what makes up their one bill. Any
+// other order (incl. a master without common areas) shows the single Vendor Cost
+// line (masters keep the inline "N Homes × rate/home" note). `total` is the
+// order's current vendor total (saved figure, or the live figure while completing).
+function CostVendorRows({ svc, total }: { svc: ServiceView; total: number | null }) {
+  const homes = svc.coveredCount ?? 0;
+  const rate = svc.perRate ?? 0;
+  const homesLabel = svc.isMaster && svc.coveredCount != null && svc.perRate != null
+    ? `${homes.toLocaleString()} Home${homes === 1 ? '' : 's'} × ${money(rate)}/home` : '';
+  const amt = 'font-semibold text-ink tabular-nums text-right shrink-0';
+  if (svc.isMaster && (svc.commonAreaCost || 0) > 0) {
+    const houseSub = Math.round(homes * rate * 100) / 100;
+    return (
+      <>
+        <div className="flex justify-between gap-2"><span className="text-gray-500">House Cuts{homesLabel && <span className="ml-1.5 text-[12px] text-gray-400">({homesLabel})</span>}</span><span className={amt}>{money(houseSub)}</span></div>
+        <div className="flex justify-between gap-2"><span className="text-gray-500">Common Area</span><span className={amt}>{money(svc.commonAreaCost)}</span></div>
+        <div className="flex justify-between gap-2 border-t border-gray-100 pt-1 mt-1"><span className="text-gray-600 font-semibold">Vendor Cost</span><span className={amt}>{money(total)}</span></div>
+      </>
+    );
+  }
+  return (
+    <div className="flex justify-between gap-2">
+      <span className="text-gray-500">Vendor Cost{homesLabel && <span className="ml-1.5 text-[12px] text-gray-400">({homesLabel})</span>}</span>
+      <span className={amt}>{money(total)}</span>
+    </div>
+  );
+}
 
 // ── Camera-backed photo group (recycles the 1099 in-camera + gallery experience) ──
 function CameraPhotos({ label, required, urls, onChange, address, propertyRecordId, upload }: {
@@ -1120,17 +1150,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   // mini-table below, so this stays the plain saved figures.
   const costDetail = svc.vendorCost != null ? (
     <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">
-      <div className="flex justify-between gap-2">
-        <span className="text-gray-500">
-          Vendor Cost
-          {/* Community grass-cut master: the per-home math beside the label.
-              Shown to everyone — vendors and internal both see it. */}
-          {svc.isMaster && svc.coveredCount != null && svc.perRate != null && (
-            <span className="ml-1.5 text-[12px] text-gray-400">({svc.coveredCount.toLocaleString()} Home{svc.coveredCount === 1 ? '' : 's'} × {money(svc.perRate)}/home)</span>
-          )}
-        </span>
-        <span className="font-semibold text-ink tabular-nums text-right shrink-0">{money(svc.vendorCost)}</span>
-      </div>
+      <CostVendorRows svc={svc} total={svc.vendorCost} />
       {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
       {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
     </CollapsibleSection>
@@ -1173,15 +1193,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
   const editableCostDetail = svc.vendorCost != null ? (
     <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">
-      <div className="flex justify-between gap-2">
-        <span className="text-gray-500">
-          Vendor Cost
-          {svc.isMaster && svc.coveredCount != null && svc.perRate != null && (
-            <span className="ml-1.5 text-[12px] text-gray-400">({svc.coveredCount.toLocaleString()} Home{svc.coveredCount === 1 ? '' : 's'} × {money(svc.perRate)}/home)</span>
-          )}
-        </span>
-        <span className="font-semibold text-ink tabular-nums text-right shrink-0">{money(liveCost.vendor)}</span>
-      </div>
+      <CostVendorRows svc={svc} total={liveCost.vendor} />
       {isInternal && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{liveCost.markup}%</span></div>}
       {isInternal && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(liveCost.client)}</span></div>}
       {liveCost.changed && liveCost.reason && (

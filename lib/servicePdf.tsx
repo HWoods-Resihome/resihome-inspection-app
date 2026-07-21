@@ -13,6 +13,9 @@ export interface ServicePdfData {
   worktype: string; subtype: string; scope: string; vendor: string; status: string;
   dueDate: string; submittedAt: string; completedAt: string;   // YYYY-MM-DD
   vendorCost: string; markupPct: string; clientCost: string;   // pre-formatted ($ / %)
+  // Community grass-cut master WITH a common area: the two-line breakdown that sums
+  // to Vendor Cost (blank otherwise). Pre-formatted $.
+  houseCuts?: string; commonArea?: string; houseCutsLabel?: string;
   adjustment: string; adjustmentReason: string;
   aiVerdict: string; aiNotes: string;
   reviewDecision: string; reviewNotes: string; reviewedBy: string;
@@ -142,6 +145,12 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
           if (d.dueDate) tiles.push({ label: 'Due Date', value: humanDate(d.dueDate) });
           if (d.submittedAt) tiles.push({ label: 'Submitted', value: humanDate(d.submittedAt) });
           else if (d.completedAt) tiles.push({ label: 'Completed', value: humanDate(d.completedAt) });
+          // Vendor invoice for a community master with a common area: show the two
+          // lines that make up the total (House Cuts + Common Area) then the total.
+          if (d.variant === 'vendor' && d.houseCuts && d.commonArea) {
+            tiles.push({ label: d.houseCutsLabel || 'House Cuts', value: d.houseCuts });
+            tiles.push({ label: 'Common Area', value: d.commonArea });
+          }
           const costVal = d.variant === 'client' ? d.clientCost : d.vendorCost;
           if (costVal) tiles.push({ label: d.variant === 'client' ? 'Client Cost' : 'Vendor Cost', value: costVal });
           return tiles.length ? (

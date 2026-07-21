@@ -123,6 +123,9 @@ interface Rule {
   propsMode: 'all' | 'list';                // 'all' = every applicable property incl. future adds; 'list' = a fixed subset
   includedProps: string[];                  // property scope, 'list' mode only: the specific property ids included
   vendorCost: string; markupPct: string;   // strings so decimals can be typed freely
+  // Community grass-cut only: optionally include a common-area cut with its own
+  // cost, folded into the master total and prorated across the per-property lines.
+  includeCommonAreas: boolean; commonAreaCost: string;
   // Grass-cut tier payouts (property grass cuts only) — optional; blank/undefined
   // falls back to DEFAULT_GRASS_TIERS at generation.
   grassStandard?: string; grassOvergrown?: string; grassHeavy?: string;
@@ -204,7 +207,7 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'landscaping', subtype: 'cut', petStations: false, scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [], description: descriptionFor('landscaping', 'cut'),
+    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [
       { id: 11, unit: 'days', interval: '14', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
@@ -217,7 +220,7 @@ const SEED: Rule[] = [
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [], description: descriptionFor('landscaping', 'cut'),
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [{ id: 21, unit: 'days', interval: '7', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
@@ -231,7 +234,7 @@ const SEED: Rule[] = [
     // Deal Stage carried no generator logic; enroll on Property Status until an
     // event trigger is actually built.)
     id: 3, name: 'ATL Move-In Cleans', active: true, worktype: 'cleaning', subtype: 'move_in_clean', petStations: false, scope: 'property',
-    portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', vendors: [], description: descriptionFor('cleaning', 'move_in_clean'),
+    portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('cleaning', 'move_in_clean'),
     recurring: false,
     cadences: [],
     initialDueDays: '2', skipMonths: [],
@@ -288,6 +291,7 @@ function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule 
     portfolios: parseArr(p.portfolios_json), communities: parseArr(p.communities_json), regions: parseArr(p.regions_json),
     propsMode: p.props_mode === 'list' ? 'list' : 'all', includedProps: parseArr(p.included_props_json),
     vendorCost: p.vendor_cost != null ? String(p.vendor_cost) : '', markupPct: p.markup_pct != null ? String(p.markup_pct) : '',
+    includeCommonAreas: p.include_common_areas === 'true', commonAreaCost: p.common_area_cost != null ? String(p.common_area_cost) : '',
     grassStandard: p.grass_rate_standard != null ? String(p.grass_rate_standard) : undefined,
     grassOvergrown: p.grass_rate_overgrown != null ? String(p.grass_rate_overgrown) : undefined,
     grassHeavy: p.grass_rate_heavy != null ? String(p.grass_rate_heavy) : undefined,
@@ -332,6 +336,9 @@ function ruleToProps(r: Rule): Record<string, any> {
   };
   if (r.vendorCost !== '') props.vendor_cost = Number(r.vendorCost);
   if (r.markupPct !== '') props.markup_pct = Number(r.markupPct);
+  // Community grass-cut common areas (persisted always; only used for that combo).
+  props.include_common_areas = r.includeCommonAreas ? 'true' : 'false';
+  if (r.commonAreaCost !== '') props.common_area_cost = Number(r.commonAreaCost);
   // Persist grass tiers only for property grass cuts (and only when set).
   if (r.scope === 'property' && r.worktype === 'landscaping' && r.subtype === 'cut') {
     if (r.grassStandard != null && r.grassStandard !== '') props.grass_rate_standard = Number(r.grassStandard);
@@ -593,7 +600,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', startDelayDays: '', stopEnabled: false, stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', startDelayDays: '', stopEnabled: false, stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
     openRule(id);
   };
   const duplicateRule = () => {
@@ -683,6 +690,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   }, [rules, rule]);
 
   const clientCost = rule ? (parseFloat(rule.vendorCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100)) : 0;
+  const commonAreaClient = rule ? (parseFloat(rule.commonAreaCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100)) : 0;
   const saveErrors: string[] = [];
   if (rule) {
     if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per work type + subtype (here: ${wtLabelD(rule.worktype)} · ${subLabelD(rule.worktype, rule.subtype)}).`);
@@ -1093,6 +1101,29 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                   <PriceField label="Vendor Cost" adorn="$" minDecimals={2} colClass="shrink-0 w-24" value={rule.vendorCost} onChange={(v) => patch({ vendorCost: v })} />
                   <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
                   <PriceField label="Client Cost" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
+                </div>
+              )}
+              {/* Community grass-cut only: optional common-area cut. Folded into the
+                  master total and prorated evenly across every home in the split. */}
+              {rule.scope === 'community' && rule.worktype === 'landscaping' && rule.subtype === 'cut' && (
+                <div className="mt-3 border-t border-gray-100 pt-3">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className={`${lbl} mb-0`}>Include Common Areas?</label>
+                    <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
+                      <button type="button" onClick={() => patch({ includeCommonAreas: true })} className={`px-4 py-1.5 rounded-md ${rule.includeCommonAreas ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Yes</button>
+                      <button type="button" onClick={() => patch({ includeCommonAreas: false })} className={`px-4 py-1.5 rounded-md ${!rule.includeCommonAreas ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>No</button>
+                    </div>
+                  </div>
+                  {rule.includeCommonAreas && (
+                    <>
+                      <div className="flex flex-nowrap items-end justify-center gap-4 sm:justify-start mt-2">
+                        <PriceField label="Common Area" adorn="$" minDecimals={2} colClass="shrink-0 w-24" value={rule.commonAreaCost} onChange={(v) => patch({ commonAreaCost: v })} />
+                        <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
+                        <PriceField label="Common Area Client" adorn="$" highlight readOnly colClass="shrink-0 w-28" value={commonAreaClient.toFixed(2)} />
+                      </div>
+                      <p className="text-[11px] text-gray-400 mt-1.5">Added to the master total and prorated evenly across every home in the split — the vendor completes one service; each per-property bill carries its share (house cut + common-area share).</p>
+                    </>
+                  )}
                 </div>
               )}
             </div>

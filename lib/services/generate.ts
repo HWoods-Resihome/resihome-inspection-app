@@ -525,10 +525,17 @@ export async function runServiceGeneration(
 
       if (isCommunityCut) {
         const perRate = Number.isFinite(vendorCost) ? vendorCost : 0;   // rule cost = per-property rate
-        const masterVendor = Math.round(eligibleIds.length * perRate * 100) / 100;
+        // Optional common-area cut: added to the master total on top of the house
+        // cuts. On split it's distributed evenly across the children (even
+        // distribution of the master total = per-house rate + commonArea/N), so
+        // each per-property billing line carries its prorated share.
+        const commonArea = p.include_common_areas === 'true' && Number.isFinite(Number(p.common_area_cost)) ? Math.max(0, Number(p.common_area_cost)) : 0;
+        const houseSubtotal = Math.round(eligibleIds.length * perRate * 100) / 100;
+        const masterVendor = Math.round((houseSubtotal + commonArea) * 100) / 100;
         orderProps.covered_property_ids = JSON.stringify(eligibleIds);
         orderProps.covered_property_count = eligibleIds.length;
         orderProps.per_property_rate = perRate;
+        if (commonArea > 0) orderProps.common_area_cost = commonArea;
         orderProps.for_billing = 'true';
         orderProps.vendor_cost = masterVendor;
         orderProps.client_cost = Number.isFinite(markupPct) ? Math.round(masterVendor * (1 + markupPct / 100) * 100) / 100 : masterVendor;

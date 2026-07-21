@@ -103,6 +103,9 @@ export const SERVICE_OBJECT: ObjectSpec = {
     TA('covered_property_ids', 'Covered Property Ids (JSON)'),
     NUM('covered_property_count', 'Covered Property Count'),
     NUM('per_property_rate', 'Per Property Rate'),
+    // Community grass-cut master: the common-area cut cost, folded into the master
+    // total and prorated across the per-property billing children on split.
+    NUM('common_area_cost', 'Common Area Cost'),
     DTIME('split_at', 'Split At'),
     // Grass-cut tier payouts, snapshotted from the rule at generation (property
     // grass cuts only). Submit resolves the payout from these by the answered
@@ -128,6 +131,10 @@ export const SERVICE_RULE_OBJECT: ObjectSpec = {
     SEL('props_mode', 'Property Mode', opt([['All (future-inclusive)', 'all'], ['List (fixed)', 'list']])),
     NUM('vendor_cost', 'Vendor Cost'),
     NUM('markup_pct', 'Markup %'),
+    // Community grass-cut only: include a common-area cut and its cost (folded into
+    // the master total, prorated across the per-property children on split).
+    BOOL('include_common_areas', 'Include Common Areas'),
+    NUM('common_area_cost', 'Common Area Cost'),
     // Grass-cut tier payouts (property grass cuts only). Configured in the rule's
     // pricing section; generation stamps them onto each created service.
     NUM('grass_rate_standard', 'Grass Rate — Standard'),
