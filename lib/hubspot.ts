@@ -1697,7 +1697,11 @@ function mapServiceRow(r: any): ServiceRecord {
 // another viewer (or to an admin), so the key is the vendor email (or 'all').
 interface SvcListEntry { data: ServiceRecord[] | null; at: number; inflight: Promise<ServiceRecord[] | null> | null }
 const _svcListCache = new Map<string, SvcListEntry>();
-const SVC_LIST_TTL_MS = 30_000;
+// Short TTL: a create/patch busts the cache on the CURRENT serverless instance,
+// but the page SSR can render on a DIFFERENT warm instance whose cache is still
+// valid — so a just-generated/edited service can lag until this expires there.
+// Kept small so that cross-instance staleness window stays a few seconds, not ~30.
+const SVC_LIST_TTL_MS = 8_000;
 export function bustServiceListCache(): void { _svcListCache.clear(); }
 
 export interface ServiceListOpts {
@@ -2196,6 +2200,9 @@ const SERVICE_DETAIL_PROPS = [
   'latitude', 'longitude',
   // Community grass-cut billing split (RECURRING_SERVICES_PLAN.md).
   'for_billing', 'master_service_id', 'covered_property_ids', 'covered_property_count', 'per_property_rate', 'split_at',
+  // Common-area cut cost folded into a community master's vendor total — read so
+  // the Cost Detail can show the separate "Common Area" line under House Cuts.
+  'common_area_cost',
   'hs_createdate',
 ];
 
