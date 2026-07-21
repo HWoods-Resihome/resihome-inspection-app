@@ -1,28 +1,17 @@
 /**
  * Global autofill guard.
  *
- * The OS/keyboard autofill strip (the password "key", payment "card", and address
- * "location" chips above the keyboard) appears whenever the browser/OS decides a
- * text field is autofillable. We don't want ANY of that on the app's own fields —
- * search boxes, cost inputs, notes, etc. — because none of them are credentials.
+ * Stamps `autocomplete="off"` plus the common password-manager opt-out hints on
+ * every text <input>/<textarea> on EVERY route EXCEPT the login screen (where
+ * credential autofill is wanted), including client-rendered fields (MutationObserver).
  *
- * Two layers, applied on EVERY route EXCEPT the login screen (where credential
- * autofill is wanted), to every text <input>/<textarea> — including client-
- * rendered ones (MutationObserver):
- *   1. autocomplete="off" + the common password-manager opt-out hints.
- *   2. A "readonly-until-focus" latch: the field is readOnly while idle, so at the
- *      instant the OS classifies it on focus it isn't an editable field and the
- *      autofill chips don't attach; a focus handler clears readOnly synchronously
- *      so the keyboard opens and typing works normally, and blur re-arms it.
- *
- * Chrome on Android ignores autocomplete="off" for its autofill, so layer 1 alone
- * isn't enough there — layer 2 is what actually keeps the chip strip away. Real
- * password fields are never touched (they live on /login, which is skipped).
+ * NOTE: this is best-effort. Chrome on Android IGNORES autocomplete="off" for its
+ * own autofill, so it does NOT reliably remove the keyboard's password/card/
+ * location chip strip inside the native WebView — that strip is OS-level and can
+ * only be turned off natively (WebView autofill importance) or in the device's
+ * keyboard/Autofill settings. This still helps desktop/iOS browsers and password
+ * managers, and it's harmless everywhere.
  */
-
-// input types that draw the password/card/address autofill heuristics; the latch
-// applies only to these (+ textarea) so date/number/checkbox/etc. are left alone.
-const LATCH_TYPES = new Set(['text', 'search', 'email', 'tel', 'url', '']);
 
 const isLoginPath = (): boolean => {
   try {
@@ -32,11 +21,9 @@ const isLoginPath = (): boolean => {
 };
 
 const isTextField = (el: Element): el is HTMLInputElement | HTMLTextAreaElement => {
-  const tag = el.tagName;
-  if (tag === 'TEXTAREA') return true;
-  if (tag !== 'INPUT') return false;
-  const t = (el as HTMLInputElement).type;
-  return t !== 'password' && LATCH_TYPES.has(t);
+  if (el.tagName === 'TEXTAREA') return true;
+  if (el.tagName !== 'INPUT') return false;
+  return (el as HTMLInputElement).type !== 'password';
 };
 
 function guardField(el: HTMLInputElement | HTMLTextAreaElement): void {
@@ -47,8 +34,6 @@ function guardField(el: HTMLInputElement | HTMLTextAreaElement): void {
   el.setAttribute('data-bwignore', '');        // Bitwarden
   el.setAttribute('data-form-type', 'other');  // Dashlane
   el.setAttribute('data-af-guarded', '1');
-  // Latch readOnly while idle (never on the field the user is currently in).
-  if (el !== document.activeElement) el.readOnly = true;
 }
 
 function guardTree(root: ParentNode): void {
@@ -60,22 +45,7 @@ let installed = false;
 export function installAutofillGuard(): void {
   if (installed || typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
   installed = true;
-
-  // Clearing readOnly synchronously on focus lets the keyboard open + typing work;
-  // re-arming on blur keeps the latch in place for the next focus. Both no-op on
-  // the login screen and on fields we didn't guard.
-  document.addEventListener('focusin', (e) => {
-    const el = e.target as Element | null;
-    if (el && (el as any).getAttribute?.('data-af-guarded') === '1') (el as HTMLInputElement | HTMLTextAreaElement).readOnly = false;
-  }, true);
-  document.addEventListener('focusout', (e) => {
-    const el = e.target as Element | null;
-    if (el && (el as any).getAttribute?.('data-af-guarded') === '1' && !isLoginPath()) (el as HTMLInputElement | HTMLTextAreaElement).readOnly = true;
-  }, true);
-
   guardTree(document);
-  // Client-side navigation and lazy renders add fields after first paint — catch
-  // them as they mount (the login-path check runs per batch, so login is spared).
   const obs = new MutationObserver((muts) => {
     if (isLoginPath()) return;
     for (const m of muts) {
