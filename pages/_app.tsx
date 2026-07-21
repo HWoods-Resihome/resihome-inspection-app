@@ -16,7 +16,7 @@ import { registerServiceWorker } from '@/lib/useAppUpdate';
 import { installOAuthBridge, installPushBridge, primeLocationPermissionNative, installNativeBackGuard } from '@/lib/nativeBridge';
 import { initPushOnLoad } from '@/lib/pushClient';
 import { installGlobalSync } from '@/lib/globalSync';
-import { installAutofillGuard } from '@/lib/disableAutofill';
+import { installAutofillGuard, syncNativeAutofill } from '@/lib/disableAutofill';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
 import 'leaflet/dist/leaflet.css';   // calendar/map views (inspections + services — namespaced .leaflet-* is inert elsewhere)
@@ -97,6 +97,10 @@ export default function App({ Component, pageProps }: AppProps) {
     // address location) on every text field except the login screen — none of the
     // app's own fields are credentials.
     installAutofillGuard();
+    // Keep the native WebView's autofill state in sync as the user navigates
+    // between the login screen (autofill ON) and the rest of the app (OFF).
+    Router.events.on('routeChangeComplete', syncNativeAutofill);
+    return () => { Router.events.off('routeChangeComplete', syncNativeAutofill); };
   }, []);
 
   // BULLETPROOF offline-readiness (independent of the SW install precache, which

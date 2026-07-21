@@ -41,6 +41,16 @@ function guardTree(root: ParentNode): void {
   root.querySelectorAll?.('input, textarea').forEach((el) => { if (isTextField(el)) guardField(el as HTMLInputElement | HTMLTextAreaElement); });
 }
 
+// Tell the native Android shell whether the WebView should allow OS autofill: ON
+// only on the login screen (so credential managers work there), OFF everywhere
+// else (kills the keyboard's password/card/location chip strip that the web layer
+// can't suppress). No-op in a browser / until the native shell exposes the
+// interface — call it on every route change. Native side: MainActivity toggles
+// WebView.setImportantForAutofill based on this.
+export function syncNativeAutofill(): void {
+  try { (window as any).AndroidAutofill?.setEnabled?.(isLoginPath()); } catch { /* no native bridge */ }
+}
+
 let installed = false;
 export function installAutofillGuard(): void {
   if (installed || typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
@@ -60,4 +70,5 @@ export function installAutofillGuard(): void {
   const start = () => { if (document.body) obs.observe(document.body, { childList: true, subtree: true }); };
   if (document.body) start();
   else document.addEventListener('DOMContentLoaded', start, { once: true });
+  syncNativeAutofill();   // set the native WebView autofill state for the initial route
 }
