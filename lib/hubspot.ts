@@ -1996,6 +1996,17 @@ async function writeObjectResilient(typeId: string, id: string | null, props: Re
   throw new Error('work order write failed after stripping rejected properties');
 }
 
+/** A Service Rule's display name by record id (for the audit "created by rule"
+ *  line). Null when the object isn't configured, the id is invalid, or not found. */
+export async function fetchServiceRuleName(ruleId: string): Promise<string | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
+  if (!typeId || !/^\d+$/.test(String(ruleId || ''))) return null;
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/${ruleId}?properties=rule_name`);
+    return String(resp?.properties?.rule_name || '').trim() || null;
+  } catch { return null; }
+}
+
 export async function upsertServiceRuleRecord(id: string | null, props: Record<string, any>): Promise<string | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
   if (!typeId) return null;

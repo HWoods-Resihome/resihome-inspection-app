@@ -11,7 +11,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
-import { fetchServiceWorkOrder } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, fetchServiceRuleName } from '@/lib/hubspot';
 import { readServiceAudit } from '@/lib/services/serviceAudit';
 import type { AuditEvent } from '@/lib/auditLog';
 
@@ -46,6 +46,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     };
     if (rec) {
       const p = rec.props;
+      // CREATED — date/time + WHY it exists, so an internal user can trace a service
+      // back to the Rules Engine rule that made it (or a bid / re-issue / manual add).
+      const key = String(p.enrollment_key || '');
+      const ruleId = String(p.generated_by_rule_id || '').trim();
+      let createdDetail = 'Created manually';
+      let createdMeta: Record<string, any> = {};
+      if (key.startsWith('gen:')) {
+        const name = await fetchServiceRuleName(ruleId).catch(() => null);
+        createdDetail = `Created by Rules Engine rule${name ? ` “${name}”` : ''}${ruleId ? ` (rule ${ruleId})` : ''}`;
+        createdMeta = { source: 'rule', ruleId, ruleName: name || null, enrollmentKey: key };
+      } else if (key.startsWith('bid:')) {
+        createdDetail = 'Created as a bid item from a completed service';
+        createdMeta = { source: 'bid', enrollmentKey: key };
+      } else if (key.startsWith('reissue:')) {
+        createdDetail = 'Re-issued from a prior service';
+        createdMeta = { source: 'reissue', enrollmentKey: key };
+      }
+      const createdTs = toIso(p.hs_createdate);
+      if (createdTs && !haveAction.has('create')) {
+        derived.push({ inspectionId: `svc-${id}`, action: 'create', ts: createdTs, detail: createdDetail, meta: { derived: true, ...createdMeta } });
+      }
       addDerived('submit', p.submitted_at, 'Completion submitted', p.vendor_email || undefined);
       addDerived('review', p.reviewed_at, p.review_decision ? `Review: ${p.review_decision}` : 'Reviewed', p.reviewed_by || undefined);
     }
