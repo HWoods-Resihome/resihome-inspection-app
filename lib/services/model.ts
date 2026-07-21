@@ -7,6 +7,14 @@
 
 import type { Worktype, ServiceScope } from './worktypes';
 
+// Reserved key in a service's answers_json holding a vendor "proof of service"
+// attachment (their own company invoice/PDF, usually already containing job
+// photos). When present it stands in for before/after photos: the completion form
+// no longer requires them, and the AI reviews the attachment under the knowledge-
+// base rules instead of the before/after comparison. Kept out of the form-question
+// namespace so it never renders as an answer row.
+export const PROOF_URL_KEY = 'proof_of_service_url';
+
 // Pipeline: Estimated → Assigned → Submitted → (Completed | Review).
 // On submit the service STAYS in Submitted with an "AI Processing" tag while the AI
 // reviews; the AI then either auto-completes it or routes it to Review for a human.

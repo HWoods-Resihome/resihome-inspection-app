@@ -9,7 +9,7 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
 import { DEFAULT_SERVICE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
-import { SERVICE_STATUS_STYLE, serviceStatusText, easternTodayISO, type ServiceStatus, type ServiceRecord } from '@/lib/services/model';
+import { SERVICE_STATUS_STYLE, serviceStatusText, easternTodayISO, PROOF_URL_KEY, type ServiceStatus, type ServiceRecord } from '@/lib/services/model';
 import { serviceVisibleTo } from '@/lib/services/scope';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, fetchPropertyMoveInDate, readServiceForms } from '@/lib/hubspot';
 import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
@@ -26,6 +26,7 @@ import { ServiceNotesThread } from '@/components/ServiceNotesThread';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { DatePicker } from '@/components/DatePicker';
 import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync, toDurableRef, rehydrateRef } from '@/lib/services/offlineServices';
+import { uploadProofFile } from '@/lib/photoUpload';
 
 interface ServiceView {
   id: string; live: boolean;
@@ -191,6 +192,49 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
       <CameraCapture isOpen={open} onClose={() => setOpen(false)} uploadPhoto={upload}
         addressSnapshot={address} propertyRecordId={propertyRecordId || undefined}
         onComplete={(newUrls) => { setOpen(false); const add = newUrls.filter((u) => u && !urls.includes(u)); if (add.length) onChange([...urls, ...add]); }} />
+    </div>
+  );
+}
+
+// Proof-of-service attachment: a vendor uploads their OWN company invoice (a PDF,
+// usually already containing job photos) in place of before/after photos. Shows an
+// "attached" state with a view link + remove; on submit the URL rides along in the
+// answers blob and the AI reviews the document instead of the photo comparison.
+function ProofOfService({ url, onChange }: { url: string; onChange: (url: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const attached = /^https?:\/\//i.test(url);
+  const isPdf = /\.pdf(\?|#|$)/i.test(url);
+  const pick = async (file?: File | null) => {
+    if (!file) return;
+    setErr(''); setBusy(true);
+    try { onChange(await uploadProofFile(file)); }
+    catch (e: any) { setErr(e?.message ? String(e.message).slice(0, 120) : 'Upload failed. Try again.'); }
+    finally { setBusy(false); if (inputRef.current) inputRef.current.value = ''; }
+  };
+  return (
+    <div className="border-t border-gray-100 pt-4">
+      <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1">Or attach proof of service</div>
+      <p className="text-[12px] text-gray-500 mb-2 leading-snug">Upload your completed invoice (PDF or image, with photos). This replaces the before/after photo requirement — AI will review the attachment.</p>
+      <input ref={inputRef} type="file" accept="application/pdf,image/*" className="hidden"
+        onChange={(e) => void pick(e.target.files?.[0])} />
+      {attached ? (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+          <span className="text-emerald-600 text-lg leading-none">{isPdf ? '📄' : '🖼️'}</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-semibold text-emerald-800">Proof of service attached</div>
+            <a href={url} target="_blank" rel="noopener noreferrer" className="text-[12px] text-emerald-700 underline">View attachment</a>
+          </div>
+          <button type="button" onClick={() => onChange('')} className="text-[12px] font-semibold text-gray-500 hover:text-red-600 px-2 py-1">Remove</button>
+        </div>
+      ) : (
+        <button type="button" disabled={busy} onClick={() => inputRef.current?.click()}
+          className={`w-full rounded-xl border-2 border-dashed py-3 text-[13px] font-semibold ${busy ? 'border-gray-200 text-gray-400' : 'border-gray-300 text-gray-600 hover:border-brand hover:text-brand'}`}>
+          {busy ? 'Uploading…' : '+ Attach invoice / PDF'}
+        </button>
+      )}
+      {err && <div className="text-[12px] text-red-600 mt-1.5">{err}</div>}
     </div>
   );
 }
@@ -879,9 +923,16 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     if (q.type === 'multi') return !Array.isArray(v) || v.length === 0;
     return v === undefined || v === '' || v === null;
   }), [form, answers]);
-  // Before + after photos are ALWAYS required — even when the service wasn't
-  // completed or access failed — to verify the vendor's effort on site.
-  const photosOk = before.length > 0 && after.length > 0;
+  // A vendor can attach their own company invoice (PDF/image, "proof of service")
+  // in place of before/after photos — for vendors who already photograph the job
+  // in their own platform. When attached, the AI reviews that document under the
+  // knowledge-base rules instead of the before/after comparison.
+  const proofUrl = String(answers[PROOF_URL_KEY] || '').trim();
+  const hasProof = /^https?:\/\//i.test(proofUrl);
+  // Before + after photos are required to verify the vendor's effort on site —
+  // UNLESS a proof-of-service invoice is attached, which satisfies the evidence
+  // requirement on its own.
+  const photosOk = hasProof || (before.length > 0 && after.length > 0);
   const ready = !requiredMissing && photosOk && bidValid && !submitting;
 
   const submit = async () => {
@@ -1413,8 +1464,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 </CollapsibleSection>
 
                 <CollapsibleSection title="Photos" subtitle={photoGuidance(svc.worktype, svc.subtype)}>
-                  <CameraPhotos label="Before photos" required urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
-                  <CameraPhotos label="After photos" required urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
+                  {/* When a proof-of-service invoice is attached, before/after photos are
+                      no longer required — dim the requirement asterisk to reflect that. */}
+                  <CameraPhotos label="Before photos" required={!hasProof} urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
+                  <CameraPhotos label="After photos" required={!hasProof} urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   {svc.petStations && (
                     <div className="border-t border-gray-100 pt-4 space-y-4">
                       <div className="text-[12px] font-bold uppercase tracking-wide text-brand">Pet Stations</div>
@@ -1422,6 +1475,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                       <CameraPhotos label="Pet station — after" urls={petAfter} onChange={setPetAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                     </div>
                   )}
+                  <ProofOfService url={proofUrl} onChange={(u) => setAns(PROOF_URL_KEY, u)} />
                 </CollapsibleSection>
 
                 {/* Additional-work bid — spawns an Estimated "Bid Item" for review. */}
@@ -1461,7 +1515,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   {submitting ? "Submitting…" : "Submit Completion"}
                 </button>
                 {error && <div className="text-center text-xs text-red-600 -mt-2">{error}</div>}
-                {!ready && !error && !submitting && <div className="text-center text-xs text-gray-400 -mt-2">Answer the required questions and add at least one before and one after photo to submit.</div>}
+                {!ready && !error && !submitting && <div className="text-center text-xs text-gray-400 -mt-2">Answer the required questions and add before/after photos (or attach a proof-of-service invoice) to submit.</div>}
               </>
             ) : (
               /* ── Read-only view (submitted / review / completed / bid) ── */
@@ -1512,7 +1566,21 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                     const ph: string[] = Array.isArray(svc.answers[`${q.id}__photos`]) ? svc.answers[`${q.id}__photos`] : [];
                     return ph.length ? <PhotoGrid key={q.id} label={q.label} urls={ph} onOpen={(i) => setLightbox({ groupId: `q:${q.id}`, index: i })} /> : null;
                   })}
-                  {gallery.groups.length === 0 && <div className="text-[13px] text-gray-400">No photos on this service.</div>}
+                  {(() => {
+                    const roProof = String(svc.answers[PROOF_URL_KEY] || '').trim();
+                    if (!/^https?:\/\//i.test(roProof)) return null;
+                    const isPdf = /\.pdf(\?|#|$)/i.test(roProof);
+                    return (
+                      <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                        <span className="text-emerald-600 text-lg leading-none">{isPdf ? '📄' : '🖼️'}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-semibold text-emerald-800">Proof of service (vendor invoice)</div>
+                          <a href={roProof} target="_blank" rel="noopener noreferrer" className="text-[12px] text-emerald-700 underline">View attachment</a>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {gallery.groups.length === 0 && !/^https?:\/\//i.test(String(svc.answers[PROOF_URL_KEY] || '')) && <div className="text-[13px] text-gray-400">No photos on this service.</div>}
                 </CollapsibleSection>
 
                 {costDetail}

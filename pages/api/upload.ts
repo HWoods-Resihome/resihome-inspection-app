@@ -51,6 +51,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const ALLOWED_TYPES = new Set([
       'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
       'video/mp4', 'video/webm', 'video/quicktime',
+      // Vendor proof-of-service attachment (invoice) — a PDF or image.
+      'application/pdf',
     ]);
     const safeContentType = String(contentType || 'image/jpeg').toLowerCase().split(';')[0].trim();
     if (!ALLOWED_TYPES.has(safeContentType)) {
