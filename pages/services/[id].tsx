@@ -231,7 +231,7 @@ function ProofOfService({ url, name, onChange }: { url: string; name: string; on
       ) : (
         <button type="button" disabled={busy} onClick={() => inputRef.current?.click()}
           className={`w-full rounded-xl border-2 border-dashed py-3 text-[13px] font-semibold ${busy ? 'border-gray-200 text-gray-400' : 'border-gray-300 text-gray-600 hover:border-brand hover:text-brand'}`}>
-          {busy ? 'Uploading…' : '+ Attach PDF / Word document'}
+          {busy ? 'Uploading…' : '+ Attach PDF'}
         </button>
       )}
       {err && <div className="text-[12px] text-red-600 mt-1.5">{err}</div>}
