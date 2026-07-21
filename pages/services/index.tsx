@@ -165,6 +165,8 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const todayISO = useMemo(() => easternTodayISO(), []);
   // Region filter options derived from the live services (was SAMPLE_REGIONS).
   const regionOptions = useMemo(() => Array.from(new Set(services.map((s) => s.region).filter(Boolean))).sort(), [services]);
+  // Community filter options — the distinct community names present in the list.
+  const communityOptions = useMemo(() => Array.from(new Set(services.map((s) => s.community || '').filter(Boolean))).sort(), [services]);
   // 'all' = everything (incl. completed); 'all_open' = everything except completed.
   // Tapping the All chip cycles between the two.
   // Vendors land on all OPEN services sorted by status (Assigned first); everyone
@@ -175,6 +177,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const [worktype, setWorktype] = useState<string[]>([]);
   const [vendor, setVendor] = useState<string[]>([]);
   const [region, setRegion] = useState<string[]>([]);
+  const [community, setCommunity] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [pastDueOnly, setPastDueOnly] = useState(false);
   const [sortField, setSortField] = useState<SortField>(isVendor ? 'status' : 'due');
@@ -275,9 +278,10 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
       (worktype.length === 0 || worktype.includes(s.worktype)) &&
       (vendor.length === 0 || vendor.includes(s.vendor || '—')) &&
       (region.length === 0 || region.includes(s.region)) &&
+      (community.length === 0 || community.includes(s.community || '')) &&
       (!q || `${s.address} ${s.locality} ${s.community || ''} ${s.vendor || ''} ${worktypeLabel(s.worktype)} ${subtypeLabel(s.worktype, s.subtype)} ${s.portfolio}`.toLowerCase().includes(q))
     );
-  }, [worktype, vendor, region, search, servicesView]);
+  }, [worktype, vendor, region, community, search, servicesView]);
 
   const summary = useMemo(() => {
     const open = scoped.filter((s) => OPEN_STATUSES.includes(s.status));
@@ -344,6 +348,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
         if (Array.isArray(s.worktype)) setWorktype(s.worktype);
         if (Array.isArray(s.vendor)) setVendor(s.vendor);
         if (Array.isArray(s.region)) setRegion(s.region);
+        if (Array.isArray(s.community)) setCommunity(s.community);
         if (typeof s.search === 'string') setSearch(s.search);
         if (typeof s.pastDueOnly === 'boolean') setPastDueOnly(s.pastDueOnly);
         if (typeof s.sortField === 'string') setSortField(s.sortField);
@@ -357,8 +362,8 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   }, []);
   useEffect(() => {
     if (!listHydrated.current) return;
-    try { sessionStorage.setItem(LIST_KEY, JSON.stringify({ status, worktype, vendor, region, search, pastDueOnly, sortField, sortDir, pageSize, filtersOpen })); } catch { /* quota/private */ }
-  }, [status, worktype, vendor, region, search, pastDueOnly, sortField, sortDir, pageSize, filtersOpen]);
+    try { sessionStorage.setItem(LIST_KEY, JSON.stringify({ status, worktype, vendor, region, community, search, pastDueOnly, sortField, sortDir, pageSize, filtersOpen })); } catch { /* quota/private */ }
+  }, [status, worktype, vendor, region, community, search, pastDueOnly, sortField, sortDir, pageSize, filtersOpen]);
 
   const chip = (val: ServiceStatus | 'all', label: string) => (
     <button type="button" onClick={() => { setStatus(val); setPastDueOnly(false); }}
@@ -496,6 +501,10 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
                 <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}
                   options={regionOptions.map((r) => ({ value: r, label: r }))} />
               </div>
+              <div className="flex-1 min-w-0">
+                <MultiFilter label="Community" selected={community} onChange={setCommunity} className={pickerCls(community.length > 0)}
+                  options={communityOptions.map((c) => ({ value: c, label: c }))} />
+              </div>
               {/* Sort — identical to inspections: tap a field to sort; tap the active field again to flip direction. */}
               <div className="relative shrink-0">
                 <button type="button" onClick={() => setSortOpen((o) => !o)} aria-expanded={sortOpen}
@@ -521,9 +530,9 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
                   </div></>)}
               </div>
             </div>
-            {(status !== 'all' || pastDueOnly || worktype.length > 0 || vendor.length > 0 || region.length > 0 || search) && (
+            {(status !== 'all' || pastDueOnly || worktype.length > 0 || vendor.length > 0 || region.length > 0 || community.length > 0 || search) && (
               <div className="flex justify-end">
-                <button type="button" onClick={() => { setStatus('all'); setPastDueOnly(false); setWorktype([]); setVendor([]); setRegion([]); setSearch(''); }}
+                <button type="button" onClick={() => { setStatus('all'); setPastDueOnly(false); setWorktype([]); setVendor([]); setRegion([]); setCommunity([]); setSearch(''); }}
                   className="text-[11px] font-heading font-semibold text-gray-500 hover:text-brand underline">Clear filters</button>
               </div>
             )}
