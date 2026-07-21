@@ -358,8 +358,16 @@ export async function runServiceGeneration(
   overrideProps?: Record<string, any>,
 ): Promise<GenerateResult | null> {
   const allRules = await searchServiceRuleRecords();
-  const existing = await readServiceWorkOrderKeys();
-  if (allRules === null || existing === null) return null; // objects not configured
+  const existingAll = await readServiceWorkOrderKeys();
+  if (allRules === null || existingAll === null) return null; // objects not configured
+  // Cancelling an order is how you scrap a scheduled service and let the rule
+  // regenerate it — so a cancelled order is treated as if it never existed. It must
+  // NOT block (dedup / openKeys), must NOT anchor the self-healing schedule
+  // (closedByKey — otherwise the next due re-anchors off the cancelled order's due
+  // and can roll into a skip/future window that's then skipped, so nothing
+  // generates), and must NOT count toward the stop-after-N cap (genCountByKey).
+  // Filtering them out of `existing` here achieves all of that in one place.
+  const existing = existingAll.filter((e) => String(e.status) !== 'canceled');
   // Ad-hoc: run a single rule (the "generate missing now" button) vs. the whole
   // set (nightly). Either way the enrollment-key dedup below prevents duplicates.
   let rules = onlyRuleId ? allRules.filter((r) => r.id === onlyRuleId) : allRules;
