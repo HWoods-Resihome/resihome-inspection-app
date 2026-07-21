@@ -1269,6 +1269,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 : svc.dueDate && <> · <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtMDY(svc.dueDate)}</span></>}
               {svc.scope !== 'community' && svc.moveInDate && <> · <span className="text-gray-600">Move-In: {svc.moveInDate}</span></>}
             </div>
+            {/* Service number — for referencing (matches the SVC# in notifications). */}
+            {svc.live && <div className="text-[11px] text-gray-400 leading-tight tabular-nums">SVC #{svc.id}</div>}
           </div>
         </div>
       </header>

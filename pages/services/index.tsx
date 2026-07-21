@@ -126,11 +126,17 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
               </p>
               <h3 className="font-bold text-[15px] text-ink break-words leading-snug">
                 <span className="align-middle">{s.address}</span>
-                <span className={`ml-2 align-middle inline-block text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
+                {/* Community chip only — SFR is the default and doesn't need a badge. */}
+                {s.scope === 'community' && (
+                  <span className="ml-2 align-middle inline-block text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Community</span>
+                )}
               </h3>
               {localityLine && (
                 <p className="text-[13px] text-gray-500 break-words leading-snug mt-0.5">{localityLine}</p>
               )}
+              {/* Service number — for referencing/searching (matches the SVC# in
+                  notifications). Searchable by any fragment via the search box. */}
+              <p className="text-[11px] text-gray-400 mt-0.5 tabular-nums">SVC #{s.id}</p>
             </div>
             <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>
               {serviceStatusText(s.status, isAdmin)}
@@ -279,7 +285,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
       (vendor.length === 0 || vendor.includes(s.vendor || '—')) &&
       (region.length === 0 || region.includes(s.region)) &&
       (community.length === 0 || community.includes(s.community || '')) &&
-      (!q || `${s.address} ${s.locality} ${s.community || ''} ${s.vendor || ''} ${worktypeLabel(s.worktype)} ${subtypeLabel(s.worktype, s.subtype)} ${s.portfolio}`.toLowerCase().includes(q))
+      (!q || `${s.address} ${s.locality} ${s.community || ''} ${s.vendor || ''} ${worktypeLabel(s.worktype)} ${subtypeLabel(s.worktype, s.subtype)} ${s.portfolio} ${s.id}`.toLowerCase().includes(q))
     );
   }, [worktype, vendor, region, community, search, servicesView]);
 
