@@ -71,21 +71,35 @@ export async function notifyServiceAssigned(o: {
 export async function notifyServiceCompleted(o: {
   serviceId: string; vendorEmail?: string | null; vendorName?: string | null;
   address: string; locality?: string; worktypeLabel: string; subtypeLabel: string; baseUrl: string; force?: boolean;
+  // Review outcome — the vendor is alerted on ANY decision. reject reads as "not
+  // approved / no payment"; modify notes pricing was adjusted; approve (or absent,
+  // e.g. AI auto-approve) reads as a plain completion. The vendor PDF is attached
+  // in every case.
+  decision?: 'approve' | 'modify' | 'reject'; reviewerNote?: string;
 }): Promise<void> {
   try {
     const to = String(o.vendorEmail || '').trim();
     if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'service_completed')))) return;
     const addr = fullAddr(o.address, o.locality);
+    const svc = `${o.worktypeLabel} (${o.subtypeLabel})`;
+    const isReject = o.decision === 'reject';
+    const isModify = o.decision === 'modify';
     let attachment: { filename: string; content: Buffer; mimeType: string } | null = null;
     try {
       const buf = await renderServicePdfBuffer(o.serviceId, { variant: 'vendor', baseUrl: o.baseUrl, internal: false });
       if (buf) attachment = { filename: pdfName('service', o.serviceId), content: buf, mimeType: 'application/pdf' };
     } catch (e: any) { console.warn('[notify] service PDF render failed:', String(e?.message || e).slice(0, 120)); }
+    const note = String(o.reviewerNote || '').trim();
+    const rows: Array<[string, string]> = [['Property', addr], ['Service', svc]];
+    if (note) rows.push(['Reviewer note', note]);
     await sendNotificationEmail({
-      to, subject: `Service Completed — ${addr}`,
-      heading: 'Service Completed',
-      intro: `Your ${o.worktypeLabel} (${o.subtypeLabel}) at ${addr} has been completed.${attachment ? ' The completion report is attached.' : ''}`,
-      rows: [['Property', addr], ['Service', `${o.worktypeLabel} (${o.subtypeLabel})`]],
+      to,
+      subject: isReject ? `Service Reviewed — Not Approved: ${addr}` : `Service Completed — ${addr}`,
+      heading: isReject ? 'Service Not Approved' : 'Service Completed',
+      intro: isReject
+        ? `Your ${svc} at ${addr} was reviewed and not approved, so no payment was issued for this visit.${attachment ? ' The report is attached.' : ''}`
+        : `Your ${svc} at ${addr} has been completed${isModify ? ' (pricing was adjusted in review)' : ''}.${attachment ? ' The completion report is attached.' : ''}`,
+      rows,
       linkUrl: `${o.baseUrl}/services/${encodeURIComponent(o.serviceId)}`, linkLabel: 'Open Service',
       attachment,
     });

@@ -125,16 +125,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // Notify the vendor their service completed (approve/modify only — a
-    // rejection denies payment, so it isn't a "completed" outcome to celebrate).
-    if (decision !== 'reject') {
-      await notifyServiceCompleted({
-        serviceId: id, vendorEmail: p.vendor_email, vendorName: p.vendor_name,
-        address: p.address_snapshot || p.service_name || 'your service', locality: p.locality_snapshot,
-        worktypeLabel: worktypeLabel(String(p.worktype || '')), subtypeLabel: subtypeLabel(String(p.worktype || ''), String(p.subtype || '')),
-        baseUrl: appBaseUrl(req),
-      });
-    }
+    // Notify the vendor of the review outcome — EVERY decision (approve, modify,
+    // reject), each with the vendor PDF attached. reject reads as "not approved /
+    // no payment"; the reviewer's note is included so the vendor knows why.
+    await notifyServiceCompleted({
+      serviceId: id, vendorEmail: p.vendor_email, vendorName: p.vendor_name,
+      address: p.address_snapshot || p.service_name || 'your service', locality: p.locality_snapshot,
+      worktypeLabel: worktypeLabel(String(p.worktype || '')), subtypeLabel: subtypeLabel(String(p.worktype || ''), String(p.subtype || '')),
+      baseUrl: appBaseUrl(req), decision, reviewerNote: notes,
+    });
 
     // Re-Issue: the reviewer wants the work redone. Spin up a fresh service with
     // the SAME requirements (worktype/subtype/description), property/community,
