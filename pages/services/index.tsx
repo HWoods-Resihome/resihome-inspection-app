@@ -202,6 +202,23 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
     return () => { alive = false; };
   }, []);
   const [reassignVendor, setReassignVendor] = useState('');
+  const [reassignQuery, setReassignQuery] = useState('');
+  // Optimistic vendor overlay: after a bulk reassign, HubSpot's search index (and
+  // the 30s server-side list cache) can lag, so an immediate SSR re-fetch may still
+  // return the OLD vendor. Overlay the new name locally per-id so the card updates
+  // right away; each entry is dropped once the SSR-fetched record confirms it.
+  const [vendorOverrides, setVendorOverrides] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setVendorOverrides((prev) => {
+      let changed = false; const next = { ...prev };
+      for (const s of services) { if (next[s.id] !== undefined && (s.vendor || '') === next[s.id]) { delete next[s.id]; changed = true; } }
+      return changed ? next : prev;
+    });
+  }, [services]);
+  const servicesView = useMemo(
+    () => (Object.keys(vendorOverrides).length === 0 ? services : services.map((s) => (vendorOverrides[s.id] !== undefined ? { ...s, vendor: vendorOverrides[s.id] } : s))),
+    [services, vendorOverrides],
+  );
   const canSelect = isAdmin && live;
   const isSelectable = (s: ServiceRecord) => canSelect && !['completed', 'canceled'].includes(s.status);
   const toggleSelect = (id: string) => setSelectedIds((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -240,6 +257,10 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
       if (!r.ok) { setActionMsg({ status: 'error', msg: `Reassign — ${d.error || 'failed.'}` }); return; }
       const parts = [`${d.reassigned} reassigned to ${d.vendorName}`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
       setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Reassign — ${parts.join(' · ')}` });
+      // Optimistically show the new vendor on the cards that actually changed — the
+      // SSR re-fetch below can lag behind the write (search index + list cache).
+      const changedIds: string[] = Array.isArray(d.results) ? d.results.filter((x: any) => x?.outcome === 'reassigned').map((x: any) => String(x.id)) : [];
+      if (changedIds.length) setVendorOverrides((prev) => { const next = { ...prev }; for (const id of changedIds) next[id] = String(d.vendorName); return next; });
       exitSelect();
       router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});
     } catch { setActionMsg({ status: 'error', msg: 'Reassign — couldn’t reach the server. Try again.' }); }
@@ -250,13 +271,13 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   // + Past-Due toggle then drill the list within that scope.
   const scoped = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return services.filter((s) =>
+    return servicesView.filter((s) =>
       (worktype.length === 0 || worktype.includes(s.worktype)) &&
       (vendor.length === 0 || vendor.includes(s.vendor || '—')) &&
       (region.length === 0 || region.includes(s.region)) &&
       (!q || `${s.address} ${s.locality} ${s.community || ''} ${s.vendor || ''} ${worktypeLabel(s.worktype)} ${subtypeLabel(s.worktype, s.subtype)} ${s.portfolio}`.toLowerCase().includes(q))
     );
-  }, [worktype, vendor, region, search, services]);
+  }, [worktype, vendor, region, search, servicesView]);
 
   const summary = useMemo(() => {
     const open = scoped.filter((s) => OPEN_STATUSES.includes(s.status));
@@ -527,7 +548,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
               <button type="button" onClick={exitSelect} className="text-[12px] font-heading font-semibold text-gray-500 hover:text-brand underline">Done</button>
             </div>
             <div className="flex items-center gap-2 mt-2">
-              <button type="button" disabled={!selectedIds.size || actionBusy} onClick={() => { setReassignVendor(vendorNames[0] || ''); setReassignOpen(true); }}
+              <button type="button" disabled={!selectedIds.size || actionBusy} onClick={() => { setReassignVendor(''); setReassignQuery(''); setReassignOpen(true); }}
                 className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-brand text-white disabled:opacity-50">Reassign Vendor</button>
               <button type="button" disabled={!selectedIds.size || actionBusy} onClick={handleBulkCancel}
                 className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-white text-red-600 border border-red-300 disabled:opacity-50">{actionBusy ? '…' : 'Move to Cancelled'}</button>
@@ -577,18 +598,30 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
       {/* Reassign Vendor popup (select mode). */}
       {reassignOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setReassignOpen(false)}>
-          <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <div className="font-heading font-bold text-[15px] text-ink">Reassign Vendor</div>
-            <p className="text-[13px] text-gray-500 -mt-1">Assign the <b className="text-ink">{selectedIds.size}</b> selected service{selectedIds.size > 1 ? 's' : ''} to a vendor. Only services in <b>Assigned</b> status are reassigned.</p>
-            <div className="space-y-1.5">
-              {vendorNames.map((name) => (
-                <button key={name} type="button" onClick={() => setReassignVendor(name)}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-heading font-semibold ${reassignVendor === name ? 'bg-brand/5 border-brand text-brand' : 'bg-white border-gray-300 text-gray-700 hover:border-brand/50'}`}>
-                  {name}
-                </button>
-              ))}
+          <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-4 flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="font-heading font-bold text-[15px] text-ink shrink-0">Reassign Vendor</div>
+            <p className="text-[13px] text-gray-500 mt-1 shrink-0">Assign the <b className="text-ink">{selectedIds.size}</b> selected service{selectedIds.size > 1 ? 's' : ''} to a vendor. Only services in <b>Assigned</b> status are reassigned.</p>
+            <div className="relative mt-3 shrink-0">
+              <input type="text" value={reassignQuery} onChange={(e) => setReassignQuery(e.target.value)} placeholder="Search vendors…"
+                className="w-full text-sm border border-gray-300 rounded-lg pl-3 pr-9 py-2.5 bg-white focus:outline-none focus:border-brand" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             </div>
-            <div className="flex gap-2 pt-1">
+            {/* Bounded, scrollable list so a long vendor roster scrolls INSIDE the
+                sheet instead of pushing the actions off-screen. */}
+            <div className="mt-2 flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-0.5">
+              {vendorNames
+                .filter((name) => !reassignQuery.trim() || name.toLowerCase().includes(reassignQuery.trim().toLowerCase()))
+                .map((name) => (
+                  <button key={name} type="button" onClick={() => setReassignVendor(name)}
+                    className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-heading font-semibold ${reassignVendor === name ? 'bg-brand/5 border-brand text-brand' : 'bg-white border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                    {name}
+                  </button>
+                ))}
+              {vendorNames.filter((name) => !reassignQuery.trim() || name.toLowerCase().includes(reassignQuery.trim().toLowerCase())).length === 0 && (
+                <div className="px-3 py-4 text-center text-[13px] text-gray-400">No vendors match “{reassignQuery.trim()}”.</div>
+              )}
+            </div>
+            <div className="flex gap-2 pt-3 shrink-0">
               <button type="button" onClick={() => setReassignOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
               <button type="button" disabled={actionBusy || !reassignVendor} onClick={applyReassign}
                 className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{actionBusy ? '…' : 'Submit'}</button>
