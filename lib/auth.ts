@@ -12,10 +12,11 @@ export const SESSION_COOKIE_NAME = 'resihome_session';
 // 30 days. Auth is gated by Google sign-in at login (proves the user controls
 // the email); after that the session is good for 30 days without re-doing Google.
 const SESSION_DURATION_HOURS = 24 * 30;
-// External vendor (Company) logins re-authenticate DAILY — one email+password
-// sign-in per day. Shorter-lived than staff sessions because these are external,
-// semi-trusted accounts; a leaked vendor token is valid for at most ~24h.
-const VENDOR_SESSION_DURATION_HOURS = 24;
+// External vendor (Company) logins stay signed in for 7 days, then must
+// re-authenticate with one email+password sign-in. Shorter-lived than staff
+// sessions (30 days) because these are external, semi-trusted accounts; a leaked
+// vendor token is valid for at most ~7 days.
+const VENDOR_SESSION_DURATION_HOURS = 24 * 7;
 
 export interface SessionUser {
   userId: string;  // HubSpot user ID
@@ -94,7 +95,7 @@ export async function createSessionCookie(user: SessionUser): Promise<string> {
   // import to avoid pulling server-only HubSpot code into any client bundle that
   // touches the cookie helpers' types.
   void import('@/lib/loginActivity').then((m) => m.recordLogin(user.email, user.name)).catch(() => {});
-  // Vendors re-sign-in daily; staff sessions last 30 days.
+  // Vendors stay signed in for 7 days; staff sessions last 30 days.
   const durationHours = user.vendor ? VENDOR_SESSION_DURATION_HOURS : SESSION_DURATION_HOURS;
   const token = await new SignJWT({
     userId: user.userId,
