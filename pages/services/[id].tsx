@@ -173,12 +173,20 @@ function CostVendorRows({ svc, total }: { svc: ServiceView; total: number | null
   const homesLabel = svc.isMaster && svc.coveredCount != null && svc.perRate != null
     ? `${homes.toLocaleString()} Home${homes === 1 ? '' : 's'} × ${money(rate)}/home` : '';
   const amt = 'font-semibold text-ink tabular-nums text-right shrink-0';
-  if (svc.isMaster && (svc.commonAreaCost || 0) > 0) {
-    const houseSub = Math.round(homes * rate * 100) / 100;
+  const houseSub = Math.round(homes * rate * 100) / 100;
+  // Common area = the explicit stored cost, else DERIVE it as (total − house
+  // subtotal). Deriving means masters created before common_area_cost was read
+  // back still show the split — as long as the per-home rate + count are known and
+  // the total genuinely exceeds the house subtotal.
+  const derived = Math.round(((Number(total) || 0) - houseSub) * 100) / 100;
+  const commonArea = (svc.commonAreaCost != null && svc.commonAreaCost > 0)
+    ? svc.commonAreaCost
+    : (svc.isMaster && homes > 0 && rate > 0 && derived >= 0.01 ? derived : 0);
+  if (svc.isMaster && commonArea > 0) {
     return (
       <>
         <div className="flex justify-between gap-2"><span className="text-gray-500">House Cuts{homesLabel && <span className="ml-1.5 text-[12px] text-gray-400">({homesLabel})</span>}</span><span className={amt}>{money(houseSub)}</span></div>
-        <div className="flex justify-between gap-2"><span className="text-gray-500">Common Area</span><span className={amt}>{money(svc.commonAreaCost)}</span></div>
+        <div className="flex justify-between gap-2"><span className="text-gray-500">Common Area</span><span className={amt}>{money(commonArea)}</span></div>
         <div className="flex justify-between gap-2 border-t border-gray-100 pt-1 mt-1"><span className="text-gray-600 font-semibold">Vendor Cost</span><span className={amt}>{money(total)}</span></div>
       </>
     );
