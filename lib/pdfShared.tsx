@@ -628,7 +628,12 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
   return (
     <View style={{ marginTop: 6, marginBottom: 6 }}>
       {rows.map((row, r) => (
-        <View key={r} style={{ flexDirection: 'row', gap: 4, marginBottom: 4 }} wrap={false}>
+        // minPresenceAhead reserves a FULL photo-row height (cell 65 + 4 margin)
+        // ahead of the row; with wrap={false} this forces a page break before a
+        // row that can't fully fit, so a photo never renders half-over the fixed
+        // footer at the bottom of a page (the FC/Utilities overflow). Applies to
+        // every section's photos + the Final Checklist uniformly.
+        <View key={r} style={{ flexDirection: 'row', gap: 4, marginBottom: 4 }} wrap={false} minPresenceAhead={70}>
           {row.map((entry, i) => renderCell(entry, r * SECTION_PHOTOS_PER_ROW + i))}
         </View>
       ))}

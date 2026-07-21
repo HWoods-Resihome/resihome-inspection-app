@@ -56,8 +56,18 @@ async function fetchAndEmbed(url: string, deadline: number): Promise<string | nu
         return null;
       }
       const buf = await readBodyCapped(r, MAX_IMAGE_BYTES);
-      const jpeg = await sharp(buf)
-        .rotate()
+      // failOn:'truncated' → a partially-uploaded/corrupt source THROWS instead of
+      // decoding the missing bytes as black (the "occasional black photo" bug); it
+      // then falls back to the "View photo" link rather than embedding a black cell.
+      const base = sharp(buf, { failOn: 'truncated' }).rotate();
+      // Reject a solid near-black frame outright (some HEIC decodes / black uploads
+      // produce one). If NO channel has a pixel brighter than ~8/255 anywhere, it
+      // isn't a real photo — a genuinely dark photo still has brighter pixels.
+      try {
+        const stats = await base.clone().stats();
+        if (stats.channels.slice(0, 3).every((c) => c.max <= 8)) return null;
+      } catch { /* stats failed → let the resize below surface a real decode error */ }
+      const jpeg = await base
         .resize(EMBED_EDGE, EMBED_EDGE, { fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: EMBED_QUALITY })
         .toBuffer();

@@ -94,7 +94,10 @@ function PhotoBlock({ title, urls, group, galleryBase }: { title: string; urls: 
       <Text style={s.photosLabel}>{title}</Text>
       <View style={s.photoGrid}>
         {rows.map((row, ri) => (
-          <View key={ri} style={s.photoRow} wrap={false}>
+          // minPresenceAhead reserves a full photo-row height (69 + 3 margin)
+          // ahead, so wrap={false} breaks to the next page rather than letting a
+          // row render half-over the fixed footer.
+          <View key={ri} style={s.photoRow} wrap={false} minPresenceAhead={74}>
             {row.map((u, i) => {
               const idx = ri * PHOTOS_PER_ROW + i;
               return galleryBase

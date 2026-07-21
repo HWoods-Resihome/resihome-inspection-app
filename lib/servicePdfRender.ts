@@ -27,7 +27,14 @@ async function toDataUri(url: string): Promise<string | null> {
     const r = await safeProxyFetch(clean);
     if (!r.ok) return null;
     const buf = await readBodyCapped(r, 40 * 1024 * 1024);
-    const jpeg = await sharp(buf).rotate().resize(360, 360, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 62 }).toBuffer();
+    // failOn:'truncated' → a partial/corrupt upload throws (→ dropped) instead of
+    // decoding as a BLACK frame; also reject a solid near-black frame outright.
+    const base = sharp(buf, { failOn: 'truncated' }).rotate();
+    try {
+      const stats = await base.clone().stats();
+      if (stats.channels.slice(0, 3).every((c) => c.max <= 8)) return null;
+    } catch { /* stats failed → the resize below surfaces a real decode error */ }
+    const jpeg = await base.resize(360, 360, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 62 }).toBuffer();
     return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
   } catch { return null; }
 }
