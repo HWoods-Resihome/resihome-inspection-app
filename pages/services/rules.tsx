@@ -73,6 +73,8 @@ const PROPERTY_FIELDS: { field: string; options: string[] }[] = [
   // Numeric gate on the property's pool_fee — "is greater than $0" enrolls homes
   // that carry a pool fee (i.e. have a pool we service). No enum values.
   { field: 'Pool Fee', options: [] },
+  // Same, on the property's landscaping_fee.
+  { field: 'Landscaping Fee', options: [] },
 ];
 const FIELD_NAMES = PROPERTY_FIELDS.map((f) => f.field);
 const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field)?.options ?? [];
@@ -83,7 +85,7 @@ const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field
 // a rule from being built on an operator the generator won't actually evaluate.
 const opsFor = (field: string): string[] =>
   field === 'RRQC Pass Date' ? ['is known']
-    : field === 'Pool Fee' ? ['is greater than $0']
+    : (field === 'Pool Fee' || field === 'Landscaping Fee') ? ['is greater than $0']
       : ['is', 'is any of', 'is not', 'is not any of'];
 // Operators that select a SET of values (multi-select UI + JSON array value).
 const isMultiOp = (op: string): boolean => op === 'is any of' || op === 'is not any of';
@@ -1271,7 +1273,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                     </div>
                     <div className="flex-1 min-w-0">
                       {c.op === 'is known' ? null : c.op === 'is greater than $0' ? (
-                        <span className="text-[12px] text-gray-500">pool fee &gt; $0</span>
+                        <span className="text-[12px] text-gray-500">&gt; $0</span>
                       ) : isMultiOp(c.op) ? (
                         <MultiFilter label="Values" sheet options={enrollValueOptsFor(c.field)} selected={c.vals}
                           onChange={(next) => patchCrit(i, { vals: next })} className={`${pick} w-full`} />
@@ -1323,7 +1325,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                           </div>
                           <div className="flex-1 min-w-0">
                             {c.op === 'is known' ? null : c.op === 'is greater than $0' ? (
-                              <span className="text-[12px] text-gray-500">pool fee &gt; $0</span>
+                              <span className="text-[12px] text-gray-500">&gt; $0</span>
                             ) : isMultiOp(c.op) ? (
                               <MultiFilter label="Values" sheet options={valueOptsFor(c.field)} selected={c.vals}
                                 onChange={(next) => patchStopCrit(i, { vals: next })} className={`${pick} w-full`} />

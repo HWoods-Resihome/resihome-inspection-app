@@ -928,7 +928,7 @@ export async function fetchPropertyStatusOptions(): Promise<{ label: string; val
  */
 export async function searchPropertiesForCoverage(
   opts: { portfolios?: string[]; regions?: string[]; statuses?: string[]; limit?: number } = {},
-): Promise<{ id: string; address: string; locality: string; region: string; portfolio: string; status: string; rrqcPassDate: string; poolFee: number; poolServicer: string }[]> {
+): Promise<{ id: string; address: string; locality: string; region: string; portfolio: string; status: string; rrqcPassDate: string; poolFee: number; poolServicer: string; landscapingFee: number }[]> {
   const { property: typeId } = typeIds();
   const limit = Math.min(Math.max(opts.limit || 1000, 1), 2000);
   const filters: any[] = [];
@@ -940,8 +940,8 @@ export async function searchPropertiesForCoverage(
   // known" can be evaluated per property (Rules Engine). Optional field — absent → ''.
   // pool_fee + pool_servicer support the "Pool Fee > $0" enrollment criterion
   // and the Tenant-Service exclusion in generation.
-  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'portfolio', PROPERTY_STATUS_PROPERTY, 'rrqc_pass_date', 'pool_fee', POOL_SERVICER_PROPERTY];
-  const out: { id: string; address: string; locality: string; region: string; portfolio: string; status: string; rrqcPassDate: string; poolFee: number; poolServicer: string }[] = [];
+  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'portfolio', PROPERTY_STATUS_PROPERTY, 'rrqc_pass_date', 'pool_fee', POOL_SERVICER_PROPERTY, 'landscaping_fee'];
+  const out: { id: string; address: string; locality: string; region: string; portfolio: string; status: string; rrqcPassDate: string; poolFee: number; poolServicer: string; landscapingFee: number }[] = [];
   try {
     let after: string | undefined;
     do {
@@ -958,6 +958,7 @@ export async function searchPropertiesForCoverage(
         const st = String(p.state_code || p.state || '').trim();
         const zip = String(p.zip_code || p.zip || '').trim();
         const feeN = Number(String(p.pool_fee ?? '').trim());
+        const landFeeN = Number(String(p.landscaping_fee ?? '').trim());
         out.push({
           id: String(r.id), address: address || `(Property ${r.id})`,
           locality: [city, st, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
@@ -966,6 +967,7 @@ export async function searchPropertiesForCoverage(
           rrqcPassDate: String(p.rrqc_pass_date || '').trim(),
           poolFee: Number.isFinite(feeN) ? feeN : 0,
           poolServicer: String(p[POOL_SERVICER_PROPERTY] || '').trim(),
+          landscapingFee: Number.isFinite(landFeeN) ? landFeeN : 0,
         });
         if (out.length >= limit) return out;
       }

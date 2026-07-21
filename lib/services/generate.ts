@@ -55,7 +55,7 @@ function parseCriteria(p: Record<string, any>): Criterion[] {
   const f = String(p.enroll_field || '');
   return f ? [{ field: f, op: String(p.enroll_op || 'is'), vals: parseVals(p.enroll_value) }] : [];
 }
-interface EvalProp { rrqcPassDate: string; status: string; dealStages?: string[]; poolFee?: number; poolServicer?: string }
+interface EvalProp { rrqcPassDate: string; status: string; dealStages?: string[]; poolFee?: number; poolServicer?: string; landscapingFee?: number }
 // A property's leasing deals + their current stage id (for per-deal enrollment).
 interface DealEntry { dealId: string; stage: string }
 // Negating operators — the value set is a membership test, and these invert it.
@@ -69,6 +69,8 @@ function matchCriterion(prop: EvalProp, c: Criterion): boolean {
   if (/rrqc/.test(field)) return c.op === 'is known' ? !!prop.rrqcPassDate : true;
   // Pool Fee > $0 — enrolls homes that carry a pool fee (a pool we service).
   if (/pool\s*fee/.test(field)) return (prop.poolFee ?? 0) > 0;
+  // Landscaping Fee > $0 — enrolls homes that carry a landscaping fee.
+  if (/landscap.*fee/.test(field)) return (prop.landscapingFee ?? 0) > 0;
   // Deal Stage — the property's associated leasing deal(s) current stage id(s).
   // vals hold stage ids; membership match, negated for "is not"/"is not any of".
   if (/deal/.test(field)) {
@@ -301,6 +303,7 @@ function isEvaluableCriterion(c: Criterion): boolean {
   const f = (c.field || '').toLowerCase();
   if (/rrqc/.test(f)) return c.op === 'is known'; // only "is known" is evaluable for the date field
   if (/pool\s*fee/.test(f)) return true;          // "is greater than $0" — self-contained gate
+  if (/landscap.*fee/.test(f)) return true;       // "is greater than $0" — self-contained gate
   if (/deal/.test(f)) return c.vals.some((v) => v.trim() !== '');
   if (/status/.test(f)) return c.vals.some((v) => v.trim() !== '');
   return false;
