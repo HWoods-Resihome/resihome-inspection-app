@@ -16,6 +16,7 @@ import { registerServiceWorker } from '@/lib/useAppUpdate';
 import { installOAuthBridge, installPushBridge, primeLocationPermissionNative, installNativeBackGuard } from '@/lib/nativeBridge';
 import { initPushOnLoad } from '@/lib/pushClient';
 import { installGlobalSync } from '@/lib/globalSync';
+import { installAutofillGuard } from '@/lib/disableAutofill';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
 import 'leaflet/dist/leaflet.css';   // calendar/map views (inspections + services — namespaced .leaflet-* is inert elsewhere)
@@ -92,6 +93,10 @@ export default function App({ Component, pageProps }: AppProps) {
     // and nudge queued photo uploads, so offline work syncs the moment signal
     // returns — not only while an inspection form is open.
     installGlobalSync();
+    // Suppress the OS/keyboard autofill strip (password key / payment card /
+    // address location) on every text field except the login screen — none of the
+    // app's own fields are credentials.
+    installAutofillGuard();
   }, []);
 
   // BULLETPROOF offline-readiness (independent of the SW install precache, which
