@@ -2026,13 +2026,38 @@ export async function fetchServiceRuleName(ruleId: string): Promise<string | nul
   } catch { return null; }
 }
 
+// Provision (create) the named properties on the Service Rule object from the
+// schema spec, so a rule field that ships ahead of its provision run can be
+// created on demand — instead of silently dropped from the save. Returns the
+// names actually created; anything it can't create (e.g. no crm.schemas scope,
+// or the rejection was an invalid enum value on an existing prop) is left out so
+// the caller drops those and still saves the rest. Best-effort, never throws.
+async function ensureServiceRuleProps(typeId: string, names: string[]): Promise<string[]> {
+  const spec = (SERVICE_OBJECTS as ObjectSpec[]).find((o) => o.name === 'service_rule');
+  if (!spec) return [];
+  const toMake = spec.properties.filter((p) => names.includes(p.name));
+  if (!toMake.length) return [];
+  const made: string[] = [];
+  try {
+    const group = await ensurePropertyGroup(typeId, `${spec.name}_information`);
+    for (const p of toMake) {
+      try { await createProperty(typeId, p, group); made.push(p.name); }
+      catch { /* already exists (enum-value rejection) or no schema scope — skip */ }
+    }
+  } catch { /* group provisioning failed (no scope) — nothing created */ }
+  return made;
+}
+
 export async function upsertServiceRuleRecord(id: string | null, props: Record<string, any>): Promise<string | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
   if (!typeId) return null;
   let body = { ...props };
-  // Retry a few times, each pass stripping any property HubSpot rejects (unknown
-  // field OR invalid enum value not yet provisioned). Other errors rethrow.
-  for (let attempt = 0; attempt < 5; attempt++) {
+  // Retry a few times. On a rejected property (unknown field not yet provisioned,
+  // OR an invalid enum value) first TRY TO PROVISION the missing field from the
+  // schema spec and retry WITHOUT dropping it — so a newly-added rule input (e.g.
+  // include_common_areas) persists on first save instead of vanishing. Only drop
+  // props that still can't be created (no schema scope / bad enum value).
+  for (let attempt = 0; attempt < 6; attempt++) {
     try {
       if (id) { await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: body }) }); return id; }
       const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: body }) });
@@ -2040,8 +2065,11 @@ export async function upsertServiceRuleRecord(id: string | null, props: Record<s
     } catch (e: any) {
       const rejected = rejectedPropNames(e).filter((n) => n in body);
       if (!rejected.length) throw e;
-      for (const n of rejected) delete body[n];
-      console.warn(`[services] rule save: dropping rejected props and retrying: ${rejected.join(', ')}`);
+      const provisioned = await ensureServiceRuleProps(typeId, rejected);
+      const drop = rejected.filter((n) => !provisioned.includes(n));
+      for (const n of drop) delete body[n];
+      if (provisioned.length) console.warn(`[services] rule save: provisioned missing props and retrying: ${provisioned.join(', ')}`);
+      if (drop.length) console.warn(`[services] rule save: dropping unprovisionable props and retrying: ${drop.join(', ')}`);
     }
   }
   throw new Error('rule save failed after stripping rejected properties');
