@@ -220,7 +220,7 @@ function ProofOfService({ url, name, onChange }: { url: string; name: string; on
       <input ref={inputRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden"
         onChange={(e) => void pick(e.target.files?.[0])} />
       {attached ? (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+        <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
           <span className="text-emerald-600 text-base leading-none shrink-0">📄</span>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 text-[13px] font-semibold text-emerald-800">
