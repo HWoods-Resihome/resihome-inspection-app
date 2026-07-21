@@ -53,20 +53,29 @@ async function fetchPhotoBlock(url: string): Promise<any | null> {
   } catch { return null; }
 }
 
-// A vendor "proof of service" attachment (their company invoice). Only a PDF can
-// be read by the model — sent as a document block. A Word doc (or anything else)
-// can't be sent, so it returns null and the review routes to a human. Returns null
-// on any fetch/decode issue too.
+// A vendor "proof of service" attachment (their company invoice) → an Anthropic
+// document block. A PDF is sent as-is; a Word .docx is converted to a PDF first
+// (mammoth extracts its text + embedded photos, react-pdf lays them out) so the
+// model can read it too. Legacy binary .doc / anything unparseable → null, which
+// routes the review to a human. Returns null on any fetch/decode issue as well.
 async function fetchProofBlock(url: string): Promise<any | null> {
   try {
     const clean = url.split('#')[0];
     if (!isAllowedPhotoHost(clean)) return null;
-    if (!/\.pdf(\?|$)/i.test(clean)) return null;   // Word/other → human review
+    const isPdf = /\.pdf(\?|$)/i.test(clean);
+    const isDocx = /\.docx(\?|$)/i.test(clean);
+    if (!isPdf && !isDocx) return null;   // legacy .doc / other → human review
     const r = await safeProxyFetch(clean);
     if (!r.ok) return null;
-    // Cap at ~24MB — comfortably above a normal invoice PDF, well under the API's
+    // Cap at ~24MB — comfortably above a normal invoice, well under the API's
     // request ceiling once base64-inflated.
     const buf = await readBodyCapped(r, 24 * 1024 * 1024);
+    if (isDocx) {
+      const { docxBufferToPdf } = await import('./docxToPdf');
+      const pdf = await docxBufferToPdf(buf);
+      if (!pdf) return null;   // couldn't parse the Word doc → human review
+      return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf.toString('base64') } };
+    }
     return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: buf.toString('base64') } };
   } catch { return null; }
 }
