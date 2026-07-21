@@ -156,20 +156,8 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
           ) : null;
         })()}
 
-        {(() => {
-          // Vendor + Due / Submitted / Cost are all in the header + summary tiles
-          // above, so the Work Order section carries only the extras: completion
-          // date and any payout adjustment. Markup % is internal — never shown on
-          // the client PDF (it only exposes our margin). Hidden when empty.
-          const rows: { label: string; value: string }[] = [];
-          if (d.completedAt) rows.push({ label: 'Completed', value: humanDate(d.completedAt) });
-          if (d.variant !== 'client' && d.adjustment) rows.push({ label: 'Payout adjustment', value: `-${d.adjustment}${d.adjustmentReason ? ` (${d.adjustmentReason})` : ''}` });
-          return rows.length ? (
-            <Section title="Work Order">
-              {rows.map((r, i) => <Row key={i} label={r.label} value={r.value} last={i === rows.length - 1} />)}
-            </Section>
-          ) : null;
-        })()}
+        {/* Work Order section removed — Due / Submitted / Cost are in the header +
+            summary tiles, and the payout adjustment now lives under Review below. */}
 
         {d.answers.length > 0 && (
           <Section title="Completion Answers">
@@ -197,6 +185,11 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
 
         {!!d.reviewDecision && (
           <Section title={`Review — ${d.reviewDecision === 'reject' ? 'Rejected' : d.reviewDecision === 'modify' ? 'Modified' : 'Approved'}${d.reviewedBy ? ` · ${d.reviewedBy}` : ''}`}>
+            {/* Payout adjustment (vendor copy only — it's our internal margin) shows
+                as the first line under Review. */}
+            {d.variant !== 'client' && d.adjustment ? (
+              <Row label="Payout adjustment" value={`-${d.adjustment}${d.adjustmentReason ? ` (${d.adjustmentReason})` : ''}`} last={!d.reviewNotes} />
+            ) : null}
             {!!d.reviewNotes && <View style={s.noteBox}><Text style={s.note}>{d.reviewNotes}</Text></View>}
           </Section>
         )}
