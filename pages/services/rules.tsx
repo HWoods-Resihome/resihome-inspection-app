@@ -730,28 +730,38 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
     }
   };
 
+  // Persist the open rule (create or update) WITHOUT closing; returns its record
+  // id. Shared by Save & Close and Generate now (so generating always uses the
+  // latest edits). Keeps the local recordId in sync on first save.
+  const persistRule = async (): Promise<string | null> => {
+    if (!rule) return null;
+    const r = await fetch('/api/services/rules/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recordId: rule.recordId, props: ruleToProps(rule) }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.id) { patch({ recordId: d.id }); return String(d.id); }
+    return rule.recordId || null;
+  };
+
   const saveRule = async () => {
     if (!canSave || !rule) { closeRule(); return; }
     setSavingRule(true);
-    try {
-      const r = await fetch('/api/services/rules/save', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordId: rule.recordId, props: ruleToProps(rule) }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok && d.id) patch({ recordId: d.id });
-    } catch { /* preview / offline — keep local */ }
+    try { await persistRule(); } catch { /* preview / offline — keep local */ }
     finally { setSavingRule(false); closeRule(); }
   };
 
-  // Ad-hoc: run THIS rule now to create any missing work orders. Idempotent — the
-  // enrollment-key dedup means it only creates targets without an open order, so
-  // it never duplicates what the nightly job (or a prior run) already made.
+  // Ad-hoc: run THIS rule now to create any missing work orders. SAVES the current
+  // rule first so it generates against the latest edits, then applies. Idempotent —
+  // the enrollment-key dedup means it only creates targets without an open order.
   const generateNow = async () => {
-    if (!rule?.recordId || genBusy) return;
+    if (!rule || genBusy) return;
+    if (!canSave) { setGenMsg('Resolve the issues above, then generate.'); return; }
     setGenBusy(true); setGenMsg('');
     try {
-      const r = await fetch(`/api/services/admin/generate?apply=1&ruleId=${encodeURIComponent(rule.recordId)}`);
+      const id = await persistRule();
+      if (!id) { setGenMsg('Couldn’t save the rule — try again.'); return; }
+      const r = await fetch(`/api/services/admin/generate?apply=1&ruleId=${encodeURIComponent(id)}`);
       const d = await r.json();
       if (!r.ok) { setGenMsg(d.error || 'Generation failed.'); return; }
       if (d.configured === false) { setGenMsg('Services objects aren’t configured yet.'); return; }
@@ -1107,12 +1117,10 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                   master total and prorated evenly across every home in the split. */}
               {rule.scope === 'community' && rule.worktype === 'landscaping' && rule.subtype === 'cut' && (
                 <div className="mt-3 border-t border-gray-100 pt-3">
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <label className={`${lbl} mb-0`}>Include Common Areas?</label>
-                    <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
-                      <button type="button" onClick={() => patch({ includeCommonAreas: true })} className={`px-4 py-1.5 rounded-md ${rule.includeCommonAreas ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Yes</button>
-                      <button type="button" onClick={() => patch({ includeCommonAreas: false })} className={`px-4 py-1.5 rounded-md ${!rule.includeCommonAreas ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>No</button>
-                    </div>
+                  <label className={lbl}>Include Common Areas?</label>
+                  <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
+                    <button type="button" onClick={() => patch({ includeCommonAreas: true })} className={`px-4 py-1.5 rounded-md ${rule.includeCommonAreas ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Yes</button>
+                    <button type="button" onClick={() => patch({ includeCommonAreas: false })} className={`px-4 py-1.5 rounded-md ${!rule.includeCommonAreas ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>No</button>
                   </div>
                   {rule.includeCommonAreas && (
                     <>
@@ -1121,7 +1129,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                         <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
                         <PriceField label="Common Area Client" adorn="$" highlight readOnly colClass="shrink-0 w-28" value={commonAreaClient.toFixed(2)} />
                       </div>
-                      <p className="text-[11px] text-gray-400 mt-1.5">Added to the master total and prorated evenly across every home in the split — the vendor completes one service; each per-property bill carries its share (house cut + common-area share).</p>
+                      <p className="text-[11px] text-gray-400 mt-1.5">Added to the master total and prorated evenly across every home in the split.</p>
                     </>
                   )}
                 </div>
@@ -1418,13 +1426,13 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                       : <span className="text-gray-500">Save the rule to see how many it would create.</span>}
                     {genMsg && <span className="block text-[12px] font-heading font-semibold text-gray-600">{genMsg}</span>}
                   </div>
-                  <button onClick={generateNow} disabled={genBusy || !rule.recordId}
-                    title={rule.recordId ? '' : 'Save the rule first'}
+                  <button onClick={generateNow} disabled={genBusy || !canSave}
+                    title={canSave ? 'Saves the rule, then generates' : 'Resolve the issues above first'}
                     className="shrink-0 rounded-xl px-3.5 py-2 text-[12px] font-heading font-bold border border-brand text-brand bg-white disabled:opacity-50">
                     {genBusy ? '…' : 'Generate now'}
                   </button>
                 </div>
-                <p className="mt-1 text-[11px] text-gray-400">Generate makes only the missing ones — safe anytime; the nightly job fills the rest.</p>
+                <p className="mt-1 text-[11px] text-gray-400">Generate saves your changes first, then makes only the missing ones — safe anytime; the nightly job fills the rest.</p>
               </>
             )}
           </div>
