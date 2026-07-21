@@ -1939,23 +1939,42 @@ const RULE_PROPS = [
   'vendor_cost', 'markup_pct', 'vendors_json', 'service_description', 'recurring',
   'cadences_json', 'initial_due_days', 'skip_months_json', 'included_props_json',
   'portfolios_json', 'communities_json', 'regions_json', 'enroll_field', 'enroll_op',
-  'enroll_value', 'enroll_criteria_json', 'enroll_combinator', 'start_date',
+  'enroll_value', 'enroll_criteria_json', 'enroll_combinator', 'start_date', 'start_delay_days',
   'stop_enabled', 'stop_mode', 'stop_field', 'stop_op', 'stop_value',
   'stop_criteria_json', 'stop_combinator', 'stop_date', 'stop_count',
+  // Community grass-cut common areas + property grass-cut tier payouts. These were
+  // written on save but NOT read back here, so they vanished on reload/generate.
+  'include_common_areas', 'common_area_cost',
+  'grass_rate_standard', 'grass_rate_overgrown', 'grass_rate_heavy',
 ];
 
 /** All Service Rule records (raw props + id), or null when not configured. */
 export async function searchServiceRuleRecords(): Promise<{ id: string; props: Record<string, any> }[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
   if (!typeId) return null;
+  // Self-healing projection: a prop that ships before its provision run isn't on
+  // the object yet, and HubSpot's SEARCH endpoint 400s on an unknown projected
+  // property — which would break reading EVERY rule. Drop the rejected names and
+  // retry so a not-yet-provisioned field simply reads back empty until provisioned.
+  let projection = [...RULE_PROPS];
   try {
     const out: { id: string; props: Record<string, any> }[] = [];
     let after: string | undefined;
     do {
-      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-        method: 'POST',
-        body: JSON.stringify({ limit: 100, after, properties: RULE_PROPS, sorts: [{ propertyName: 'hs_createdate', direction: 'ASCENDING' }] }),
-      });
+      let resp: any;
+      for (;;) {
+        try {
+          resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+            method: 'POST',
+            body: JSON.stringify({ limit: 100, after, properties: projection, sorts: [{ propertyName: 'hs_createdate', direction: 'ASCENDING' }] }),
+          });
+          break;
+        } catch (e) {
+          const rejected = rejectedPropNames(e).filter((n) => projection.includes(n));
+          if (!rejected.length) throw e;
+          projection = projection.filter((n) => !rejected.includes(n));   // strictly shrinks → terminates
+        }
+      }
       for (const r of resp.results || []) out.push({ id: String(r.id), props: r.properties || {} });
       after = resp.paging?.next?.after;
     } while (after);

@@ -156,6 +156,7 @@ export const SERVICE_RULE_OBJECT: ObjectSpec = {
     TA('enroll_criteria_json', 'Enrollment Criteria (JSON)'),   // multiple criteria (source of truth)
     SEL('enroll_combinator', 'Enroll Combinator', opt([['All (AND)', 'and'], ['Any (OR)', 'or']])),
     DATE('start_date', 'Rule Start Date'),                      // dormant until this date
+    NUM('start_delay_days', 'Enroll Delay (days)'),             // start N days after a target first qualifies
 
     BOOL('stop_enabled', 'Stop Enabled'),
     SEL('stop_mode', 'Stop Mode', opt([['Condition', 'condition'], ['Date', 'date'], ['Count', 'count']])),
