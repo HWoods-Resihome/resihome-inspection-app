@@ -9,7 +9,7 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
 import { DEFAULT_SERVICE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
-import { SERVICE_STATUS_STYLE, serviceStatusText, easternTodayISO, PROOF_URL_KEY, type ServiceStatus, type ServiceRecord } from '@/lib/services/model';
+import { SERVICE_STATUS_STYLE, serviceStatusText, easternTodayISO, PROOF_URL_KEY, PROOF_NAME_KEY, type ServiceStatus, type ServiceRecord } from '@/lib/services/model';
 import { serviceVisibleTo } from '@/lib/services/scope';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, fetchPropertyMoveInDate, readServiceForms } from '@/lib/hubspot';
 import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
@@ -200,38 +200,38 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
 // usually already containing job photos) in place of before/after photos. Shows an
 // "attached" state with a view link + remove; on submit the URL rides along in the
 // answers blob and the AI reviews the document instead of the photo comparison.
-function ProofOfService({ url, onChange }: { url: string; onChange: (url: string) => void }) {
+function ProofOfService({ url, name, onChange }: { url: string; name: string; onChange: (url: string, name: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const attached = /^https?:\/\//i.test(url);
-  const isPdf = /\.pdf(\?|#|$)/i.test(url);
+  const displayName = (name || '').trim() || (decodeURIComponent(url.split('#')[0].split('?')[0].split('/').pop() || '').replace(/^proof_/, '')) || 'Attachment';
   const pick = async (file?: File | null) => {
     if (!file) return;
     setErr(''); setBusy(true);
-    try { onChange(await uploadProofFile(file)); }
-    catch (e: any) { setErr(e?.message ? String(e.message).slice(0, 120) : 'Upload failed. Try again.'); }
+    try { onChange(await uploadProofFile(file), file.name); }
+    catch (e: any) { setErr(e?.message ? String(e.message).slice(0, 140) : 'Upload failed. Try again.'); }
     finally { setBusy(false); if (inputRef.current) inputRef.current.value = ''; }
   };
   return (
     <div className="border-t border-gray-100 pt-4">
       <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1">Or attach proof of service</div>
-      <p className="text-[12px] text-gray-500 mb-2 leading-snug">Upload your completed invoice (PDF or image, with photos). This replaces the before/after photo requirement — AI will review the attachment.</p>
-      <input ref={inputRef} type="file" accept="application/pdf,image/*" className="hidden"
+      <p className="text-[12px] text-gray-500 mb-2 leading-snug">Upload your completed invoice (PDF with photos). This replaces the before/after photo requirement.</p>
+      <input ref={inputRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden"
         onChange={(e) => void pick(e.target.files?.[0])} />
       {attached ? (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-          <span className="text-emerald-600 text-lg leading-none">{isPdf ? '📄' : '🖼️'}</span>
+          <span className="text-emerald-600 text-lg leading-none">📄</span>
           <div className="flex-1 min-w-0">
-            <div className="text-[13px] font-semibold text-emerald-800">Proof of service attached</div>
+            <div className="text-[13px] font-semibold text-emerald-800 truncate" title={displayName}>{displayName}</div>
             <a href={url} target="_blank" rel="noopener noreferrer" className="text-[12px] text-emerald-700 underline">View attachment</a>
           </div>
-          <button type="button" onClick={() => onChange('')} className="text-[12px] font-semibold text-gray-500 hover:text-red-600 px-2 py-1">Remove</button>
+          <button type="button" onClick={() => onChange('', '')} className="text-[12px] font-semibold text-gray-500 hover:text-red-600 px-2 py-1">Remove</button>
         </div>
       ) : (
         <button type="button" disabled={busy} onClick={() => inputRef.current?.click()}
           className={`w-full rounded-xl border-2 border-dashed py-3 text-[13px] font-semibold ${busy ? 'border-gray-200 text-gray-400' : 'border-gray-300 text-gray-600 hover:border-brand hover:text-brand'}`}>
-          {busy ? 'Uploading…' : '+ Attach invoice / PDF'}
+          {busy ? 'Uploading…' : '+ Attach PDF / Word document'}
         </button>
       )}
       {err && <div className="text-[12px] text-red-600 mt-1.5">{err}</div>}
@@ -1475,7 +1475,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                       <CameraPhotos label="Pet station — after" urls={petAfter} onChange={setPetAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                     </div>
                   )}
-                  <ProofOfService url={proofUrl} onChange={(u) => setAns(PROOF_URL_KEY, u)} />
+                  <ProofOfService url={proofUrl} name={String(answers[PROOF_NAME_KEY] || '')} onChange={(u, n) => { setAns(PROOF_URL_KEY, u); setAns(PROOF_NAME_KEY, n); }} />
                 </CollapsibleSection>
 
                 {/* Additional-work bid — spawns an Estimated "Bid Item" for review. */}
@@ -1569,13 +1569,18 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   {(() => {
                     const roProof = String(svc.answers[PROOF_URL_KEY] || '').trim();
                     if (!/^https?:\/\//i.test(roProof)) return null;
-                    const isPdf = /\.pdf(\?|#|$)/i.test(roProof);
+                    const roName = String(svc.answers[PROOF_NAME_KEY] || '').trim()
+                      || decodeURIComponent(roProof.split('#')[0].split('?')[0].split('/').pop() || '').replace(/^proof_/, '')
+                      || 'Attachment';
                     return (
-                      <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                        <span className="text-emerald-600 text-lg leading-none">{isPdf ? '📄' : '🖼️'}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[13px] font-semibold text-emerald-800">Proof of service (vendor invoice)</div>
-                          <a href={roProof} target="_blank" rel="noopener noreferrer" className="text-[12px] text-emerald-700 underline">View attachment</a>
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">Proof of service (vendor invoice)</div>
+                        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                          <span className="text-emerald-600 text-lg leading-none">📄</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[13px] font-semibold text-emerald-800 truncate" title={roName}>{roName}</div>
+                            <a href={roProof} target="_blank" rel="noopener noreferrer" className="text-[12px] text-emerald-700 underline">View attachment</a>
+                          </div>
                         </div>
                       </div>
                     );

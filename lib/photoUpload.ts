@@ -144,23 +144,32 @@ export async function uploadPhoto(file: File): Promise<string> {
 
 /**
  * Upload a vendor "proof of service" attachment — their own company invoice
- * (usually a PDF with photos) — used in place of before/after photos. A PDF is
- * uploaded verbatim (never recompressed); an image is compressed to JPEG like a
- * normal photo. Returns the hosted URL. Bounded/retried like the photo path.
+ * (a PDF with photos, or a Word document) — used in place of before/after
+ * photos. The document is uploaded verbatim (never recompressed). Image files
+ * are intentionally NOT accepted here — those belong in the photo gallery.
+ * Returns the hosted URL. Bounded/retried like the photo path.
  */
+const PROOF_DOC_TYPES: Record<string, string> = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
 export async function uploadProofFile(file: File): Promise<string> {
   const rawType = String(file.type || '').toLowerCase().split(';')[0].trim();
-  const isPdf = rawType === 'application/pdf' || /\.pdf$/i.test(file.name || '');
-  if (!isPdf) {
-    // An image proof (photo of the invoice) — compress + upload as JPEG.
-    const compressed = await compressToJpeg(file);
-    return uploadJpegBlob(compressed, toJpegName(file.name));
-  }
-  // PDF: send the original bytes untouched so the invoice stays intact + readable.
+  const nameExt = (/\.([a-z0-9]+)$/i.exec(file.name || '')?.[1] || '').toLowerCase();
+  // Resolve the extension/content-type from the declared MIME first, else the name.
+  const ext = rawType === 'application/pdf' ? 'pdf'
+    : rawType === 'application/msword' ? 'doc'
+    : rawType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? 'docx'
+    : (nameExt === 'pdf' || nameExt === 'doc' || nameExt === 'docx') ? nameExt
+    : '';
+  if (!ext) throw new Error('Attach a PDF or Word document (photos go in the gallery).');
+  const contentType = PROOF_DOC_TYPES[ext];
+  // Send the original bytes untouched so the invoice stays intact + readable.
   const base64 = await fileToBase64(file);
-  const safeBase = (file.name || 'invoice.pdf').replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.pdf$/i, '') || 'invoice';
-  const filename = `proof_${safeBase}.pdf`;
-  const payload = JSON.stringify({ filename, contentType: 'application/pdf', base64 });
+  const safeBase = (file.name || `invoice.${ext}`).replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.[a-z0-9]+$/i, '') || 'invoice';
+  const filename = `proof_${safeBase}.${ext}`;
+  const payload = JSON.stringify({ filename, contentType, base64 });
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
     const controller = new AbortController();

@@ -14,6 +14,8 @@ import type { Worktype, ServiceScope } from './worktypes';
 // base rules instead of the before/after comparison. Kept out of the form-question
 // namespace so it never renders as an answer row.
 export const PROOF_URL_KEY = 'proof_of_service_url';
+// Companion key holding the original uploaded filename (for display only).
+export const PROOF_NAME_KEY = 'proof_of_service_name';
 
 // Pipeline: Estimated → Assigned → Submitted → (Completed | Review).
 // On submit the service STAYS in Submitted with an "AI Processing" tag while the AI

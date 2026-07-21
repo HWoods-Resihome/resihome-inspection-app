@@ -53,15 +53,15 @@ async function fetchPhotoBlock(url: string): Promise<any | null> {
   } catch { return null; }
 }
 
-// A vendor "proof of service" attachment (their company invoice) — a PDF is sent
-// as a document block, an image as an image block — so the model can read the
-// invoice in place of before/after photos. Returns null on any fetch/decode issue.
+// A vendor "proof of service" attachment (their company invoice). Only a PDF can
+// be read by the model — sent as a document block. A Word doc (or anything else)
+// can't be sent, so it returns null and the review routes to a human. Returns null
+// on any fetch/decode issue too.
 async function fetchProofBlock(url: string): Promise<any | null> {
   try {
     const clean = url.split('#')[0];
     if (!isAllowedPhotoHost(clean)) return null;
-    const isPdf = /\.pdf(\?|$)/i.test(clean);
-    if (!isPdf) return fetchPhotoBlock(url);
+    if (!/\.pdf(\?|$)/i.test(clean)) return null;   // Word/other → human review
     const r = await safeProxyFetch(clean);
     if (!r.ok) return null;
     // Cap at ~24MB — comfortably above a normal invoice PDF, well under the API's
