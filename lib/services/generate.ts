@@ -340,8 +340,9 @@ export interface GenerateResult {
   created: number;
   skippedExisting: number;
   // Stop-criteria auto-cancel: assigned orders whose property now meets the
-  // rule's stop condition (or whose rule passed its stop date), cancelled when
-  // due 3+ days out or already past due — never within the 2 days before due.
+  // rule's stop condition (or whose rule passed its stop date), cancelled unless
+  // due TODAY or TOMORROW (the vendor is likely already scheduled); past due
+  // always cancels.
   wouldCancel: number;
   canceled: number;
   errors: number;
@@ -459,20 +460,20 @@ export async function runServiceGeneration(
       'Community (contract calendar): occurrences generate on a fixed schedule regardless of completion — the day after each due date mints the next (due = prior due + a step), so open orders can stack. ≥3 open of the same type raises a backlog alert.',
       'Cadence is “every N days” (weekday anchor seeds the first order) or “monthly on day X”. Skip months are respected by the DUE date’s month; a due rolled across a skip month isn’t created until within one step of it. First Order Due lets the first one land earlier.',
       'Vendor rotation: an address keeps its vendor for the enrollment’s life (sticky); net-new enrollments balance toward the rule vendor with the lowest open volume, ties by vendor order.',
-      'Stop auto-cancel: when a property meets the stop condition (or a rule passes its stop date), its ASSIGNED orders are cancelled — but only when due 3+ days out or already past due; orders due within 2 days are left for the vendor to finish. Submitted/review work is never touched.',
+      'Stop auto-cancel: when a property meets the stop condition (or a rule passes its stop date), its ASSIGNED orders are cancelled — unless due today or tomorrow (left for the vendor to finish); past due always cancels. Submitted/review work is never touched.',
     ],
   };
 
   // ── Stop-criteria AUTO-CANCEL ────────────────────────────────────────────
   // Cancels ASSIGNED orders only (never estimated/submitted/review — a bid isn't
   // dispatched work, and submitted work is owed its review/payout), and only when
-  // the timing says the vendor almost certainly hasn't gone out: due 3+ days from
-  // now, or already past due. Orders due within the next 2 days are left alone.
+  // the timing says the vendor almost certainly hasn't gone out: due 2+ days from
+  // now, or already past due. Orders due TODAY or TOMORROW are left alone.
   const shouldCancelDue = (dueRaw: string): boolean => {
     const due = dateOnly(dueRaw);
     if (!due) return true;                            // no due date → nothing imminent
     if (due < todayISO) return true;                  // past due
-    return due > addDays(todayISO, 2);                // still 3+ days out
+    return due > addDays(todayISO, 1);                // still 2+ days out (not today/tomorrow)
   };
   const autoCancel = async (ruleId: string, ruleName: string, orders: typeof existing, reason: string, targetLabel?: string): Promise<void> => {
     for (const o of orders) {
