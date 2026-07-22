@@ -396,7 +396,10 @@ export async function runServiceGeneration(
   overrideProps?: Record<string, any>,
 ): Promise<GenerateResult | null> {
   const allRules = await searchServiceRuleRecords();
-  const existingAll = await readServiceWorkOrderKeys();
+  // Dry-run (the live "would create" preview) reuses a ~15s-cached key scan so
+  // rapid edits don't re-scan every keystroke; apply always reads fresh so its
+  // dedup can't miss a just-created order.
+  const existingAll = await readServiceWorkOrderKeys({ maxAgeMs: apply ? 0 : 15_000 });
   if (allRules === null || existingAll === null) return null; // objects not configured
   // Cancelling an order is how you scrap a scheduled service and let the rule
   // regenerate it — so a cancelled order is treated as if it never existed. It must

@@ -2126,9 +2126,18 @@ export interface ServiceWorkOrderKey {
   // fallback), dueDate (scheduled due). All '' when unset.
   serviceCompletedDate: string; submittedAt: string; completedAt: string; dueDate: string;
 }
-export async function readServiceWorkOrderKeys(): Promise<ServiceWorkOrderKey[] | null> {
+// Short-lived cache of the full key scan. Populated on every read; only SERVED
+// when a caller passes maxAgeMs (the rules "would create" preview does, so rapid
+// edits don't re-scan every keystroke). Apply/cron read fresh (no maxAgeMs), and a
+// create/patch busts it so a preview right after a generate reflects the new orders.
+let _svcKeysCache: { at: number; data: ServiceWorkOrderKey[] } | null = null;
+export function bustServiceKeysCache(): void { _svcKeysCache = null; }
+
+export async function readServiceWorkOrderKeys(opts?: { maxAgeMs?: number }): Promise<ServiceWorkOrderKey[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
+  const maxAge = opts?.maxAgeMs ?? 0;
+  if (maxAge > 0 && _svcKeysCache && Date.now() - _svcKeysCache.at < maxAge) return _svcKeysCache.data;
   const out: ServiceWorkOrderKey[] = [];
   let after: string | undefined;
   // service_completed_date is a newer property — a deploy that hasn't run the
@@ -2162,6 +2171,7 @@ export async function readServiceWorkOrderKeys(): Promise<ServiceWorkOrderKey[] 
     after = resp.paging?.next?.after;
     if (out.length >= HUBSPOT_SEARCH_MAX) { if (after) console.warn('[services] key scan hit the 10k search cap — dedup set is partial'); break; }
   } while (after);
+  _svcKeysCache = { at: Date.now(), data: out };
   return out;
 }
 
@@ -2205,7 +2215,7 @@ export async function createServiceWorkOrder(props: Record<string, any>): Promis
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
   const resp = await writeObjectResilient(typeId, null, props);
-  bustServiceListCache();   // a new work order → the list changed
+  bustServiceListCache(); bustServiceKeysCache();   // a new work order → the list + key scan changed
   return resp?.id ? String(resp.id) : null;
 }
 
@@ -2296,7 +2306,7 @@ export async function patchServiceWorkOrder(id: string, props: Record<string, an
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId || !id) return false;
   await writeObjectResilient(typeId, id, props);
-  bustServiceListCache();   // status/vendor/etc changed → invalidate the list
+  bustServiceListCache(); bustServiceKeysCache();   // status/vendor/etc changed → invalidate the list + key scan
   return true;
 }
 
