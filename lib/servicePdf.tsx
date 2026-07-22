@@ -21,6 +21,11 @@ export interface ServicePdfData {
   reviewDecision: string; reviewNotes: string; reviewedBy: string;
   answers: { label: string; value: string }[];
   before: string[]; after: string[]; petBefore: string[]; petAfter: string[];  // data URIs
+  // Proof-of-service (vendor closed out with their OWN PDF report): the AI's
+  // neutral summary of that document, the job photos extracted from inside it
+  // (data URIs), and a link to open the original document. Shown on BOTH the
+  // vendor and client variants.
+  proofSummary: string; proofPhotos: string[]; proofLink: string;
   // Bid items that originated from THIS completion (so the PDF shows their origin).
   bids: { description: string; cost: string; status: string; photos: string[] }[];
   galleryBase: string;
@@ -180,6 +185,21 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
             <PhotoBlock title="After photos" urls={d.after} group="after" galleryBase={d.galleryBase} />
             <PhotoBlock title="Pet station - before" urls={d.petBefore} group="petBefore" galleryBase={d.galleryBase} />
             <PhotoBlock title="Pet station - after" urls={d.petAfter} group="petAfter" galleryBase={d.galleryBase} />
+          </Section>
+        )}
+
+        {/* Vendor's own service report (proof-of-service close-out): the AI summary
+            of their document, the photos pulled from inside it, and a link to the
+            original. Rendered on both vendor and client copies. */}
+        {(d.proofSummary || d.proofPhotos.length > 0 || d.proofLink) && (
+          <Section title="Vendor Service Report" breakable>
+            {!!d.proofSummary && <View style={s.noteBox}><Text style={s.note}>{pdfSafe(d.proofSummary)}</Text></View>}
+            {d.proofPhotos.length > 0 && <PhotoBlock title="Photos from the vendor's report" urls={d.proofPhotos} group="" galleryBase="" />}
+            {!!d.proofLink && (
+              <Text style={{ fontSize: 9, marginTop: 4 }}>
+                <Link src={d.proofLink} style={{ color: '#ff0060', textDecoration: 'underline' }}>View the vendor’s full report (PDF)</Link>
+              </Text>
+            )}
           </Section>
         )}
 

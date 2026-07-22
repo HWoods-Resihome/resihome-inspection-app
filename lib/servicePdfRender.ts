@@ -10,6 +10,7 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import { fetchServiceWorkOrder, readServiceForms, findServiceBidChildren } from '@/lib/hubspot';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { DEFAULT_SERVICE_FORMS, formKey } from '@/lib/services/serviceForms';
+import { PROOF_URL_KEY } from '@/lib/services/model';
 import { ServicePdf, type ServicePdfData } from '@/lib/servicePdf';
 import { safeProxyFetch, readBodyCapped, isAllowedPhotoHost } from '@/lib/safeProxyFetch';
 
@@ -66,10 +67,15 @@ export async function renderServicePdfBuffer(id: string, opts: { variant: 'vendo
       return { label: q.label, value: note ? `${base} — ${note}` : base };
     });
 
-  const [before, after, petBefore, petAfter] = await Promise.all([
+  const [before, after, petBefore, petAfter, proofPhotos] = await Promise.all([
     encodeAll(splitUrls(p.before_photo_urls)), encodeAll(splitUrls(p.after_photo_urls)),
     encodeAll(splitUrls(p.pet_before_photo_urls)), encodeAll(splitUrls(p.pet_after_photo_urls)),
+    // Photos extracted from the vendor's proof-of-service PDF (AI-review step).
+    encodeAll(splitUrls(p.proof_photo_urls), 12),
   ]);
+  // Link to the vendor's original proof document (from their completion answers).
+  const proofLinkRaw = String(answersRaw[PROOF_URL_KEY] || '').trim();
+  const proofLink = /^https?:\/\//i.test(proofLinkRaw) ? proofLinkRaw : '';
 
   const bidChildren = await findServiceBidChildren(id).catch(() => []);
   const bids = await Promise.all(bidChildren.map(async (c) => ({
@@ -104,6 +110,7 @@ export async function renderServicePdfBuffer(id: string, opts: { variant: 'vendo
     aiVerdict: p.ai_verdict || '', aiNotes: p.ai_notes || '',
     reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: p.reviewed_by || '',
     answers, before, after, petBefore, petAfter, bids,
+    proofSummary: String(p.proof_summary || '').trim(), proofPhotos, proofLink,
     galleryBase: `${baseUrlClean(opts.baseUrl)}/services/${encodeURIComponent(id)}/photos`,
     isInternal: opts.internal,
     variant: opts.variant,

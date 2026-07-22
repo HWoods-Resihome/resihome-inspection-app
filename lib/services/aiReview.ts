@@ -18,6 +18,7 @@ import { recordAiUsage } from '@/lib/aiUsage';
 import { SAMPLE_AI_CHECKS, type AiCheck } from './aiKnowledge';
 import { worktypeLabel, subtypeLabel, type Worktype } from './worktypes';
 import { PROOF_URL_KEY } from './model';
+import { extractProofPhotos } from './proofExtract';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-6';
@@ -90,7 +91,12 @@ function checksFor(all: AiCheck[], worktype: string, subtype: string): string[] 
     .map((c) => c.check);
 }
 
-export interface ServiceVerdict { verdict: 'clean' | 'needs_review'; workEvidenced: boolean; geofenceOk: boolean; notes: string; issues: string[]; }
+export interface ServiceVerdict {
+  verdict: 'clean' | 'needs_review'; workEvidenced: boolean; geofenceOk: boolean; notes: string; issues: string[];
+  /** Proof-of-service mode only: the model's neutral summary of the vendor's
+   *  document (for the service report) + whether a proof doc was attached. */
+  proofSummary: string; hasProof: boolean;
+}
 
 /** Run the AI review for one submitted order's evidence, against the given check set. */
 export async function reviewOne(order: { id: string; props: Record<string, any> }, allChecks: AiCheck[] = SAMPLE_AI_CHECKS): Promise<ServiceVerdict> {
@@ -221,6 +227,7 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
         geofence_ok: { type: 'boolean', description: 'false when the photo evidence stamps show an off-site (✗) or missing capture GPS, a location that does not match the address, or implausible capture timing. A false value must route to needs_review.' },
         notes: { type: 'string', description: 'One or two plain sentences explaining the decision for the coordinator.' },
         issues: { type: 'array', items: { type: 'string' }, description: 'Short bullet list of specific concerns (empty when clean). Prefix a before/after concern with "Work:" and a location/timing concern with "Geofence:".' },
+        proof_summary: { type: 'string', description: 'ONLY when a PROOF OF SERVICE document is attached: a 2–4 sentence neutral summary of the vendor’s document for the service report — what work it records, the service/completion date it shows, and any notable line items or photos it contains. Written for the client/vendor report, not the reviewer. Empty string when there is no proof document.' },
       },
       required: ['verdict', 'work_evidenced', 'geofence_ok', 'notes'],
     },
@@ -255,6 +262,9 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
     geofenceOk,
     notes: String(input.notes || '').slice(0, 900),
     issues: Array.isArray(input.issues) ? input.issues.map((s: any) => String(s)).slice(0, 12) : [],
+    // Only trust a summary when a proof doc was actually attached and readable.
+    proofSummary: hasProof && proofBlock ? String(input.proof_summary || '').slice(0, 1500) : '',
+    hasProof,
   };
   return verdict;
 }
@@ -322,6 +332,17 @@ export async function runServiceAiReview(apply: boolean, todayISO: string, onlyI
           ai_notes: workPrefix.concat(geoPrefix).concat(isMasterCut && v.verdict === 'clean' ? 'Community grass-cut master — routed to review to confirm covered homes and split into per-property billing.\n\n' : '').concat(notes).slice(0, 2000),
           status: clean ? 'completed' : 'review',
         };
+        // Proof-of-service enrichment (both feed the vendor/client service PDFs):
+        // the model's neutral document summary, and the job photos extracted from
+        // inside the vendor's PDF. Best-effort — never blocks/alters the verdict.
+        if (v.proofSummary) props.proof_summary = v.proofSummary;
+        if (v.hasProof) {
+          try {
+            const ans = JSON.parse(order.props.answers_json || '{}');
+            const photos = await extractProofPhotos(String(ans[PROOF_URL_KEY] || ''), order.id);
+            if (photos.length) props.proof_photo_urls = photos.join('\n');
+          } catch (e) { console.warn('[ai-review] proof photo extraction skipped:', e); }
+        }
         if (clean) {
           props.completed_at = new Date().toISOString();
           const due = String(order.props.due_date || '').slice(0, 10);

@@ -83,6 +83,11 @@ export const SERVICE_OBJECT: ObjectSpec = {
     DATE('service_completed_date', 'Service Completed Date'),
     SEL('ai_verdict', 'AI Verdict', opt([['Clean', 'clean'], ['Needs Review', 'needs_review']])),
     TA('ai_notes', 'AI Notes'),
+    // Proof-of-service enrichment (vendor closed out with their own PDF report):
+    // the AI's neutral summary of that document + the job photos extracted from
+    // inside it. Both surface on the vendor/client service PDFs.
+    TA('proof_summary', 'Proof-of-Service Summary'),
+    TA('proof_photo_urls', 'Proof Photo URLs'),
     SEL('review_decision', 'Review Decision', opt([['Approved', 'approve'], ['Modified', 'modify'], ['Rejected', 'reject']])),
     TA('review_notes', 'Review Notes'),
     T('reviewed_by', 'Reviewed By'),
