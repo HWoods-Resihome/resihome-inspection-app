@@ -197,7 +197,7 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
             {d.proofPhotos.length > 0 && <PhotoBlock title="Photos from the vendor's report" urls={d.proofPhotos} group="" galleryBase="" />}
             {!!d.proofLink && (
               <Text style={{ fontSize: 9, marginTop: 4 }}>
-                <Link src={d.proofLink} style={{ color: '#ff0060', textDecoration: 'underline' }}>View the vendor’s full report (PDF)</Link>
+                <Link src={d.proofLink} style={{ color: '#ff0060', textDecoration: 'underline' }}>Vendor Service Report (PDF)</Link>
               </Text>
             )}
           </Section>
