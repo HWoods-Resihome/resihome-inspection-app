@@ -81,10 +81,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (alsoApi) {
       const typeId = /evic/i.test(target) ? TICKET_TYPE_EVICTION : TICKET_TYPE_TURNKEY;
       const apiRes = await setMaintenanceTicketType(ticketId, typeId);
+      const apiState = !apiRes.configured ? '⚠️ not configured (no API key)'
+        : apiRes.skipped ? '⏭️ skipped'
+        : apiRes.ok ? '✅ OK' : '❌ failed';
       parts.push(
         `<h3>API PUT (ticketTypeId=${typeId})</h3>`
-        + `<p>${apiRes.configured ? (apiRes.ok ? '✅ OK' : '❌ failed') : '⚠️ not configured (no API key)'}`
-        + ` — status ${apiRes.status ?? '—'}${apiRes.error ? ` · ${esc(apiRes.error)}` : ''}${apiRes.body ? `<br><code style="font-size:12px">${esc(apiRes.body)}</code>` : ''}</p>`
+        + `<p>${apiState} — status ${apiRes.status ?? '—'}${apiRes.error ? ` · ${esc(apiRes.error)}` : ''}${apiRes.body ? `<br><code style="font-size:12px">${esc(apiRes.body)}</code>` : ''}</p>`
       );
     }
 

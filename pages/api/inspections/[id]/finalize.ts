@@ -55,6 +55,7 @@ import { uploadToSftp, type SftpUploadResult } from '@/lib/sftp';
 import { enqueueSftpWatch, WATCH_WINDOW_MS } from '@/lib/sftpWatch';
 import { getGmailRefreshToken, encryptToken } from '@/lib/gmailAuth';
 import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, TICKET_TYPE_EVICTION, TICKET_CATEGORY_EVICTION, TICKET_CATEGORY_CAPEX, type CreateTicketResult } from '@/lib/maintenanceAi';
+import { enqueueTicketEnforcement } from '@/lib/ticketEnforceQueue';
 import { vendorTicketKind } from '@/lib/vendors';
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
@@ -1106,6 +1107,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             // Persist the ticket id (durably — the re-finalize/resume dedup
             // depends on it) for visibility + background doc-upload retries.
             await storeTicketId('hbmm_ticket_id', ticketResult.ticketId);
+            // Queue the Turnkey type-enforcement SERVER-SIDE so it survives the
+            // user closing the tab — a cron drives the UI to completion no matter
+            // what (the client's live upload is just the fast path). See
+            // lib/ticketEnforceQueue + pages/api/cron/ticket-type-sweep.
+            if (ticketResult.ticketId) await enqueueTicketEnforcement(Number(ticketResult.ticketId), (process.env.HBMM_TICKET_TYPE_TARGET || 'Turnkey').trim(), id).catch(() => {});
           } else if (ticketResult.configured) {
             console.warn(`[finalize] maintenance ticket failed: ${ticketResult.error}`);
           } else {
@@ -1163,6 +1169,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             if (evictionTicketResult.ok) {
               console.log(`[finalize] eviction ticket created: #${evictionTicketResult.ticketId} (type ${TICKET_TYPE_EVICTION}) on property ${hbmmId}`);
               await storeTicketId('hbmm_eviction_ticket_id', evictionTicketResult.ticketId);
+              // Same durable enforcement for the Evictions-type ticket.
+              if (evictionTicketResult.ticketId) await enqueueTicketEnforcement(Number(evictionTicketResult.ticketId), (process.env.HBMM_TICKET_TYPE_TARGET_EVICTION || 'Evictions').trim(), id).catch(() => {});
             } else if (evictionTicketResult.configured) {
               console.warn(`[finalize] eviction ticket failed: ${evictionTicketResult.error}`);
             }

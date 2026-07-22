@@ -190,7 +190,7 @@ export interface CreateTicketInput {
   skipTypeUpdate?: boolean;
 }
 
-export interface TicketTypeUpdateResult { ok: boolean; status?: number; body?: string; error?: string }
+export interface TicketTypeUpdateResult { ok: boolean; status?: number; body?: string; error?: string; skipped?: boolean }
 
 /**
  * Set a ticket's type. The create call does NOT reliably set the type (the API
@@ -201,13 +201,24 @@ export interface TicketTypeUpdateResult { ok: boolean; status?: number; body?: s
  * Endpoint/method are the documented ones (PUT /ticket/{id} with ticketTypeId);
  * overridable via MAINTENANCE_AI_TICKET_UPDATE_METHOD if the API differs.
  */
-async function updateTicketType(baseUrl: string, version: string, apiKey: string, ticketId: number, ticketTypeId: number): Promise<TicketTypeUpdateResult> {
+async function updateTicketType(baseUrl: string, version: string, apiKey: string, ticketId: number, ticketTypeId: number, fullBody?: Record<string, any>): Promise<TicketTypeUpdateResult> {
   const method = (process.env.MAINTENANCE_AI_TICKET_UPDATE_METHOD || 'PUT').trim().toUpperCase();
+  const statusId = Number(process.env.MAINTENANCE_AI_TICKET_STATUS_ID || 0) || 0;
+  // PUT /ticket/{id} is a FULL-object update: HoneyBadger 400s it without
+  // priorityId + categoryIds + description + locationId + ticketStatusId (observed
+  // VALIDATION_ERROR). A blind { ticketId, ticketTypeId } always failed, so we only
+  // call the API when we can send a COMPLETE body (the create fields) AND a
+  // configured status id. Otherwise skip — the UI enforcement + cron sweep set the
+  // type reliably, and we don't waste a guaranteed-400 request (+ its retry sleeps).
+  if (!fullBody || !statusId) {
+    return { ok: false, skipped: true, status: 0, body: 'API type-set skipped — PUT needs a full ticket body + MAINTENANCE_AI_TICKET_STATUS_ID; using UI enforcement instead.' };
+  }
+  const payload = { ...fullBody, ticketId, ticketTypeId, ticketStatusId: statusId };
   const attempt = async (): Promise<TicketTypeUpdateResult> => {
     const resp = await fetch(`${baseUrl}/api/external/${version}/ticket/${ticketId}`, {
       method,
       headers: { 'x-api-key': apiKey, 'x-request-id': genRequestId(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticketId, ticketTypeId }),
+      body: JSON.stringify(payload),
     });
     const body = await resp.text().catch(() => '');
     return { ok: resp.ok, status: resp.status, body: body.replace(/\s+/g, ' ').slice(0, 200) };
@@ -317,7 +328,7 @@ export async function createMaintenanceTicket(input: CreateTicketInput): Promise
       // entirely for the 1099/vacancy flow (skipTypeUpdate), which keeps the
       // type the API assigned.
       const typeUpdate = (!input.skipTypeUpdate)
-        ? await updateTicketType(baseUrl, version, apiKey, tid, body.ticketTypeId)
+        ? await updateTicketType(baseUrl, version, apiKey, tid, body.ticketTypeId, body)
         : undefined;
       return { ok: true, configured: true, status, requestId, ticketId: tid, typeUpdate };
     }

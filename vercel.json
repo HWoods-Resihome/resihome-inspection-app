@@ -56,6 +56,9 @@
     },
     "pages/api/admin/reclaim-photos-bg.ts": {
       "maxDuration": 300
+    },
+    "pages/api/cron/ticket-type-sweep.ts": {
+      "maxDuration": 300
     }
   },
   "crons": [
@@ -110,6 +113,10 @@
     {
       "path": "/api/cron/reclaim-photos-worker",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/ticket-type-sweep",
+      "schedule": "*/2 * * * *"
     }
   ]
 }

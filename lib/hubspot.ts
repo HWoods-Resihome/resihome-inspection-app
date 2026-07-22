@@ -7060,6 +7060,13 @@ export function writeServiceTaxonomy(taxonomy: any[]): Promise<boolean> { return
 export function readGenEnrollSeen(): Promise<Record<string, string> | null> { return readAgentJson<Record<string, string>>('gen_enroll_seen_json'); }
 export function writeGenEnrollSeen(map: Record<string, string>): Promise<boolean> { return writeAgentJson('gen_enroll_seen_json', 'Generation Enrollment Seen (JSON)', map); }
 
+/** Durable queue of HoneyBadger tickets whose type still needs enforcing (Turnkey /
+ *  Evictions). Enqueued server-side at finalize so the enforcement survives the
+ *  user closing the browser; a cron drains it via the UI until each is confirmed.
+ *  Null when unset. */
+export function readTicketEnforceQueue<T = any[]>(): Promise<T | null> { return readAgentJson<T>('ticket_type_enforce_json'); }
+export function mutateTicketEnforceQueue<T = any[]>(mutator: (cur: T | null) => T): Promise<boolean> { return mutateAgentJson<T>('ticket_type_enforce_json', 'Ticket Type Enforce Queue (JSON)', mutator); }
+
 /** Per-user email notification preferences: a map of lowercased email →
  *  { [notificationKey]: boolean }. Absent keys default to ON. Null when unset. */
 export function readNotificationPrefsRaw(): Promise<Record<string, Record<string, boolean>> | null> {
