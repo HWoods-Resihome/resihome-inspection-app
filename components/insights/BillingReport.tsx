@@ -20,24 +20,32 @@ const RANGES: { value: string; label: string }[] = [
   { value: 'custom', label: 'Custom…' },
 ];
 
+// Presets whose range ENDS today — the only ones the "Include today" toggle
+// affects. With the toggle OFF the window ends yesterday instead: a rolling
+// preset keeps its full width (Last 7 days → the trailing 7 days BEFORE today),
+// a period-to-date preset simply stops at yesterday.
+const TODAY_ENDING = new Set(['last_7_days', 'last_30_days', 'this_week', 'this_month', 'this_year']);
+
 // Client-side resolve of a relative preset → { from, to } (browser-local date;
 // the scheduled cron resolves in ET precisely). 'custom'/'all' handled by caller.
-function resolveRange(range: string): { from?: string; to?: string } {
+function resolveRange(range: string, includeToday = true): { from?: string; to?: string } {
   const now = new Date();
   const d = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
   const today = d(now);
   const shift = (n: number) => { const x = new Date(now); x.setDate(x.getDate() + n); return d(x); };
   const dow = now.getDay();
+  // End of a today-ending window: today, or yesterday when today is excluded.
+  const end = includeToday ? today : shift(-1);
   switch (range) {
     case 'today': return { from: today, to: today };
     case 'yesterday': return { from: shift(-1), to: shift(-1) };
-    case 'last_7_days': return { from: shift(-6), to: today };
-    case 'last_30_days': return { from: shift(-29), to: today };
-    case 'this_week': return { from: shift(-dow), to: today };
+    case 'last_7_days': return { from: shift(includeToday ? -6 : -7), to: end };
+    case 'last_30_days': return { from: shift(includeToday ? -29 : -30), to: end };
+    case 'this_week': return { from: shift(-dow), to: end };
     case 'last_week': return { from: shift(-dow - 7), to: shift(-dow - 1) };
-    case 'this_month': return { from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`, to: today };
+    case 'this_month': return { from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`, to: end };
     case 'last_month': { const y = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear(); const m = now.getMonth() === 0 ? 12 : now.getMonth(); const last = new Date(y, m, 0).getDate(); return { from: `${y}-${String(m).padStart(2, '0')}-01`, to: `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}` }; }
-    case 'this_year': return { from: `${now.getFullYear()}-01-01`, to: today };
+    case 'this_year': return { from: `${now.getFullYear()}-01-01`, to: end };
     default: return {};
   }
 }
@@ -88,6 +96,7 @@ export function BillingReport({ object }: { object: Obj }) {
   const [people, setPeople] = useState<string[]>([]);
   const [types, setTypes] = useState<string[]>([]);
   const [range, setRange] = useState('last_7_days');
+  const [includeToday, setIncludeToday] = useState(true);   // today-ending presets only
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [exporting, setExporting] = useState(false);
@@ -95,8 +104,8 @@ export function BillingReport({ object }: { object: Obj }) {
 
   const resolved = useMemo(() => {
     if (range === 'custom') return { from: customFrom || undefined, to: customTo || undefined };
-    return resolveRange(range);
-  }, [range, customFrom, customTo]);
+    return resolveRange(range, includeToday);
+  }, [range, includeToday, customFrom, customTo]);
 
   // DRAFT (the controls above) vs APPLIED (what the table/export/schedule use).
   // Selections stage in the draft and only take effect on "Apply", so the
@@ -172,6 +181,14 @@ export function BillingReport({ object }: { object: Obj }) {
         <select value={range} onChange={(e) => setRange(e.target.value)} className={CTRL} aria-label="Completed date range">
           {RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
+        {/* Include today? Only for presets that end today. OFF = the window ends
+            yesterday (Last 7 days becomes the trailing 7 days before today). */}
+        {TODAY_ENDING.has(range) && (
+          <label className={`${CTRL} inline-flex items-center gap-1.5 cursor-pointer select-none ${includeToday ? '' : 'border-[#ff0060] text-[#ff0060]'}`} title="Off = the range ends yesterday (e.g. the trailing 7 days before today)">
+            <input type="checkbox" checked={includeToday} onChange={(e) => setIncludeToday(e.target.checked)} className="accent-[#ff0060]" />
+            Include today
+          </label>
+        )}
         {range === 'custom' && (
           <>
             <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className={CTRL} aria-label="From" />
