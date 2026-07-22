@@ -12,7 +12,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { updateVendorCompany, archiveVendorCompany, fetchVendorAdminList, type VendorWritePatch } from '@/lib/hubspot';
+import { updateVendorCompany, archiveVendorCompany, fetchVendorAdminList, fetchVendorInspectionFlags, type VendorWritePatch } from '@/lib/hubspot';
 import { normalizeRegionsString } from '@/lib/vendorRegions';
 import { sendVendorWelcomeEmail } from '@/lib/notifications/vendorWelcome';
 
@@ -70,7 +70,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
     try {
       await updateVendorCompany(id, patch);
-      return res.status(200).json({ ok: true });
+      // VERIFIED SAVE for the inspections flags: the resilient vendor write can
+      // silently drop an unwritable flag (e.g. resiwalk_inspection_full archived
+      // in HubSpot) so the rest of the patch still lands — which made "Full"
+      // look saved but revert. Read back what's actually stored and return it,
+      // so the client can reconcile and tell the admin the truth.
+      let applied: { inspectionAccess: boolean; inspectionFull: boolean } | null = null;
+      if (patch.inspectionAccess !== undefined || patch.inspectionFull !== undefined) {
+        applied = await fetchVendorInspectionFlags(id);
+      }
+      return res.status(200).json({ ok: true, applied });
     } catch (e: any) {
       console.error('[admin/vendors] update failed:', e);
       return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });

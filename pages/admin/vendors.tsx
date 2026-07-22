@@ -169,7 +169,11 @@ export default function VendorManagement() {
       const snap = JSON.parse(localStorage.getItem(SNAP_KEY) || 'null');
       if (snap?.vendors?.length) { setVendors(snap.vendors); setRegionOptions(snap.regionOptions || []); setLoading(false); }
     } catch { /* corrupt snapshot */ }
-    void load();
+    // Reconcile against LIVE HubSpot (refresh=1 bypasses the server's 10-min
+    // list cache). A write busts the cache only on ITS serverless instance, so a
+    // plain load could hit another instance and paint pre-write values — which
+    // made a just-saved toggle look like it reverted.
+    void load(true);
   }, []);
 
   const allRegionOptions = useMemo(() => {
@@ -209,14 +213,16 @@ export default function VendorManagement() {
   const activeFilterCount = regionFilter.length + recurringFilter.length + statusFilter.length;
 
   // ── Mutations (optimistic + PATCH; reload only on failure) ──
-  async function patchVendor(id: string, patch: Record<string, unknown>): Promise<boolean> {
+  // Returns the response body on success (truthy — existing boolean callers keep
+  // working) so save-verification data like `applied` reaches the caller.
+  async function patchVendor(id: string, patch: Record<string, unknown>): Promise<Record<string, any> | false> {
     try {
       const r = await fetch(`/api/admin/vendors/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      return true;
+      return d || {};
     } catch (e: any) {
       void dialog.alert(`Update failed: ${e?.message || e}`);
       await load(true);
@@ -239,6 +245,10 @@ export default function VendorManagement() {
 
   // Tri-state Inspections access: none / limited (own work, any type) / full
   // (everything, like internal). Requires an ACTIVE vendor for limited/full.
+  // VERIFIED save: the server reads back what HubSpot actually stored (`applied`)
+  // — if the requested level didn't stick (e.g. the resiwalk_inspection_full
+  // Company property is archived/missing), reconcile the card to the truth and
+  // tell the admin why instead of silently reverting on the next reload.
   function setInspLevel(v: VendorRow, lvl: InspLevel) {
     if (lvl !== 'none' && !v.resiwalkAccess) {
       void dialog.alert('Reactivate this vendor first — a deactivated vendor can’t access Inspections.');
@@ -246,7 +256,20 @@ export default function VendorManagement() {
     }
     if (inspLevelOf(v) === lvl) return;
     mutateLocal(v.id, { inspectionAccess: lvl !== 'none', inspectionFull: lvl === 'full' });
-    void patchVendor(v.id, { inspectionLevel: lvl });
+    void patchVendor(v.id, { inspectionLevel: lvl }).then((resp) => {
+      const applied = resp && (resp as any).applied;
+      if (!applied) return;   // failed (already alerted+reloaded) or flags not returned
+      const got = inspLevelOf(applied);
+      if (got !== lvl) {
+        mutateLocal(v.id, { inspectionAccess: applied.inspectionAccess, inspectionFull: applied.inspectionFull });
+        void dialog.alert(
+          `Saved as “${got}” — “${lvl}” did not stick in HubSpot.\n\n`
+          + (inspPropError
+            ? `Reason: ${inspPropError}`
+            : 'The “ResiWalk Inspection Full Access” Company property is likely archived or missing in HubSpot. Check Settings → Properties → Companies (include archived) and restore it, then try again.'),
+        );
+      }
+    });
   }
 
   async function toggleStatus(v: VendorRow) {

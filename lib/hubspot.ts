@@ -8776,6 +8776,17 @@ export async function updateVendorCompany(id: string, patch: VendorWritePatch): 
   bustVendorCompaniesCache();
 }
 
+/** The two inspection flags as ACTUALLY STORED on a vendor Company right now —
+ *  the save-verification read (vendorWrite can silently drop an unwritable flag
+ *  to save the rest of a patch; this is how the caller finds out). */
+export async function fetchVendorInspectionFlags(id: string): Promise<{ inspectionAccess: boolean; inspectionFull: boolean } | null> {
+  try {
+    const r = await hubspotFetch(`/crm/v3/objects/companies/${id}?properties=resiwalk_inspection_access,resiwalk_inspection_full`);
+    const p = r?.properties || {};
+    return { inspectionAccess: vendorTruthy(p.resiwalk_inspection_access), inspectionFull: vendorTruthy(p.resiwalk_inspection_full) };
+  } catch { return null; }
+}
+
 /** Archive (delete) a vendor Company — removes it from HubSpot's active records
  *  and thereby from every ResiWalk vendor list/login. */
 export async function archiveVendorCompany(id: string): Promise<void> {
