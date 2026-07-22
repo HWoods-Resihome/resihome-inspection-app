@@ -548,6 +548,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
   const [reissueDays, setReissueDays] = useState('5');
   const [reissueNote, setReissueNote] = useState('');
   const [open, setOpen] = useState(true);   // the panel is collapsible
+  const [blockMsg, setBlockMsg] = useState('');   // why the submit is held (shown on tap)
   const money = (n: number) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmt2 = (v: string) => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) ? n.toFixed(2) : v; };
   const inputCls = 'w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand';
@@ -689,16 +690,34 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
           placeholder="Required — the reason for this decision (visible on the record)…" />
       </div>
 
-      <button type="button" disabled={!canSubmit}
-        onClick={() => canSubmit && onSubmit({ decision: decision as DecisionPayload['decision'], vendorCost: Number(vc || '0'), markupPct: Number(mk || '0'), dueDays: Number(days || '0'), notes, reissue: kind === 'review' && allowReissue && reissue, reissueDays: Number(reissueDays || '0'), reissueNote })}
+      <button type="button"
+        onClick={() => {
+          if (busy) return;
+          if (!canSubmit) {
+            // Never a silently-dead button: tapping it while not ready spells
+            // out exactly what's missing (the grey hints were easy to miss).
+            const missing: string[] = [];
+            if (!decision) missing.push('Choose Approve, Modify, or Reject above.');
+            if (!notes.trim()) missing.push('Write a decision note (required — it goes on the record and to the vendor).');
+            if (needsDays && !(Number(days) > 0)) missing.push('Enter the days to complete.');
+            if (!reissueOk) missing.push('Enter the days to complete the re-issued service (or set Re-Issue to No).');
+            setBlockMsg(missing.join('\n'));
+            return;
+          }
+          setBlockMsg('');
+          onSubmit({ decision: decision as DecisionPayload['decision'], vendorCost: Number(vc || '0'), markupPct: Number(mk || '0'), dueDays: Number(days || '0'), notes, reissue: kind === 'review' && allowReissue && reissue, reissueDays: Number(reissueDays || '0'), reissueNote });
+        }}
         className={`w-full rounded-xl py-3 font-heading font-bold text-sm ${
           !canSubmit ? 'bg-gray-200 text-gray-400'
             : decision === 'reject' ? 'bg-red-600 text-white' : decision === 'modify' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}`}>
         {busy ? '…' : submitLabel}
       </button>
-      {decision && !notes.trim() && <div className="text-[12px] text-gray-400 text-center -mt-1">A decision note is required to finalize.</div>}
-      {needsDays && !(Number(days) > 0) && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days to complete.</div>}
-      {kind === 'review' && reissue && !reissueOk && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days to complete the re-issued service.</div>}
+      {blockMsg && (
+        <div className="text-[13px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 whitespace-pre-line">{blockMsg}</div>
+      )}
+      {decision && !notes.trim() && <div className="text-[12px] font-semibold text-amber-600 text-center -mt-1">A decision note is required to finalize.</div>}
+      {needsDays && !(Number(days) > 0) && <div className="text-[12px] font-semibold text-amber-600 text-center -mt-1">Enter the days to complete.</div>}
+      {kind === 'review' && reissue && !reissueOk && <div className="text-[12px] font-semibold text-amber-600 text-center -mt-1">Enter the days to complete the re-issued service.</div>}
       {error && <div className="text-center text-xs text-red-600">{error}</div>}
       </>)}
     </section>
