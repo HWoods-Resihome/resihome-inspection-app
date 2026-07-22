@@ -5,7 +5,8 @@ import { isExternalEmail, EXTERNAL_TEMPLATE } from '@/lib/userAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { canViewInsights } from '@/lib/insightsAccess';
-import { isResiwalkActive, inspectionsEnabled } from '@/lib/userManagement';
+import { isResiwalkActive, inspectionsEnabled, inspectionAccessLevel } from '@/lib/userManagement';
+import { vendorInspectionLevel } from '@/lib/inspectionGuard';
 import { warnOnBootIfMisconfigured } from '@/lib/configValidation';
 
 // Cheap, env-only, once-per-cold-instance: log a warning if a required env var
@@ -28,6 +29,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
   const external = isExternalEmail(user.email);
   const isAdmin = await isAppAdmin(user.email);
+  // Effective inspections LEVEL: a vendor's tri-state (Vendor Management) or a
+  // per-user override (User Management) can grant FULL — "everything, any type,
+  // like an internal user". Only below-full external users keep the 1099-only
+  // template restriction; domain alone no longer decides it.
+  const level = user.vendor
+    ? ((await vendorInspectionLevel(user.email).catch(() => null)) ?? 'limited')
+    : await inspectionAccessLevel(user.email).catch(() => (external ? 'limited' as const : 'full' as const));
+  const externalRestricted = external && level !== 'full';
   return res.status(200).json({
     authenticated: true,
     user,
@@ -44,10 +53,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Whether this user may finalize their OWN submitted inspection (bypass the
     // dual-approval lock). Everyone else must hand off to a second reviewer.
     isFinalizeAdmin: isFinalizeAdmin(user.email),
-    // External (non-internal-domain) users are limited to the 1099 template:
-    // start one, view 1099-type inspections, no editing completed ones.
-    isExternal: external,
-    allowedTemplate: external ? EXTERNAL_TEMPLATE : null,
+    // External (non-internal-domain) users are limited to the 1099 template —
+    // UNLESS their effective inspections level is FULL (vendor tri-state or
+    // User Management override), which unlocks every template like an internal
+    // user. Server-side write guards enforce the same level independently.
+    isExternal: externalRestricted,
+    allowedTemplate: externalRestricted ? EXTERNAL_TEMPLATE : null,
     // Admin "view as": when set, isAdmin/isExternal above reflect the IMPERSONATED
     // user (so the app shows exactly what they'd see); realEmail is the admin, used
     // to render the banner + allow stopping.
