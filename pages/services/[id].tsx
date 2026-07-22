@@ -13,6 +13,7 @@ import { SERVICE_STATUS_STYLE, serviceStatusText, easternTodayISO, PROOF_URL_KEY
 import { serviceVisibleTo } from '@/lib/services/scope';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, fetchPropertyMoveInDate, readServiceForms } from '@/lib/hubspot';
 import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
+import { reviewerDisplayName } from '@/lib/reviewerName';
 import type { AuditEvent } from '@/lib/auditLog';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
@@ -109,7 +110,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
           heavy: num(p.grass_rate_heavy) ?? DEFAULT_GRASS_TIERS.heavy,
         },
         aiVerdict: p.ai_verdict || '', aiNotes: p.ai_notes || '',
-        reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: p.reviewed_by || '',
+        reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: await reviewerDisplayName(p.reviewed_by),
         answers: (() => { try { return JSON.parse(p.answers_json || '{}'); } catch { return {}; } })(),
         before: splitUrls(p.before_photo_urls), after: splitUrls(p.after_photo_urls),
         petBefore: splitUrls(p.pet_before_photo_urls), petAfter: splitUrls(p.pet_after_photo_urls),

@@ -66,7 +66,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       status: 'completed',
       review_decision: decision,
       review_notes: notes.slice(0, 2000),
-      reviewed_by: email || '',
+      // The NAME, not the email — this shows to the vendor on the record + PDF.
+      reviewed_by: session?.name || email || '',
       reviewed_at: now,
       completed_at: now,
     };
@@ -117,7 +118,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const markup = Number.isFinite(Number(props.markup_pct)) ? Number(props.markup_pct) : (Number.isFinite(Number(p.markup_pct)) ? Number(p.markup_pct) : null);
           split = await splitMasterCommunityCut({
             masterId: id, masterProps: p, finalVendorCost, markupPct: markup,
-            closedAt: now, reviewedBy: email || '', reviewNotes: notes, decision,
+            closedAt: now, reviewedBy: session?.name || email || '', reviewNotes: notes, decision,
           });
           void recordServiceAudit({ serviceId: id, action: 'review', actorEmail: email, actorName: session?.name, detail: `Split into ${split.count} per-property billing line${split.count === 1 ? '' : 's'}`.slice(0, 500), meta: { split: true, count: split.count } });
         } catch (e: any) {

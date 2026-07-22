@@ -13,6 +13,7 @@ import { DEFAULT_SERVICE_FORMS, formKey } from '@/lib/services/serviceForms';
 import { PROOF_URL_KEY } from '@/lib/services/model';
 import { ServicePdf, type ServicePdfData } from '@/lib/servicePdf';
 import { safeProxyFetch, readBodyCapped, isAllowedPhotoHost } from '@/lib/safeProxyFetch';
+import { reviewerDisplayName } from '@/lib/reviewerName';
 
 const money = (v: any) => { const n = Number(v); return Number.isFinite(n) ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''; };
 const splitUrls = (v: any): string[] => String(v || '').split(/[\n,]+/).map((x) => x.trim()).filter((x) => /^https?:\/\//i.test(x.split('#')[0]));
@@ -108,7 +109,7 @@ export async function renderServicePdfBuffer(id: string, opts: { variant: 'vendo
     })(),
     adjustment: p.vendor_cost_adjustment && Number(p.vendor_cost_adjustment) > 0 ? money(p.vendor_cost_adjustment) : '', adjustmentReason: p.vendor_cost_adjustment_reason || '',
     aiVerdict: p.ai_verdict || '', aiNotes: p.ai_notes || '',
-    reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: p.reviewed_by || '',
+    reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: await reviewerDisplayName(p.reviewed_by),
     answers, before, after, petBefore, petAfter, bids,
     proofSummary: String(p.proof_summary || '').trim(), proofPhotos, proofLink,
     galleryBase: `${baseUrlClean(opts.baseUrl)}/services/${encodeURIComponent(id)}/photos`,
