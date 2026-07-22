@@ -516,12 +516,31 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
 
   const toggleSec = (n: 1 | 2 | 3) => setOpenSec((s) => ({ ...s, [n]: !s[n] }));
   const openRule = (id: number) => {
+    const wasOpen = openId != null;
     setOpenId(id); setOpenSec({ 1: true, 2: true, 3: true }); setPropsOpen(false); setPropSearch('');
     const r = rules.find((x) => x.id === id);
     setShowSkip((r?.skipMonths.length ?? 0) > 0);
     setStartMode(r?.startDate ? 'date' : (r?.startDelayDays ? 'delay' : 'immediate'));
+    // Push a history entry ONLY on the list→rule transition so the browser/OS
+    // back button (and the header back) closes the rule and returns to the rules
+    // list — instead of leaving /services/rules and landing on the home screen.
+    // Preserve Next's router state so its history isn't clobbered.
+    if (typeof window !== 'undefined' && !wasOpen) {
+      try { window.history.pushState({ ...window.history.state, svcRuleOpen: true }, ''); } catch { /* ignore */ }
+    }
   };
-  const closeRule = () => setOpenId(null);
+  const closeRule = () => {
+    // Consume the pushed entry (fires popstate → clears openId) so history stays in
+    // sync; fall back to a plain state clear if there's nothing to pop.
+    if (typeof window !== 'undefined' && (window.history.state as any)?.svcRuleOpen) { window.history.back(); return; }
+    setOpenId(null);
+  };
+  // Browser/OS back while a rule is open → close it (return to the list).
+  useEffect(() => {
+    const onPop = () => setOpenId(null);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   const patch = (p: Partial<Rule>) => setRules((rs) => rs.map((r) => (r.id === openId ? { ...r, ...p } : r)));
   // ── Enrollment criteria (AND-combined) mutators ──
@@ -900,7 +919,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <PageHeader title="Rules Engine" onBack={() => { if (typeof window !== 'undefined' && window.history.length > 1) window.history.back(); else window.location.href = '/services'; }} backHref="/services" maxW="max-w-3xl" />
+      <PageHeader title="Rules Engine" onBack={() => { if (openId != null) { closeRule(); return; } if (typeof window !== 'undefined' && window.history.length > 1) window.history.back(); else window.location.href = '/services'; }} backHref="/services" maxW="max-w-3xl" />
 
       {openId === null ? (
         /* ───────────── LIST VIEW: search + filters + rule cards ───────────── */
