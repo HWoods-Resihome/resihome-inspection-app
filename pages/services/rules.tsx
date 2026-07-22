@@ -133,7 +133,12 @@ interface Rule {
   description: string;                      // scope-of-work language (defaults from the worktype; editable)
   recurring: boolean;                       // false = one-time (no cadence); true = recurring (cadences required)
   cadences: Cadence[];
-  initialDueDays: string;                   // optional: first order due N days after enrollment (blank = standard cadence)
+  initialDueDays: string;                   // optional: first order due N days after enrollment (blank = standard cadence); ALSO the fallback for a lease-anchored move-in clean while the lease start date is unknown
+  // Move-in clean only: anchor the due date to the lease start date instead of
+  // enrollment. 'lease_start' → due = leaseStart − daysBeforeLeaseStart (with the
+  // enrollment fallback above until the date is known; the re-sync cron finalizes it).
+  dueAnchor: 'enroll' | 'lease_start';
+  daysBeforeLeaseStart: string;
   skipMonths: number[];                     // months explicitly set to NO service
   enrollField: string; enrollOp: string; enrollVals: string[];   // legacy single (= first criterion, kept in sync)
   enrollCriteria: EnrollCriterion[];         // enrollment criteria (source of truth)
@@ -213,7 +218,7 @@ const SEED: Rule[] = [
       { id: 11, unit: 'days', interval: '14', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
       { id: 12, unit: 'months', interval: '1', dow: 0, dom: 15, months: [10, 11] },
     ],
-    initialDueDays: '5', skipMonths: [0, 1],
+    initialDueDays: '5', dueAnchor: 'enroll', daysBeforeLeaseStart: '', skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
     enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }], enrollCombinator: 'and', startDate: '', startDelayDays: '',
     stopEnabled: true, stopMode: 'condition', stopCriteria: [{ field: 'Property Status', op: 'is', vals: ['Occupied'] }], stopCombinator: 'and', stopField: 'Property Status', stopOp: 'is', stopVal: 'Occupied', stopDate: '', stopCount: '',
@@ -223,7 +228,7 @@ const SEED: Rule[] = [
     portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [{ id: 21, unit: 'days', interval: '7', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
-    initialDueDays: '5', skipMonths: [],
+    initialDueDays: '5', dueAnchor: 'enroll', daysBeforeLeaseStart: '', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
     enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Vacant'] }], enrollCombinator: 'and', startDate: '', startDelayDays: '',
     stopEnabled: false, stopMode: 'condition', stopCriteria: [{ field: 'Property Status', op: 'is', vals: ['Occupied'] }], stopCombinator: 'and', stopField: 'Property Status', stopOp: 'is', stopVal: 'Occupied', stopDate: '', stopCount: '',
@@ -237,7 +242,7 @@ const SEED: Rule[] = [
     portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('cleaning', 'move_in_clean'),
     recurring: false,
     cadences: [],
-    initialDueDays: '2', skipMonths: [],
+    initialDueDays: '3', dueAnchor: 'lease_start', daysBeforeLeaseStart: '2', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Pending MOI/Rekey'],
     enrollCriteria: [{ field: 'Property Status', op: 'is', vals: ['Pending MOI/Rekey'] }], enrollCombinator: 'and', startDate: '', startDelayDays: '',
     stopEnabled: false, stopMode: 'condition', stopCriteria: [{ field: 'Property Status', op: 'is', vals: ['Occupied'] }], stopCombinator: 'and', stopField: 'Property Status', stopOp: 'is', stopVal: 'Occupied', stopDate: '', stopCount: '',
@@ -298,6 +303,8 @@ function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule 
     vendors: parseArr(p.vendors_json), description: p.service_description || '',
     recurring: p.recurring !== 'false', cadences,
     initialDueDays: p.initial_due_days != null ? String(p.initial_due_days) : '', skipMonths: parseArr(p.skip_months_json),
+    dueAnchor: p.due_anchor === 'lease_start' ? 'lease_start' : 'enroll',
+    daysBeforeLeaseStart: p.days_before_lease_start != null && String(p.days_before_lease_start) !== '' ? String(p.days_before_lease_start) : '',
     enrollField: p.enroll_field || 'Property Status', enrollOp: p.enroll_op || 'is', enrollVals: parseVals(p.enroll_value),
     enrollCriteria: parseCriteria(p),
     enrollCombinator: p.enroll_combinator === 'or' ? 'or' : 'and',
@@ -346,6 +353,10 @@ function ruleToProps(r: Rule): Record<string, any> {
     if (r.grassHeavy != null && r.grassHeavy !== '') props.grass_rate_heavy = Number(r.grassHeavy);
   }
   if (r.initialDueDays !== '') props.initial_due_days = Number(r.initialDueDays);
+  // Move-in-clean lease-anchor scheduling (persisted only for that combo).
+  const leaseAnchorEligible = r.worktype === 'cleaning' && r.subtype === 'move_in_clean' && r.scope === 'property';
+  props.due_anchor = leaseAnchorEligible && r.dueAnchor === 'lease_start' ? 'lease_start' : 'enroll';
+  if (leaseAnchorEligible && r.dueAnchor === 'lease_start' && r.daysBeforeLeaseStart !== '') props.days_before_lease_start = Number(r.daysBeforeLeaseStart);
   if (r.startDate) props.start_date = r.startDate;
   if (r.startDelayDays !== '') props.start_delay_days = Number(r.startDelayDays);
   if (r.stopDate) props.stop_date = r.stopDate;
@@ -600,7 +611,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', startDelayDays: '', stopEnabled: false, stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', dueAnchor: 'enroll', daysBeforeLeaseStart: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', startDelayDays: '', stopEnabled: false, stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
     openRule(id);
   };
   const duplicateRule = () => {
@@ -712,6 +723,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
     if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per work type + subtype (here: ${wtLabelD(rule.worktype)} · ${subLabelD(rule.worktype, rule.subtype)}).`);
     if (rule.recurring && missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
     if (!rule.recurring && !rule.initialDueDays.trim()) saveErrors.push('Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
+    if (rule.dueAnchor === 'lease_start' && !rule.daysBeforeLeaseStart.trim()) saveErrors.push('Set “days before lease start” for the lease-anchored due date.');
     if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
     // Enrollment criteria are OPTIONAL — with none, every applicable property
     // enrolls immediately. Any criterion that IS present still needs a value.
@@ -1179,9 +1191,34 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
           <section className={sec}>
             <SecHead n={2} title="Cadence" />
             {openSec[2] && (<div className="mt-3">
+            {/* Move-in clean only: anchor the due date to the lease start date. */}
+            {rule.worktype === 'cleaning' && rule.subtype === 'move_in_clean' && rule.scope === 'property' && (
+              <div className="mb-3">
+                <label className={lbl}>Due Date Anchor</label>
+                <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
+                  <button type="button" onClick={() => patch({ dueAnchor: 'enroll' })} className={`px-3 py-1.5 rounded-md ${rule.dueAnchor !== 'lease_start' ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>Enrollment</button>
+                  {/* Lease anchor makes it inherently one-time (one clean per lease). */}
+                  <button type="button" onClick={() => patch({ dueAnchor: 'lease_start', recurring: false })} className={`px-3 py-1.5 rounded-md ${rule.dueAnchor === 'lease_start' ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Lease start date</button>
+                </div>
+                <div className="text-[11px] text-gray-400 mt-1">
+                  {rule.dueAnchor === 'lease_start'
+                    ? 'Due lands a set number of days BEFORE the lease start date (from the leasing deal). The lease start date isn’t always known at enrollment — until it is, the due falls back to “days after enrollment” below and is re-synced automatically once the date populates (and canceled if the lease is already within a day).'
+                    : 'Standard — the due date is “days after enrollment” below.'}
+                </div>
+                {rule.dueAnchor === 'lease_start' && (
+                  <div className="bg-brand/5 border border-brand/20 rounded-lg px-3 py-2 mt-2">
+                    <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
+                      <input value={rule.daysBeforeLeaseStart} inputMode="numeric" onChange={(e) => patch({ daysBeforeLeaseStart: e.target.value.replace(/\D/g, '') })} placeholder="—"
+                        className={`${ctl} w-12 text-center tabular-nums ${!rule.daysBeforeLeaseStart.trim() ? 'border-red-300' : ''}`} />
+                      <span className="text-gray-600">days before lease start</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {/* First order due — optional (required when one-time); blank = due on the enrollment date. */}
             <div className="mb-3">
-              <label className={lbl}>First Order Due{!rule.recurring && <span className="text-brand"> *</span>}</label>
+              <label className={lbl}>{rule.dueAnchor === 'lease_start' ? 'Fallback: First Order Due' : 'First Order Due'}{!rule.recurring && <span className="text-brand"> *</span>}</label>
               <div className="bg-brand/5 border border-brand/20 rounded-lg px-3 py-2">
                 <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
                   <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—"

@@ -1971,6 +1971,8 @@ const RULE_PROPS = [
   // written on save but NOT read back here, so they vanished on reload/generate.
   'include_common_areas', 'common_area_cost',
   'grass_rate_standard', 'grass_rate_overgrown', 'grass_rate_heavy',
+  // Move-in-clean lease-anchored scheduling.
+  'due_anchor', 'days_before_lease_start',
 ];
 
 /** All Service Rule records (raw props + id), or null when not configured. */
@@ -2226,6 +2228,8 @@ const SERVICE_DETAIL_PROPS = [
   // Common-area cut cost folded into a community master's vendor total — read so
   // the Cost Detail can show the separate "Common Area" line under House Cuts.
   'common_area_cost',
+  // Move-in-clean lease-anchored scheduling — read by the re-sync cron.
+  'due_anchor', 'days_before_lease_start',
   // Proof-of-service enrichment (vendor closed out with their own PDF): the AI's
   // document summary + photos extracted from inside it — the service PDFs render
   // these, so they MUST be projected here (HubSpot returns only requested props).

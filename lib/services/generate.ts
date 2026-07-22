@@ -21,7 +21,7 @@
  * follow the active cadence (else First Order Due, else +5); vendors are assigned by
  * equal-volume rotation with sticky-per-address (see ./rotation).
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, patchServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool, readGenEnrollSeen, writeGenEnrollSeen } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, patchServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool, readGenEnrollSeen, writeGenEnrollSeen, fetchPropertyMoveInDate } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { DEFAULT_GRASS_TIERS } from './grassPricing';
@@ -129,6 +129,30 @@ function dateOnly(s: string): string {
   return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
 }
 const maxISO = (a: string, b: string): string => (!a ? b : !b ? a : a >= b ? a : b);
+
+/**
+ * Move-in-clean lease-anchored due date for a property target. Shared by
+ * generation (first order) and the re-sync cron so the rule is applied identically.
+ *   • lease start KNOWN → due = max(leaseStart − B, today+1). If that floored date
+ *     isn't strictly before lease start (lease is today/tomorrow — no runway to
+ *     hand a vendor at least a day), return { cancel:true }.
+ *   • lease start UNKNOWN (null / 'TBD') → fallback due = today + F (initial_due_days),
+ *     flagged pending so the cron keeps re-checking until the date populates.
+ * `leaseStart` may be passed in (cron already resolved it) to avoid a re-fetch.
+ */
+export function computeLeaseAnchoredDue(
+  opts: { leaseStart: string; daysBefore: number; fallbackDays: number; todayISO: string },
+): { cancel: true } | { cancel: false; due: string; pending: boolean } {
+  const B = Math.max(0, Math.floor(opts.daysBefore) || 0);
+  const lease = dateOnly(String(opts.leaseStart || ''));   // 'TBD'/'' → '' (unknown)
+  if (!lease) {
+    const F = Number.isFinite(opts.fallbackDays) && opts.fallbackDays > 0 ? Math.floor(opts.fallbackDays) : 5;
+    return { cancel: false, due: addDays(opts.todayISO, F), pending: true };
+  }
+  const due = maxISO(addDays(lease, -B), addDays(opts.todayISO, 1));
+  if (due >= lease) return { cancel: true };   // lease today/tomorrow → no room before it
+  return { cancel: false, due, pending: false };
+}
 
 // ── Cadence model ─────────────────────────────────────────────────────────────
 // A rule's cadence: "every N days" (unit days/weeks, dow = weekday anchor seed) or
@@ -539,7 +563,7 @@ export async function runServiceGeneration(
     // community-recurring paths — all the order-building / master-cut / pricing /
     // geocode / notify logic lives here so the three schedulers only decide WHEN
     // and WITH WHAT due date to call it.
-    const emitOrder = async (t: Target, dueDate: string, enrollmentKey: string): Promise<void> => {
+    const emitOrder = async (t: Target, dueDate: string, enrollmentKey: string, extraProps?: Record<string, any>): Promise<void> => {
       const base: {
         ruleId: string; ruleName: string; target: string; worktype: string; subtype: string;
         dueDate: string; vendor: string | null; enrollmentKey: string;
@@ -621,6 +645,10 @@ export async function runServiceGeneration(
         if (c) { orderProps.latitude = c.lat; orderProps.longitude = c.lng; }
       } catch { /* non-fatal — the map falls back to live geocoding */ }
 
+      // Extra per-order stamps (e.g. move-in-clean lease-anchor config for the
+      // re-sync cron). Applied last so the caller can override any default above.
+      if (extraProps) Object.assign(orderProps, extraProps);
+
       try {
         const recordId = await createServiceWorkOrder(orderProps);
         openKeys.add(enrollmentKey);
@@ -679,14 +707,29 @@ export async function runServiceGeneration(
     }
 
     // ── ONE-TIME (non-recurring): exactly one order per target, ever. Due =
-    // enrollment + First Order Due (fallback +5). ──
+    // enrollment + First Order Due (fallback +5), OR — for a move-in clean anchored
+    // to the lease start date — leaseStart − N (fallback until the date is known;
+    // the re-sync cron finalizes it). ──
     if (!recurring) {
       const initDue = Number(p.initial_due_days);
       const oneTimeDue = addDays(todayISO, Number.isFinite(initDue) && initDue > 0 ? initDue : 5);
+      const leaseAnchor = String(p.due_anchor || '') === 'lease_start';
+      const daysBefore = Math.max(0, Math.floor(Number(p.days_before_lease_start) || 0));
       for (const t of targets) {
         const key = `gen:${ruleId}:${t.id}${t.dealId ? `:${t.dealId}` : ''}`;
         if ((genCountByKey.get(key) || 0) >= 1 || openKeys.has(key)) { skipItem(t, key, oneTimeDue); continue; }
         if (!startGateOk(key)) continue;   // enroll delay hasn't elapsed yet
+        if (leaseAnchor && t.scope === 'property') {
+          // Resolve the lease start date (Property → Listing → Deal); compute the
+          // anchored due. If the lease is already today/tomorrow, skip creating (no
+          // runway). Stamp the anchor config so the cron can re-finalize the due.
+          let lease = '';
+          try { lease = String((await fetchPropertyMoveInDate(t.id)) || ''); } catch { lease = ''; }
+          const r = computeLeaseAnchoredDue({ leaseStart: lease, daysBefore, fallbackDays: initDue, todayISO });
+          if (r.cancel) { skipItem(t, key, ''); continue; }
+          await emitOrder(t, r.due, key, { due_anchor: 'lease_start', days_before_lease_start: daysBefore });
+          continue;
+        }
         await emitOrder(t, oneTimeDue, key);
       }
       continue;

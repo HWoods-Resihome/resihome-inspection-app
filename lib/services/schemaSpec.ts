@@ -57,6 +57,11 @@ export const SERVICE_OBJECT: ObjectSpec = {
     SEL('scope', 'Coverage Scope', SCOPE_OPTS),
     TA('service_description', 'Service Description'),
     DATE('due_date', 'Due Date'),
+    // Move-in-clean lease-anchored scheduling: stamped from the rule so the
+    // re-sync cron can recompute the due (or cancel) as the lease start date
+    // populates — WITHOUT re-reading the rule. 'lease_start' = anchored.
+    T('due_anchor', 'Due Anchor'),
+    NUM('days_before_lease_start', 'Days Before Lease Start'),
     T('region_snapshot', 'Region'),
     T('address_snapshot', 'Address'),
     T('locality_snapshot', 'Locality (City, ST ZIP)'),
@@ -150,6 +155,12 @@ export const SERVICE_RULE_OBJECT: ObjectSpec = {
     BOOL('recurring', 'Recurring'),
     TA('cadences_json', 'Cadences (JSON)'),
     NUM('initial_due_days', 'First Order Due (days)'),
+    // Move-in-clean only: anchor the due date to the lease start date.
+    // 'lease_start' → due = leaseStart − days_before_lease_start (else the classic
+    // enrollment anchor). initial_due_days doubles as the fallback (days after
+    // enrollment) while the lease start date is still unknown.
+    SEL('due_anchor', 'Due Anchor', opt([['Enrollment', 'enroll'], ['Lease start date', 'lease_start']])),
+    NUM('days_before_lease_start', 'Days Before Lease Start'),
     TA('skip_months_json', 'No-Service Months (JSON)'),
     TA('included_props_json', 'Included Properties (JSON)'),
     TA('portfolios_json', 'Portfolios (JSON)'),
