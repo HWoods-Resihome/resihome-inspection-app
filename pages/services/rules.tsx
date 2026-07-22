@@ -682,6 +682,17 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
     if (!rule) return null;
     for (const other of rules) {
       if (other.id === rule.id || !other.active || other.worktype !== rule.worktype || other.subtype !== rule.subtype || other.scope !== rule.scope) continue;
+      // Two PROPERTY rules that both use a FIXED list conflict only when they
+      // share an actual property — splitting one portfolio's homes across two
+      // rules (e.g. trimming the original SFR Grass Cut and moving the rest to a
+      // new rule) is legitimate. Portfolio-level overlap still blocks whenever
+      // either side is 'all' mode (it would swallow the other's homes).
+      if (rule.scope === 'property' && rule.propsMode === 'list' && other.propsMode === 'list') {
+        const mine = new Set(rule.includedProps);
+        const sharedIds = other.includedProps.filter((id) => mine.has(id));
+        if (sharedIds.length) return { rule: other, shared: [`${sharedIds.length} propert${sharedIds.length === 1 ? 'y' : 'ies'} selected in both`] };
+        continue;
+      }
       const a = new Set(rule.scope === 'property' ? rule.portfolios : rule.communities);
       const shared = (other.scope === 'property' ? other.portfolios : other.communities).filter((k) => a.has(k));
       if (shared.length) return { rule: other, shared };
