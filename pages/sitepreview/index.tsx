@@ -41,24 +41,14 @@ const FEATURES = [
   { id: 'insights', icon: I.chart, tag: 'Insights', title: 'A full-service insights command center', body: 'Live analytics across inspections, pass/fail trends, scope cost, inspector performance, AI acceptance, and service throughput — banked daily and sliced by region, program, and person. Exec-ready and always current.', points: ['Region, program & inspector breakdowns', 'Trend history banked automatically', 'Real-time, decision-ready'], visual: <InsightsScreen />, visualWide: true },
 ];
 
-const INTEGRATION_GROUPS: { category: string; items: { name: string; desc: string; logo: ReactNode }[] }[] = [
-  { category: 'CRM & System of Record', items: [
-    { name: 'HubSpot', desc: 'Properties, listings, tickets & workflows — the system of record.', logo: <HubSpotMark className="w-8 h-8" /> },
-  ] },
-  { category: 'Storage & Documents', items: [
-    { name: 'Google Drive', desc: 'Reports, evidence & documents synced where teams work.', logo: <DriveMark className="w-8 h-8" /> },
-  ] },
-  { category: 'Scheduling', items: [
-    { name: 'Google Calendar', desc: 'Scheduling & dispatch on the right calendars.', logo: <CalendarMark className="w-8 h-8" /> },
-    { name: 'Google Workspace', desc: 'Single sign-on and identity for your staff.', logo: <GoogleMark className="w-8 h-8" /> },
-  ] },
-  { category: 'Communication', items: [
-    { name: 'Slack', desc: 'Real-time approvals, dispatch alerts & a conversational assistant.', logo: <SlackMark className="w-8 h-8" /> },
-  ] },
-  { category: 'Market Data & Maintenance', items: [
-    { name: 'RentCast', desc: 'Live market comps to inform listing & scoping.', logo: <span className="w-8 h-8 rounded-lg bg-[#0f172a] flex items-center justify-center text-[10px] text-white font-extrabold">RC</span> },
-    { name: 'Maintenance / MM', desc: 'Two-way work-order & ticket sync with your MM stack.', logo: <span className="w-8 h-8 rounded-lg bg-[#ff0060]/10 flex items-center justify-center"><I.cloud className="w-5 h-5 text-[#ff0060]" /></span> },
-  ] },
+const INTEGRATIONS: { name: string; category: string; desc: string; logo: ReactNode }[] = [
+  { name: 'HubSpot', category: 'CRM', desc: 'Properties, listings, tickets & workflows — your system of record.', logo: <HubSpotMark className="w-8 h-8" /> },
+  { name: 'Google Drive', category: 'Storage', desc: 'Reports, evidence & documents synced where your teams work.', logo: <DriveMark className="w-8 h-8" /> },
+  { name: 'Google Calendar', category: 'Scheduling', desc: 'Service scheduling & dispatch on the right calendars.', logo: <CalendarMark className="w-8 h-8" /> },
+  { name: 'Google Workspace', category: 'Identity / SSO', desc: 'Single sign-on and identity for your staff.', logo: <GoogleMark className="w-8 h-8" /> },
+  { name: 'Slack', category: 'Communication', desc: 'Approvals, dispatch alerts & a conversational assistant.', logo: <SlackMark className="w-8 h-8" /> },
+  { name: 'RentCast', category: 'Market Data', desc: 'Live market comps to inform listing & scoping.', logo: <span className="w-8 h-8 rounded-lg bg-[#0f172a] flex items-center justify-center text-[11px] text-white font-extrabold">RC</span> },
+  { name: 'Maintenance / MM', category: 'Work Orders', desc: 'Two-way work-order & ticket sync with your MM stack.', logo: <span className="w-8 h-8 rounded-lg bg-[#ff0060]/10 flex items-center justify-center"><I.cloud className="w-5 h-5 text-[#ff0060]" /></span> },
 ];
 
 export default function SitePreview() {
@@ -103,28 +93,29 @@ export default function SitePreview() {
               </Reveal>
               <Reveal delay={240}>
                 <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-ink/60">
-                  <span className="inline-flex items-center gap-1.5"><I.shield className="w-4 h-4 text-accent-dark" /> Enterprise-grade &amp; auditable</span>
-                  <span className="inline-flex items-center gap-1.5"><I.check className="w-4 h-4 text-accent-dark" /> Offline-ready field app</span>
+                  <span className="inline-flex items-center gap-1.5"><I.check className="w-4 h-4 text-accent-dark" /> From first walk to final invoice</span>
+                  <span className="inline-flex items-center gap-1.5"><I.check className="w-4 h-4 text-accent-dark" /> Priced on-site against live rate cards</span>
                 </div>
               </Reveal>
             </div>
 
-            {/* hero product composition */}
+            {/* hero product composition — larger phone; cards flank, don't cover */}
             <Reveal delay={140}>
-              <div className="relative mx-auto max-w-md lg:max-w-none">
-                <div className="hidden sm:block absolute -top-6 -left-6 w-56 z-20 rotate-[-4deg]">
-                  <div className="rounded-xl bg-white shadow-2xl ring-1 ring-black/5 p-3">
-                    <div className="text-[10px] text-gray-400">Rate-card total</div>
-                    <div className="font-heading font-extrabold text-brand text-lg">$3,205.00</div>
-                    <div className="mt-1 h-1.5 rounded-full bg-gray-100 overflow-hidden"><div className="h-full w-4/5 bg-gradient-to-r from-brand to-accent" /></div>
+              <div className="relative mx-auto w-fit lg:ml-auto">
+                <div className="flex justify-center"><InspectionPhone /></div>
+                <div className="hidden md:block absolute -top-7 -left-16 lg:-left-24 w-52 z-20 rotate-[-5deg]">
+                  <div className="rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 p-4">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Rate-card total</div>
+                    <div className="font-heading font-extrabold text-brand text-2xl mt-0.5">$3,205.00</div>
+                    <div className="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden"><div className="h-full w-4/5 bg-gradient-to-r from-brand to-accent" /></div>
+                    <div className="mt-1.5 text-[10px] text-gray-400">Priced on-site · GA · Atlanta</div>
                   </div>
                 </div>
-                <div className="flex justify-center"><InspectionPhone /></div>
-                <div className="hidden sm:block absolute -bottom-8 -right-4 w-64 z-20 rotate-[3deg]">
-                  <div className="rounded-xl bg-ink text-white shadow-2xl ring-1 ring-white/10 p-3">
-                    <div className="text-[10px] text-white/50 mb-1.5">Pass rate · this month</div>
-                    <div className="flex items-end gap-1 h-10">{[40,55,48,66,60,74,88].map((h,i)=><div key={i} className="flex-1 rounded-t bg-gradient-to-t from-brand to-accent" style={{height:`${h}%`}} />)}</div>
-                    <div className="mt-1 font-heading font-extrabold text-accent text-sm">96.4%</div>
+                <div className="hidden md:block absolute -bottom-9 -right-14 lg:-right-24 w-52 z-20 rotate-[4deg]">
+                  <div className="rounded-2xl bg-ink text-white shadow-2xl ring-1 ring-white/10 p-4">
+                    <div className="text-[10px] uppercase tracking-wide text-white/45 font-semibold mb-2">Pass rate · this month</div>
+                    <div className="flex items-end gap-1 h-12">{[40,55,48,66,60,74,88].map((h,i)=><div key={i} className="flex-1 rounded-t bg-gradient-to-t from-brand to-accent" style={{height:`${h}%`}} />)}</div>
+                    <div className="mt-1.5 font-heading font-extrabold text-accent text-lg">96.4%</div>
                   </div>
                 </div>
               </div>
@@ -132,18 +123,24 @@ export default function SitePreview() {
           </div>
         </section>
 
-        {/* ============ STATS / TRUST ============ */}
+        {/* ============ STATS / TRUST — platform outcomes ============ */}
         <section className="border-y border-gray-100 bg-white">
-          <div className="max-w-7xl mx-auto px-5 lg:px-8 py-10">
+          <div className="max-w-7xl mx-auto px-5 lg:px-8 py-12">
             <Reveal>
-              <p className="text-center text-xs font-heading font-bold uppercase tracking-widest text-ink/40">Proven across the Southeast SFR &amp; BTR landscape</p>
+              <p className="text-center text-xs font-heading font-bold uppercase tracking-widest text-ink/40">The results teams see with ResiWalk</p>
             </Reveal>
-            <div className="mt-7 grid grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-4">
-              {[['6,000+', 'Homes under active management'], ['32,000+', 'Homes managed, all-time'], ['15', 'Markets across the Southeast'], ['4,200+', 'BTR homes delivered']].map((s, i) => (
-                <Reveal key={s[1]} delay={i * 70}>
-                  <div className="text-center">
-                    <div className="font-heading font-extrabold text-3xl lg:text-4xl bg-gradient-to-br from-brand to-brand-deeper bg-clip-text text-transparent">{s[0]}</div>
-                    <div className="mt-1 text-[13px] text-ink/60 leading-snug">{s[1]}</div>
+            <div className="mt-8 grid grid-cols-2 lg:grid-cols-4 gap-y-8 gap-x-4 lg:divide-x lg:divide-gray-100">
+              {[
+                ['26×', 'Faster', 'Scope-to-ticket — 2.6 days down to same-day'],
+                ['6', 'Templates', 'Inspection & service types in one field app'],
+                ['100%', 'On-site', 'Scopes priced against live rate cards — no re-pricing'],
+                ['15', 'Markets', 'Live across the Southeast, and scaling'],
+              ].map((s, i) => (
+                <Reveal key={s[2]} delay={i * 70}>
+                  <div className="text-center px-2">
+                    <div className="font-heading font-extrabold text-4xl lg:text-5xl text-ink leading-none">{s[0]}</div>
+                    <div className="mt-1 font-heading font-bold text-brand text-sm uppercase tracking-wide">{s[1]}</div>
+                    <div className="mt-2 text-[13px] text-ink/55 leading-snug max-w-[15rem] mx-auto">{s[2]}</div>
                   </div>
                 </Reveal>
               ))}
@@ -162,19 +159,27 @@ export default function SitePreview() {
               </div>
             </Reveal>
             <Reveal delay={100}>
-              <div className="mt-12 max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl ring-1 ring-black/5 bg-ink">
-                <video className="w-full h-auto block" controls playsInline preload="metadata" poster="/resiwalk-logo.svg">
+              <div className="mt-12 max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl ring-1 ring-black/5 bg-black">
+                <video className="w-full h-auto block bg-black" style={{ aspectRatio: '16 / 9', objectFit: 'contain' }} controls playsInline preload="metadata">
                   <source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" />
                 </video>
               </div>
             </Reveal>
-            <div className="mt-10 grid md:grid-cols-3 gap-5">
-              {[['Inspect', 'Walk the home once — offline-ready, photo-evidenced.'], ['Price & scope', 'Live rate-card pricing computed on the spot.'], ['Dispatch & measure', 'Auto-route, invoice, and track it all in insights.']].map((s, i) => (
-                <Reveal key={s[0]} delay={i * 80}>
-                  <div className="rounded-2xl bg-white ring-1 ring-gray-100 p-6">
-                    <div className="w-8 h-8 rounded-full bg-brand text-white font-heading font-bold text-sm flex items-center justify-center">{i + 1}</div>
-                    <h3 className="mt-3 font-heading font-bold text-lg text-ink">{s[0]}</h3>
-                    <p className="mt-1.5 text-[15px] text-ink/65">{s[1]}</p>
+            <div className="mt-12 grid md:grid-cols-3 gap-5 items-stretch">
+              {[
+                { n: 'Inspect', d: 'Walk each home once. Every room photo-documented and GPS-stamped — online or off.', icon: I.clipboard },
+                { n: 'Price & scope', d: 'Line items priced instantly against live regional rate cards. No spreadsheets, no delay.', icon: I.dollar },
+                { n: 'Dispatch & measure', d: 'Auto-route approvals, invoice vendors, and watch it all land in real-time insights.', icon: I.chart },
+              ].map((s, i) => (
+                <Reveal key={s.n} delay={i * 80} className="h-full">
+                  <div className="relative h-full rounded-2xl bg-white ring-1 ring-gray-100 p-6 flex flex-col">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-brand/10 text-brand flex items-center justify-center"><s.icon className="w-5 h-5" /></div>
+                      <div className="w-7 h-7 rounded-full bg-brand text-white font-heading font-bold text-[13px] flex items-center justify-center">{i + 1}</div>
+                    </div>
+                    <h3 className="mt-4 font-heading font-bold text-lg text-ink">{s.n}</h3>
+                    <p className="mt-1.5 text-[15px] text-ink/65 leading-relaxed">{s.d}</p>
+                    {i < 2 && <div aria-hidden className="hidden md:flex absolute top-1/2 -right-3 z-10 w-6 h-6 rounded-full bg-white ring-1 ring-gray-100 items-center justify-center text-brand"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>}
                   </div>
                 </Reveal>
               ))}
@@ -218,24 +223,27 @@ export default function SitePreview() {
                 <p className="mt-4 text-lg text-ink/70">ResiWalk is the connective tissue of your operation — data flows cleanly across your CRM, storage, calendar, and comms, automatically.</p>
               </div>
             </Reveal>
-            <div className="mt-12 space-y-10">
-              {INTEGRATION_GROUPS.map((g, gi) => (
-                <Reveal key={g.category} delay={gi * 40}>
-                  <div>
-                    <div className="text-xs font-heading font-bold uppercase tracking-widest text-ink/40 mb-3">{g.category}</div>
-                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {g.items.map((it) => (
-                        <div key={it.name} className="flex items-start gap-4 rounded-2xl bg-white ring-1 ring-gray-100 p-5 hover:shadow-lg hover:-translate-y-0.5 transition-all">
-                          <div className="shrink-0 w-12 h-12 rounded-xl bg-gray-50 ring-1 ring-gray-100 flex items-center justify-center">{it.logo}</div>
-                          <div><h3 className="font-heading font-bold text-ink">{it.name}</h3><p className="mt-1 text-[13.5px] text-ink/60 leading-snug">{it.desc}</p></div>
-                        </div>
-                      ))}
+            <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
+              {INTEGRATIONS.map((it, i) => (
+                <Reveal key={it.name} delay={(i % 3) * 60} className="h-full">
+                  <div className="h-full flex flex-col rounded-2xl bg-white ring-1 ring-gray-100 p-6 hover:shadow-lg hover:-translate-y-0.5 transition-all">
+                    <div className="flex items-center justify-between">
+                      <div className="w-12 h-12 rounded-xl bg-gray-50 ring-1 ring-gray-100 flex items-center justify-center">{it.logo}</div>
+                      <span className="text-[10px] font-heading font-bold uppercase tracking-wide text-ink/40 bg-gray-50 rounded-full px-2.5 py-1">{it.category}</span>
                     </div>
+                    <h3 className="mt-4 font-heading font-bold text-lg text-ink">{it.name}</h3>
+                    <p className="mt-1.5 text-[14px] text-ink/60 leading-relaxed">{it.desc}</p>
                   </div>
                 </Reveal>
               ))}
+              <Reveal delay={60} className="h-full">
+                <Link href="#contact" className="h-full flex flex-col items-center justify-center text-center rounded-2xl border-2 border-dashed border-gray-200 p-6 hover:border-brand hover:text-brand transition-colors text-ink/50">
+                  <span className="text-2xl font-heading font-extrabold">+</span>
+                  <span className="mt-1 text-sm font-heading font-bold">API-first — build your own</span>
+                  <span className="mt-1 text-[13px]">Tell us the next integration on your roadmap.</span>
+                </Link>
+              </Reveal>
             </div>
-            <Reveal><p className="mt-8 text-center text-sm text-ink/45">…plus an API-first foundation for the next integration on your roadmap.</p></Reveal>
           </div>
         </section>
 

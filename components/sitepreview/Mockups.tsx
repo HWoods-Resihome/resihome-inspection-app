@@ -24,11 +24,11 @@ export function BrowserFrame({ url = 'app.resiwalk.com', children, className = '
 }
 
 /** Phone frame with notch. */
-export function PhoneFrame({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+export function PhoneFrame({ children, className = '', width = 320 }: { children: React.ReactNode; className?: string; width?: number }) {
   return (
-    <div className={`relative w-[260px] rounded-[2.2rem] bg-ink p-2.5 shadow-2xl ring-1 ring-black/10 ${className}`}>
-      <div className="absolute left-1/2 -translate-x-1/2 top-2.5 w-24 h-5 bg-ink rounded-b-2xl z-10" />
-      <div className="rounded-[1.7rem] overflow-hidden bg-white">{children}</div>
+    <div className={`relative rounded-[2.6rem] bg-ink p-3 shadow-2xl ring-1 ring-black/10 ${className}`} style={{ width }}>
+      <div className="absolute left-1/2 -translate-x-1/2 top-3 w-28 h-6 bg-ink rounded-b-2xl z-10" />
+      <div className="rounded-[2rem] overflow-hidden bg-white">{children}</div>
     </div>
   );
 }
