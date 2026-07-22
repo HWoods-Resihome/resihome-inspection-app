@@ -127,6 +127,14 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: svc.vendor, vendorEmail: svcVendorEmail } as ServiceRecord, viewer)) {
     return { redirect: { destination: '/services', permanent: false } };
   }
+  // Internal-only data must never reach a vendor's client — the UI already hides
+  // it, but the props are serialized into the page (visible in source), so strip
+  // it server-side: the AI QC review (verdict + notes) and our margin/client price.
+  // A vendor login OR an internal "View as Vendor" preview both count as external.
+  if (!isInternal) {
+    svc.aiVerdict = ''; svc.aiNotes = '';
+    svc.markupPct = null; svc.clientCost = null;
+  }
   const savedForms = await readServiceForms().catch(() => null);
   const formSet: Record<string, any[]> = { ...DEFAULT_SERVICE_FORMS, ...(savedForms || {}) };
   const form = (formSet[formKey(svc.worktype, svc.subtype)] || [])
