@@ -158,9 +158,9 @@ export function ServicesScreen() {
 }
 
 /** Phone: inspection in progress with AI capture chip. */
-export function InspectionPhone() {
+export function InspectionPhone({ width }: { width?: number } = {}) {
   return (
-    <PhoneFrame>
+    <PhoneFrame width={width}>
       <div className="text-ink">
         <div className="h-11 bg-[#ff0060] flex items-center justify-center text-white text-[12px] font-heading font-bold">Scope · 1408 Oak Hill Trl</div>
         <div className="p-3 space-y-2">

@@ -82,7 +82,7 @@ export default function SitePreview() {
         {/* ============ HERO ============ */}
         <section className="relative pt-28 lg:pt-36 pb-16 lg:pb-24">
           <HeroBackground />
-          <div className="relative max-w-7xl mx-auto px-5 lg:px-8 grid lg:grid-cols-[1.05fr_1fr] gap-14 items-center">
+          <div className="relative max-w-7xl mx-auto px-5 lg:px-8 grid lg:grid-cols-[1fr_1.15fr] gap-14 lg:gap-10 items-center">
             <div>
               <Reveal>
                 <span className="inline-flex items-center gap-2 rounded-full bg-white/70 backdrop-blur ring-1 ring-black/5 text-brand px-3.5 py-1.5 text-xs font-heading font-bold tracking-wide uppercase shadow-sm">
@@ -113,53 +113,30 @@ export default function SitePreview() {
               </Reveal>
             </div>
 
-            {/* hero product composition — larger phone; cards flank, don't cover */}
+            {/* hero product composition — a large dashboard with the phone as a
+                deliberate foreground accent (fills the column; phone reads as
+                intentional, not shrunk). */}
             <Reveal delay={140}>
-              <div className="relative mx-auto w-fit lg:ml-auto">
-                <div className="flex justify-center"><InspectionPhone /></div>
-                <div className="hidden md:block absolute -top-7 -left-16 lg:-left-24 w-52 z-20 rotate-[-5deg]">
-                  <div className="rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 p-4">
-                    <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Rate-card total</div>
-                    <div className="font-heading font-extrabold text-brand text-2xl mt-0.5">$3,205.00</div>
-                    <div className="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden"><div className="h-full w-4/5 bg-gradient-to-r from-brand to-accent" /></div>
-                    <div className="mt-1.5 text-[10px] text-gray-400">Priced on-site · GA · Atlanta</div>
-                  </div>
+              <div className="relative pl-2 sm:pl-16 lg:pl-20 pb-10 sm:pb-4">
+                <div className="drop-shadow-2xl"><InsightsScreen /></div>
+                {/* phone overlapping front-left */}
+                <div className="absolute -bottom-2 sm:bottom-2 -left-1 sm:left-0 z-20">
+                  <InspectionPhone width={214} />
                 </div>
-                <div className="hidden md:block absolute -bottom-9 -right-14 lg:-right-24 w-52 z-20 rotate-[4deg]">
-                  <div className="rounded-2xl bg-ink text-white shadow-2xl ring-1 ring-white/10 p-4">
-                    <div className="text-[10px] uppercase tracking-wide text-white/45 font-semibold mb-2">Pass rate · this month</div>
-                    <div className="flex items-end gap-1 h-12">{[40,55,48,66,60,74,88].map((h,i)=><div key={i} className="flex-1 rounded-t bg-gradient-to-t from-brand to-accent" style={{height:`${h}%`}} />)}</div>
-                    <div className="mt-1.5 font-heading font-extrabold text-accent text-lg">96.4%</div>
-                  </div>
+                {/* floating AI chip */}
+                <div className="hidden md:flex absolute top-8 -right-4 z-20 items-center gap-2 rounded-xl bg-white shadow-2xl ring-1 ring-black/5 px-3.5 py-2.5">
+                  <span className="w-2 h-2 rounded-full bg-brand animate-pulse" />
+                  <span className="text-[12px] font-heading font-semibold text-ink">AI: water stain → drywall + paint</span>
                 </div>
               </div>
             </Reveal>
           </div>
         </section>
 
-        {/* ============ STATS / TRUST — platform outcomes ============ */}
-        <section className="border-y border-gray-100 bg-white">
-          <div className="max-w-7xl mx-auto px-5 lg:px-8 py-12">
-            <Reveal>
-              <p className="text-center text-xs font-heading font-bold uppercase tracking-widest text-ink/40">The results teams see with ResiWalk</p>
-            </Reveal>
-            <div className="mt-8 grid grid-cols-2 lg:grid-cols-4 gap-y-8 gap-x-4 lg:divide-x lg:divide-gray-100">
-              {[
-                ['26×', 'Faster', 'Scope-to-ticket — 2.6 days down to same-day'],
-                ['6', 'Templates', 'Inspection & service types in one field app'],
-                ['100%', 'On-site', 'Scopes priced against live rate cards — no re-pricing'],
-                ['15', 'Markets', 'Live across the Southeast, and scaling'],
-              ].map((s, i) => (
-                <Reveal key={s[2]} delay={i * 70}>
-                  <div className="text-center px-2">
-                    <div className="font-heading font-extrabold text-4xl lg:text-5xl text-ink leading-none">{s[0]}</div>
-                    <div className="mt-1 font-heading font-bold text-brand text-sm uppercase tracking-wide">{s[1]}</div>
-                    <div className="mt-2 text-[13px] text-ink/55 leading-snug max-w-[15rem] mx-auto">{s[2]}</div>
-                  </div>
-                </Reveal>
-              ))}
-            </div>
-          </div>
+        {/* ============ INSIGHTS TICKER ============ */}
+        <section className="border-y border-gray-100 bg-white py-6">
+          <p className="text-center text-xs font-heading font-bold uppercase tracking-widest text-ink/40 mb-5">Live across the platform</p>
+          <InsightsMarquee />
         </section>
 
         {/* ============ SHOWCASE (video + one platform) ============ */}
@@ -357,13 +334,14 @@ export default function SitePreview() {
         </section>
 
         {/* ============ VETERANS ============ */}
-        <section className="py-16 lg:py-20">
+        <section className="relative pt-16 lg:pt-20 overflow-hidden">
           <div className="max-w-5xl mx-auto px-5 lg:px-8 text-center">
             <Reveal>
               <h2 className="font-heading font-extrabold text-2xl lg:text-3xl text-ink leading-snug">Designed, built, and managed by industry veterans —<br className="hidden sm:block" /> for the SFR &amp; BTR demands of today and tomorrow.</h2>
               <p className="mt-4 text-ink/60 text-lg max-w-2xl mx-auto">We&apos;ve run the portfolios, walked the homes, and chased the invoices. ResiWalk is the platform we always wished we had — now yours.</p>
             </Reveal>
           </div>
+          <NeighborhoodBand />
         </section>
 
         {/* ============ CONTACT ============ */}
@@ -405,6 +383,43 @@ export default function SitePreview() {
   );
 }
 
+/** Compact, auto-scrolling ticker of live-feel platform insights. Pauses on hover. */
+function InsightsMarquee() {
+  const items: [string, string, boolean][] = [
+    ['96.4%', 'Inspection pass rate', false],
+    ['1,208', 'Inspections this month', true],
+    ['$1,284', 'Average scope', false],
+    ['98%', 'Services on-time', true],
+    ['26×', 'Faster scope-to-ticket', false],
+    ['91%', 'AI suggestions accepted', true],
+    ['15', 'Markets live', false],
+    ['6', 'Inspection & service types', true],
+    ['2.6d → same-day', 'Turnaround', false],
+    ['100%', 'Priced on-site', true],
+  ];
+  const row = [...items, ...items]; // duplicated for a seamless loop
+  return (
+    <div className="marquee-mask relative overflow-hidden">
+      <div className="marquee-track flex w-max gap-3 px-3">
+        {row.map(([v, l, teal], i) => (
+          <div key={i} className="flex items-center gap-2.5 rounded-full bg-gray-50 ring-1 ring-gray-100 pl-3 pr-4 py-2 shrink-0">
+            <span className={`w-1.5 h-1.5 rounded-full ${teal ? 'bg-accent' : 'bg-brand'}`} />
+            <span className="font-heading font-extrabold text-ink text-[15px] leading-none">{v}</span>
+            <span className="text-[12px] text-ink/50 leading-none whitespace-nowrap">{l}</span>
+          </div>
+        ))}
+      </div>
+      <style jsx>{`
+        .marquee-track { animation: mq 46s linear infinite; }
+        .marquee-mask:hover .marquee-track { animation-play-state: paused; }
+        .marquee-mask { -webkit-mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent); mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent); }
+        @keyframes mq { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        @media (prefers-reduced-motion: reduce) { .marquee-track { animation: none; } }
+      `}</style>
+    </div>
+  );
+}
+
 /** Slim, dismissible "Book a demo" bar that slides up after the hero scrolls by. */
 function StickyDemoBar() {
   const [show, setShow] = useState(false);
@@ -426,6 +441,36 @@ function StickyDemoBar() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Original stylized "neighborhood" illustration band (SFR + BTR homes). */
+function NeighborhoodBand() {
+  return (
+    <div aria-hidden className="mt-10 w-full overflow-hidden leading-[0]">
+      <svg viewBox="0 0 1200 180" className="w-full h-auto block" preserveAspectRatio="xMidYEnd meet">
+        <defs>
+          <linearGradient id="nb-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#fff5f9" /><stop offset="1" stopColor="#ffe1ec" /></linearGradient>
+        </defs>
+        <rect width="1200" height="180" fill="url(#nb-sky)" />
+        {[0, 170, 340, 510, 680, 850, 1020].map((x, i) => {
+          const roof = i % 2 ? '#ff0060' : '#cc004d';
+          const body = i % 3 === 0 ? '#ffffff' : '#fff0f5';
+          const h = 78 + (i % 3) * 14;
+          const y = 180 - h;
+          return (
+            <g key={x}>
+              <rect x={x + 20} y={y} width="130" height={h} fill={body} stroke="#ffd0e0" strokeWidth="2" />
+              <polygon points={`${x + 12},${y} ${x + 85},${y - 34} ${x + 158},${y}`} fill={roof} />
+              <rect x={x + 40} y={y + 22} width="26" height="26" fill="#73e3df" opacity="0.7" />
+              <rect x={x + 104} y={y + 22} width="26" height="26" fill="#73e3df" opacity="0.7" />
+              <rect x={x + 70} y={y + h - 34} width="30" height="34" fill={roof} opacity="0.85" />
+            </g>
+          );
+        })}
+        <rect x="0" y="176" width="1200" height="4" fill="#ff0060" opacity="0.25" />
+      </svg>
     </div>
   );
 }
