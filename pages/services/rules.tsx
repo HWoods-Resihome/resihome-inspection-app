@@ -364,6 +364,31 @@ function ruleToProps(r: Rule): Record<string, any> {
   return props;
 }
 
+/**
+ * One property → one rule per work type + subtype. Returns the ACTIVE rule that
+ * `target` overlaps (shares a portfolio/community, or a fixed-list property), or
+ * null. Only ACTIVE rules conflict — an off rule sits harmlessly, so a duplicate
+ * parked off never blocks. Used to (a) force an overlapping rule OFF on save and
+ * (b) block turning it back ON until its property selection is fixed.
+ */
+function overlapForRule(target: Rule, all: Rule[]): { rule: Rule; shared: string[] } | null {
+  for (const other of all) {
+    if (other.id === target.id || !other.active || other.worktype !== target.worktype || other.subtype !== target.subtype || other.scope !== target.scope) continue;
+    // Two PROPERTY rules that both use a FIXED list conflict only on a shared
+    // property (splitting a portfolio's homes across two list-rules is legit).
+    if (target.scope === 'property' && target.propsMode === 'list' && other.propsMode === 'list') {
+      const mine = new Set(target.includedProps);
+      const sharedIds = other.includedProps.filter((id) => mine.has(id));
+      if (sharedIds.length) return { rule: other, shared: [`${sharedIds.length} propert${sharedIds.length === 1 ? 'y' : 'ies'} selected in both`] };
+      continue;
+    }
+    const a = new Set(target.scope === 'property' ? target.portfolios : target.communities);
+    const shared = (other.scope === 'property' ? other.portfolios : other.communities).filter((k) => a.has(k));
+    if (shared.length) return { rule: other, shared };
+  }
+  return null;
+}
+
 export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, vendorOpen }: { ruleRecords: { id: string; props: Record<string, any> }[] | null; live: boolean; canGenerate: boolean; taxonomy?: CustomWorktypeDef[] | null; vendorOpen: Record<string, number> }) {
   // Built-in taxonomy merged with the admin's custom work types / subtypes.
   const defs = useMemo(() => mergeWorktypes(taxonomy), [taxonomy]);
@@ -411,6 +436,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   // be selected before a value is entered. Synced to the rule on open.
   const [startMode, setStartMode] = useState<'immediate' | 'date' | 'delay'>('immediate');
   const [confirmDelete, setConfirmDelete] = useState(false);   // Delete-rule confirmation modal
+  const [activateMsg, setActivateMsg] = useState('');          // list banner: blocked activation / duplicate-saved-off notice
   // Rules-list search / filter / sort (mirrors the Services home).
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -614,13 +640,24 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
     setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', dueAnchor: 'enroll', daysBeforeLeaseStart: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', startDelayDays: '', stopEnabled: false, stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
     openRule(id);
   };
-  const duplicateRule = () => {
+  const duplicateRule = async () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    // The copy is a NEW, UNSAVED rule — drop the original's recordId so saving/
-    // editing/deleting/deactivating it targets its OWN HubSpot record (created on
-    // first save), never the original.
-    setRules((rs) => [...rs, { ...rule, id, recordId: undefined, name: `${rule.name} (copy)`, cadences: rule.cadences.map((c) => ({ ...c, id: ++_cid })) }]);
+    // The copy is a NEW rule with its OWN HubSpot record (recordId dropped so it
+    // never targets the original). It shares the original's property selection, so
+    // it overlaps → it's created OFF and AUTO-SAVED immediately. It can't be turned
+    // on until its property selection is changed to remove the overlap.
+    const copy: Rule = { ...rule, id, recordId: undefined, name: `${rule.name} (copy)`, active: false, cadences: rule.cadences.map((c) => ({ ...c, id: ++_cid })) };
+    setRules((rs) => [...rs, copy]);
     openRule(id);
+    setActivateMsg('Duplicate created and saved OFF — it overlaps the original. Change its property selection, then activate it.');
+    try {
+      const resp = await fetch('/api/services/rules/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordId: undefined, props: { ...ruleToProps(copy), active: 'false' } }),
+      });
+      const d = await resp.json().catch(() => ({}));
+      if (resp.ok && d.id) setRules((rs) => rs.map((x) => (x.id === id ? { ...x, recordId: String(d.id) } : x)));
+    } catch { /* offline — stays local until the user saves */ }
   };
   const deleteRule = (id: number) => {
     const recId = rules.find((r) => r.id === id)?.recordId;
@@ -694,33 +731,15 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   // any portfolio/community with ANOTHER active rule of the same worktype AND
   // subtype. Different subtypes of the same worktype (e.g. Grass Cut vs. Tree
   // Trimming) may cover the same property, so they never conflict.
-  const overlap = useMemo(() => {
-    if (!rule) return null;
-    for (const other of rules) {
-      if (other.id === rule.id || !other.active || other.worktype !== rule.worktype || other.subtype !== rule.subtype || other.scope !== rule.scope) continue;
-      // Two PROPERTY rules that both use a FIXED list conflict only when they
-      // share an actual property — splitting one portfolio's homes across two
-      // rules (e.g. trimming the original SFR Grass Cut and moving the rest to a
-      // new rule) is legitimate. Portfolio-level overlap still blocks whenever
-      // either side is 'all' mode (it would swallow the other's homes).
-      if (rule.scope === 'property' && rule.propsMode === 'list' && other.propsMode === 'list') {
-        const mine = new Set(rule.includedProps);
-        const sharedIds = other.includedProps.filter((id) => mine.has(id));
-        if (sharedIds.length) return { rule: other, shared: [`${sharedIds.length} propert${sharedIds.length === 1 ? 'y' : 'ies'} selected in both`] };
-        continue;
-      }
-      const a = new Set(rule.scope === 'property' ? rule.portfolios : rule.communities);
-      const shared = (other.scope === 'property' ? other.portfolios : other.communities).filter((k) => a.has(k));
-      if (shared.length) return { rule: other, shared };
-    }
-    return null;
-  }, [rules, rule]);
+  const overlap = useMemo(() => (rule ? overlapForRule(rule, rules) : null), [rules, rule]);
 
   const clientCost = rule ? (parseFloat(rule.vendorCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100)) : 0;
   const commonAreaClient = rule ? (parseFloat(rule.commonAreaCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100)) : 0;
   const saveErrors: string[] = [];
   if (rule) {
-    if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per work type + subtype (here: ${wtLabelD(rule.worktype)} · ${subLabelD(rule.worktype, rule.subtype)}).`);
+    // NOTE: overlap does NOT block saving. An overlapping rule saves fine but is
+    // parked OFF (persistRule forces active=false) and can't be turned on until the
+    // property selection no longer overlaps — surfaced as a warning below, not an error.
     if (rule.recurring && missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
     if (!rule.recurring && !rule.initialDueDays.trim()) saveErrors.push('Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
     if (rule.dueAnchor === 'lease_start' && !rule.daysBeforeLeaseStart.trim()) saveErrors.push('Set “days before lease start” for the lease-anchored due date.');
@@ -743,6 +762,13 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   // with a revert if the save fails; unsaved rules (no recordId) stay local.
   const toggleRuleActive = async (r: Rule) => {
     const next = !r.active;
+    // Can't ACTIVATE a rule that overlaps another active rule (one property → one
+    // active rule per work type + subtype). Fix its property selection first.
+    if (next) {
+      const ov = overlapForRule(r, rules);
+      if (ov) { setActivateMsg(`“${r.name}” can’t be activated — it overlaps “${ov.rule.name}” (${ov.shared.join(', ')}). Change its property selection so it no longer overlaps, then activate.`); return; }
+    }
+    setActivateMsg('');
     setRules((rs) => rs.map((x) => (x.id === r.id ? { ...x, active: next } : x)));
     if (!r.recordId) return;
     try {
@@ -763,12 +789,18 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   // latest edits). Keeps the local recordId in sync on first save.
   const persistRule = async (): Promise<string | null> => {
     if (!rule) return null;
+    // Overlapping rules save fine but are FORCED OFF — a property can only belong
+    // to one active rule per work type + subtype. The rule stays saved (so a
+    // duplicate persists on creation) and can be activated once the overlap is fixed.
+    const willOverlap = !!overlapForRule(rule, rules);
+    const props = ruleToProps(rule);
+    if (willOverlap) props.active = 'false';
     const r = await fetch('/api/services/rules/save', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recordId: rule.recordId, props: ruleToProps(rule) }),
+      body: JSON.stringify({ recordId: rule.recordId, props }),
     });
     const d = await r.json().catch(() => ({}));
-    if (r.ok && d.id) { patch({ recordId: d.id }); return String(d.id); }
+    if (r.ok && d.id) { patch({ recordId: d.id, ...(willOverlap && rule.active ? { active: false } : {}) }); return String(d.id); }
     return rule.recordId || null;
   };
 
@@ -928,6 +960,13 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
             </div>
           )}
 
+          {activateMsg && (
+            <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+              <span className="leading-snug">{activateMsg}</span>
+              <button type="button" onClick={() => setActivateMsg('')} aria-label="Dismiss" className="shrink-0 opacity-60 hover:opacity-100">✕</button>
+            </div>
+          )}
+
           <button onClick={addRule} className="w-full mb-3 text-brand bg-brand/5 border border-dashed border-brand/40 rounded-xl py-2.5 text-[13px] font-heading font-bold">+ New Rule</button>
 
           <div className="space-y-2">
@@ -942,7 +981,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                     <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${r.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{r.scope === 'community' ? 'Community' : 'SFR'}</span>
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{wtLabelD(r.worktype)} · {subLabelD(r.worktype, r.subtype)}</span>
-                      {!r.active && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">Paused</span>}
+                      {!r.active && (overlapForRule(r, rules)
+                        ? <span title="Overlaps an active rule — change its property selection to activate" className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">Overlap · off</span>
+                        : <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">Paused</span>)}
                     </div>
                     <div className="text-[11px] text-gray-500 mt-1 truncate">
                       {r.scope === 'community'
@@ -1463,8 +1504,15 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
             {saveErrors.map((e, i) => (
               <div key={i} className="mb-2 text-[12.5px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {e}</div>
             ))}
+            {/* Overlap is a WARNING, not a blocker: the rule saves but stays OFF
+                until its property selection no longer overlaps an active rule. */}
+            {overlap && (
+              <div className="mb-2 text-[12.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Overlaps “{overlap.rule.name}” on: {overlap.shared.join(', ')}. This rule will be <b>saved OFF</b> — a property can only belong to one active rule per work type + subtype. Change its property selection to activate it.
+              </div>
+            )}
             <button onClick={saveRule} disabled={!canSave || savingRule} className={`w-full rounded-2xl py-3 font-heading font-bold text-sm ${canSave && !savingRule ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
-              {savingRule ? 'Saving…' : canSave ? 'Save & Close' : 'Resolve the Issues Above to Save'}
+              {savingRule ? 'Saving…' : !canSave ? 'Resolve the Issues Above to Save' : overlap ? 'Save (Off) & Close' : 'Save & Close'}
             </button>
             {/* Live target count (from the coverage catalog — updates as the rule's
                 scope changes) + a compact ad-hoc Generate (idempotent: only fills
