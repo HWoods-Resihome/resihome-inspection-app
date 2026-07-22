@@ -1669,6 +1669,21 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
           onClose={() => setLightbox(null)}
           onDelete={() => { /* read-only */ }}
           onReplace={() => { /* read-only */ }}
+          // Internal: rotate a stored photo 90° in place (server-side — updates
+          // the record, PDFs, and emails). Answer-photo groups aren't rotatable
+          // (the endpoint declines them). Refresh SSR props so the fix paints.
+          onRotate={isInternal && svc.live ? async (gid, i) => {
+            const entry = gallery.map[gid]?.[i];
+            if (!entry) return false;
+            try {
+              const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/rotate-photo`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: entry }),
+              });
+              if (!r.ok) return false;
+              await router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});
+              return true;
+            } catch { return false; }
+          } : undefined}
         />
       )}
 

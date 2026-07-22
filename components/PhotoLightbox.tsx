@@ -29,6 +29,11 @@ interface Props {
   onClose: () => void;
   onDelete: (groupId: string, index: number) => void;
   onReplace: (groupId: string, index: number, file: File) => void;
+  /** Optional SERVER-side rotate (e.g. the services record, where photos are
+   *  read-only and stored on the order). When provided, the Rotate button shows
+   *  even in readOnly mode and calls this instead of the client-canvas path;
+   *  return true on success (the caller refreshes the photo list). */
+  onRotate?: (groupId: string, index: number) => Promise<boolean>;
   // Optional tag-to-line (only meaningful for room/section groups).
   tagLinesByGroup?: Record<string, { externalId: string; label: string }[]>;
   onTagToLine?: (groupId: string, index: number, lineExternalId: string) => void;
@@ -40,7 +45,7 @@ interface Props {
 
 export function PhotoLightbox({
   groups, photosByGroup, initialGroupId, initialIndex, readOnly, hideSave,
-  onClose, onDelete, onReplace, tagLinesByGroup, onTagToLine, onUntagFromLine, currentTagsFor,
+  onClose, onDelete, onReplace, onRotate, tagLinesByGroup, onTagToLine, onUntagFromLine, currentTagsFor,
 }: Props) {
   const [groupId, setGroupId] = useState(initialGroupId);
   const [index, setIndex] = useState(initialIndex);
@@ -152,6 +157,44 @@ export function PhotoLightbox({
     else setToast(null); // cancelled
   }
 
+  // Rotate the current photo 90° clockwise. Server path (onRotate — services)
+  // when provided; otherwise client canvas rotate → the same onReplace pipeline
+  // the annotator uses (upload + swap the stored URL), so it persists everywhere.
+  const [rotating, setRotating] = useState(false);
+  async function handleRotate() {
+    const u = photos[index];
+    if (!u || isVideoEntry(u) || rotating) return;
+    setRotating(true); showToast('Rotating…');
+    try {
+      if (onRotate) {
+        const ok = await onRotate(groupId, index);
+        showToast(ok ? 'Photo rotated' : 'Couldn’t rotate this photo');
+        return;
+      }
+      const local = /^(blob:|data:)/.test(u);
+      // Remote photos go through the same-origin proxy (like Mark up) so the
+      // canvas isn't cross-origin tainted; ~1920px re-encode decodes reliably.
+      const src = local ? u : `/api/photo-proxy?url=${encodeURIComponent(getPosterUrl(u))}&w=1920`;
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = () => reject(new Error('load failed')); img.src = src; });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalHeight; canvas.height = img.naturalWidth;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('canvas unavailable');
+      ctx.translate(canvas.width, 0);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, 0, 0);
+      const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', 0.9));
+      if (!blob) throw new Error('encode failed');
+      onReplace(groupId, index, new File([blob], `rotated-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      showToast('Photo rotated');
+    } catch {
+      showToast('Rotate failed');
+    } finally {
+      setRotating(false);
+    }
+  }
+
   const url = photos[index];
 
   return (
@@ -234,6 +277,17 @@ export function PhotoLightbox({
 
       {/* Actions — all on one line, with Return at the far right */}
       <div className="bg-black px-2 py-3 flex items-center gap-2">
+        {/* Rotate 90° — editable photos always; read-only too when a server
+            rotate handler is wired (services). Photos only, never videos. */}
+        {(!readOnly || !!onRotate) && !isVideoEntry(url) && (
+          <button type="button" onClick={handleRotate} disabled={rotating} title="Rotate 90°"
+            className="shrink-0 flex items-center gap-2 h-11 px-3 bg-white/15 active:bg-white/30 text-white font-heading text-sm rounded-lg disabled:opacity-50">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            <span className="hidden sm:inline">Rotate</span>
+          </button>
+        )}
         {!readOnly && (
           <>
             {!isVideoEntry(url) && (

@@ -93,6 +93,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       buffer = await transcodeToH264Mp4(buffer);
       outType = 'video/mp4';
       outName = safeName.replace(/\.[a-zA-Z0-9]{1,5}$/, '') + '.mp4';
+    } else if (/^image\/(jpe?g|png|webp)$/.test(safeContentType)) {
+      // AUTO-ROTATE: physically apply any EXIF orientation so the stored pixels
+      // are upright everywhere (some render paths ignore the EXIF tag → sideways
+      // photos in PDFs/reports). Only touches images that actually carry an
+      // orientation (>1) — everything else passes through byte-identical, so
+      // in-app camera captures (canvas-encoded, no EXIF) are never recompressed.
+      // Best-effort: any decode issue stores the original bytes unchanged.
+      try {
+        const sharp = (await import('sharp')).default;
+        const meta = await sharp(buffer).metadata();
+        if ((meta.orientation || 1) > 1) {
+          buffer = await sharp(buffer).rotate().toBuffer();   // no-arg rotate = EXIF-aware; output carries no orientation tag
+        }
+      } catch { /* keep original bytes */ }
     }
     // Store in Vercel Blob (public URL), NOT HubSpot File Manager — keeps
     // resident-home photos off HubSpot's storage cap while the read/display path
