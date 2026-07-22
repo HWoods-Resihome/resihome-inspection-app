@@ -18,6 +18,7 @@ import { ApprovalRoutingManager } from '@/components/admin/ApprovalRoutingManage
 import { SlackNotificationsManager } from '@/components/admin/SlackNotificationsManager';
 import { ErrorLogManager } from '@/components/admin/ErrorLogManager';
 import { InternalUsersManager } from '@/components/admin/InternalUsersManager';
+import { AiUsageSection } from '@/components/admin/AiUsageSection';
 
 const SETUP_LABELS: Record<string, string> = {
   app_admins_json: 'Admins storage (Agent)',
@@ -104,6 +105,9 @@ export default function AdminFlowsPage() {
 
         {/* ---- Error Log (real-time app failures) — self-contained card ---- */}
         <ErrorLogManager />
+
+        {/* ---- Claude API Usage & Cost (spend + top usage + reduction tips) ---- */}
+        <AiUsageSection />
 
         {/* ---- Provision Fields (Setup) ---- */}
         <Section
