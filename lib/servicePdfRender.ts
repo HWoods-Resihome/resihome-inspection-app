@@ -18,6 +18,17 @@ import { reviewerDisplayName } from '@/lib/reviewerName';
 const money = (v: any) => { const n = Number(v); return Number.isFinite(n) ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''; };
 const splitUrls = (v: any): string[] => String(v || '').split(/[\n,]+/).map((x) => x.trim()).filter((x) => /^https?:\/\//i.test(x.split('#')[0]));
 const normDate = (v: any): string => { const t = String(v ?? '').trim(); if (!t) return ''; if (/^\d{10,}$/.test(t)) return new Date(Number(t)).toISOString().slice(0, 10); return t.slice(0, 10); };
+// Answer values print app-wide style: ISO dates as M-D-YY, yes/no capitalized.
+const prettyAnswer = (v: any): string => {
+  const t = String(v ?? '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (m) return `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}`;
+  if (t === 'yes') return 'Yes';
+  if (t === 'no') return 'No';
+  return String(v ?? '');
+};
+
+const PHOTO_FETCH_TIMEOUT_MS = 8000; // one hung upstream photo must not stall the whole PDF
 
 async function toDataUri(url: string): Promise<string | null> {
   try {
@@ -26,7 +37,7 @@ async function toDataUri(url: string): Promise<string | null> {
     // every redirect hop resolves to a public IP) so a stored URL can't pull an
     // internal/metadata address into the admin-viewed PDF.
     if (!isAllowedPhotoHost(clean)) return null;
-    const r = await safeProxyFetch(clean);
+    const r = await safeProxyFetch(clean, { signal: AbortSignal.timeout(PHOTO_FETCH_TIMEOUT_MS) });
     if (!r.ok) return null;
     const buf = await readBodyCapped(r, 40 * 1024 * 1024);
     // failOn:'truncated' → a partial/corrupt upload throws (→ dropped) instead of
@@ -40,8 +51,20 @@ async function toDataUri(url: string): Promise<string | null> {
     return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
   } catch { return null; }
 }
+// Global limiter shared by every photo group in a render: before/after, pet,
+// proof, and bid photos together previously fired ~44 unbounded fetch+sharp ops
+// at once, which starved the event loop and made the PDF feel hung. Six at a
+// time keeps the pipe full without the stampede.
+const ENCODE_CONCURRENCY = 6;
+let _active = 0;
+const _waiters: Array<() => void> = [];
+async function withEncodeSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (_active >= ENCODE_CONCURRENCY) await new Promise<void>((r) => _waiters.push(r));
+  _active++;
+  try { return await fn(); } finally { _active--; _waiters.shift()?.(); }
+}
 async function encodeAll(urls: string[], cap = 8): Promise<string[]> {
-  const out = await Promise.all(urls.slice(0, cap).map(toDataUri));
+  const out = await Promise.all(urls.slice(0, cap).map((u) => withEncodeSlot(() => toDataUri(u))));
   return out.filter((x): x is string => !!x);
 }
 
@@ -63,7 +86,7 @@ export async function renderServicePdfBuffer(id: string, opts: { variant: 'vendo
   const answers = form
     .filter((q) => answersRaw[q.id] != null && answersRaw[q.id] !== '')
     .map((q) => {
-      const base = Array.isArray(answersRaw[q.id]) ? answersRaw[q.id].join(', ') : String(answersRaw[q.id]);
+      const base = Array.isArray(answersRaw[q.id]) ? answersRaw[q.id].map(prettyAnswer).join(', ') : prettyAnswer(answersRaw[q.id]);
       const note = q.type === 'yesno' && answersRaw[q.id] === 'no' ? String(answersRaw[`${q.id}__note`] || '').trim() : '';
       return { label: q.label, value: note ? `${base} — ${note}` : base };
     });

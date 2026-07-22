@@ -289,11 +289,16 @@ function ProofOfService({ url, name, onChange }: { url: string; name: string; on
   );
 }
 
-// Format an ISO date (YYYY-MM-DD) as M-D-YY (e.g. 2026-07-12 → 7-12-26); any
-// non-date string passes through unchanged. Used for date answer values.
+// Format an answer value for display: an ISO date (YYYY-MM-DD) becomes M-D-YY
+// (e.g. 2026-07-12 → 7-12-26) and stored yes/no answers capitalize to Yes/No;
+// anything else passes through unchanged.
 function mdyIfDate(v: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec((v || '').trim());
-  return m ? `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}` : v;
+  const t = (v || '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (m) return `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}`;
+  if (t === 'yes') return 'Yes';
+  if (t === 'no') return 'No';
+  return v;
 }
 
 function PhotoGrid({ label, urls, onOpen }: { label: string; urls: string[]; onOpen: (index: number) => void }) {
