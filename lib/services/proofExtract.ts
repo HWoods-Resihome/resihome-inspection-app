@@ -24,7 +24,11 @@ import { safeProxyFetch, readBodyCapped, isAllowedPhotoHost } from '@/lib/safePr
 
 const MAX_DOC_BYTES = 24 * 1024 * 1024;  // same ceiling as the AI-review proof fetch
 const MAX_PHOTOS = 12;                    // cap per document (a report rarely has more real photos)
-const MIN_EDGE_PX = 350;                  // skip logos/icons/signatures — keep real job photos
+// Vendor platforms often embed the job photos as SMALL thumbnails (real example:
+// 188×250 grids), so the "not a logo" floor must be low; banner-shaped images
+// (wide/thin logos, header art) are excluded by aspect ratio instead.
+const MIN_EDGE_PX = 150;                  // long edge — keeps photo thumbnails, drops icons
+const MAX_ASPECT = 3.2;                   // skip banner-shaped images (logos/headers)
 const OUT_EDGE = 1280;                    // stored size (matches app photo scale)
 
 /** Slice every plausible JPEG (SOI …FFD8FF… → EOI …FFD9) out of a raw buffer. */
@@ -53,28 +57,38 @@ export async function extractProofPhotos(proofUrl: string, serviceId: string): P
     if (!r.ok) return [];
     const doc = await readBodyCapped(r, MAX_DOC_BYTES);
 
-    const urls: string[] = [];
+    // Validate every candidate first, THEN keep the largest (by pixel area) up to
+    // the cap — so when a report has more photos than the cap, the small
+    // duplicates/thumbnails are what gets dropped, never the main photos.
+    const keeps: { jpeg: Buffer; area: number; hash: string }[] = [];
     const seen = new Set<string>();
-    let idx = 0;
     for (const cand of sliceJpegCandidates(doc)) {
-      if (urls.length >= MAX_PHOTOS) break;
       try {
         const base = sharp(cand, { failOn: 'truncated' }).rotate();
         const meta = await base.clone().metadata();
-        const long = Math.max(meta.width || 0, meta.height || 0);
-        if (long < MIN_EDGE_PX) continue;   // logo / icon / signature — not a job photo
+        const w = meta.width || 0; const h = meta.height || 0;
+        const long = Math.max(w, h); const short = Math.min(w, h) || 1;
+        if (long < MIN_EDGE_PX) continue;              // icon / signature — not a job photo
+        if (long / short > MAX_ASPECT) continue;       // banner-shaped logo / header art
         const jpeg = await base.resize(OUT_EDGE, OUT_EDGE, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 78 }).toBuffer();
         // Dedupe identical photos (same image often appears twice in a PDF's
         // object tree — thumbnail + full — or across pages).
         const hash = createHash('sha1').update(jpeg).digest('hex');
         if (seen.has(hash)) continue;
         seen.add(hash);
-        idx++;
-        const url = await uploadFile(jpeg, `proof-${serviceId}-${idx}-${hash.slice(0, 8)}.jpg`, 'image/jpeg', '/service_proof_photos');
-        if (url) urls.push(url);
+        keeps.push({ jpeg, area: w * h, hash });
       } catch { /* not a decodable/real JPEG — skip candidate */ }
     }
-    if (urls.length) console.log(`[proof-extract] service ${serviceId}: extracted ${urls.length} photo(s) from proof document`);
+    keeps.sort((a, b) => b.area - a.area);
+    const urls: string[] = [];
+    for (let i = 0; i < Math.min(keeps.length, MAX_PHOTOS); i++) {
+      const k = keeps[i];
+      try {
+        const url = await uploadFile(k.jpeg, `proof-${serviceId}-${i + 1}-${k.hash.slice(0, 8)}.jpg`, 'image/jpeg', '/service_proof_photos');
+        if (url) urls.push(url);
+      } catch (e) { console.warn('[proof-extract] upload failed for one photo (continuing):', e); }
+    }
+    if (urls.length) console.log(`[proof-extract] service ${serviceId}: extracted ${urls.length} photo(s) from proof document (${keeps.length} candidates kept)`);
     return urls;
   } catch (e) {
     console.warn('[proof-extract] failed (continuing without photos):', e);

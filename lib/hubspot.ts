@@ -2212,6 +2212,10 @@ const SERVICE_DETAIL_PROPS = [
   // Common-area cut cost folded into a community master's vendor total — read so
   // the Cost Detail can show the separate "Common Area" line under House Cuts.
   'common_area_cost',
+  // Proof-of-service enrichment (vendor closed out with their own PDF): the AI's
+  // document summary + photos extracted from inside it — the service PDFs render
+  // these, so they MUST be projected here (HubSpot returns only requested props).
+  'proof_summary', 'proof_photo_urls',
   'hs_createdate',
 ];
 

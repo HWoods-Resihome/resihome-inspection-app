@@ -15,7 +15,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchServiceWorkOrder, patchServiceWorkOrder, readServiceAiChecks } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, patchServiceWorkOrder, readServiceAiChecks, provisionServicesSchema } from '@/lib/hubspot';
 import { reviewOne } from '@/lib/services/aiReview';
 import { extractProofPhotos } from '@/lib/services/proofExtract';
 import { PROOF_URL_KEY } from '@/lib/services/model';
@@ -57,10 +57,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!Object.keys(props).length) {
       return res.status(200).json({ ok: false, message: 'Nothing extracted — no embedded JPEG photos found and no summary produced.', photos: 0 });
     }
+
+    // Persist AND VERIFY. The resilient work-order write silently STRIPS
+    // properties HubSpot doesn't know yet — so before the proof fields are
+    // provisioned, a plain patch "succeeds" while saving nothing. Re-read to
+    // check; if the values didn't stick, run the (additive, idempotent) Services
+    // provisioner to create the fields, patch again, and verify once more.
+    const stored = async (): Promise<boolean> => {
+      const fresh = await fetchServiceWorkOrder(id).catch(() => null);
+      const fp = fresh?.props || {};
+      const wantPhotos = !props.proof_photo_urls || !!String(fp.proof_photo_urls || '').trim();
+      const wantSummary = !props.proof_summary || !!String(fp.proof_summary || '').trim();
+      return wantPhotos && wantSummary;
+    };
     await patchServiceWorkOrder(id, props);
+    let persisted = await stored();
+    let provisioned = false;
+    if (!persisted) {
+      try { await provisionServicesSchema(true); provisioned = true; } catch (e) {
+        console.warn('[proof-refresh] provisioning failed:', e);
+      }
+      await patchServiceWorkOrder(id, props);
+      persisted = await stored();
+    }
+    if (!persisted) {
+      return res.status(500).json({
+        ok: false, photos: photos.length, summary: verdict?.proofSummary || null,
+        error: 'Extraction worked but the proof fields would not persist — the proof_summary / proof_photo_urls properties are missing on the Service Work Order object and auto-provisioning did not create them. Run /api/services/admin/provision?apply=1 and retry.',
+      });
+    }
     return res.status(200).json({
-      ok: true, photos: photos.length, summary: verdict?.proofSummary || null,
-      message: `Enriched: ${photos.length} photo(s)${verdict?.proofSummary ? ' + document summary' : ''}. The vendor/client PDFs now include them.`,
+      ok: true, photos: photos.length, summary: verdict?.proofSummary || null, provisioned,
+      message: `Enriched: ${photos.length} photo(s)${verdict?.proofSummary ? ' + document summary' : ''}${provisioned ? ' (fields were auto-provisioned first)' : ''}. The vendor/client PDFs now include them.`,
     });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
