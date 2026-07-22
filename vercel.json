@@ -59,6 +59,9 @@
     },
     "pages/api/cron/ticket-type-sweep.ts": {
       "maxDuration": 300
+    },
+    "pages/api/admin/rebrand-file-urls.ts": {
+      "maxDuration": 300
     }
   },
   "crons": [

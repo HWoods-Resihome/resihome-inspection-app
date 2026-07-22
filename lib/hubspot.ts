@@ -13,6 +13,7 @@ import { calculateLine, roundMoney } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
 import { normalizeApprovalRouting, type ApprovalRoutingConfig } from './approvalRouting';
 import { rejectedPropNames } from './hubspotErrors';
+import { rebrandUrl, rebrandDelimitedList, rebrandJsonBlob, hasBlobUrl } from './rebrandUrls';
 import { isVendorPasswordSet } from './vendorPassword';
 import { reportServerError } from './serverErrorReporter';
 import { SERVICE_OBJECTS, QUESTION_ADDITIONS, SERVICE_ASSOCIATIONS, type PropSpec, type ObjectSpec } from './services/schemaSpec';
@@ -6617,6 +6618,96 @@ export async function updateInspection(recordId: string, props: Record<string, a
     method: 'PATCH',
     body: JSON.stringify({ properties: props }),
   });
+}
+
+// ── One-time backfill: rewrite stored RAW Vercel Blob URLs → branded /m/ URLs ──
+// A resumable, per-batch pass over one object type. Rewrites only strings that
+// match the raw blob host (idempotent — a branded URL won't match, so re-runs are
+// safe). Different fields carry URLs in different shapes (scalar / newline list /
+// semicolon list / JSON blob), so each is handled correctly; photo_count is left
+// alone (rebranding never changes the entry count).
+export type RebrandObject = 'service' | 'inspection' | 'answer';
+type RebrandField = { name: string; kind: 'scalar' | 'listNL' | 'listSemi' | 'json' };
+
+function rebrandFieldSpec(object: RebrandObject): { typeId: string; fields: RebrandField[] } | null {
+  if (object === 'service') {
+    const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+    return typeId ? { typeId, fields: [
+      { name: 'before_photo_urls', kind: 'listNL' }, { name: 'after_photo_urls', kind: 'listNL' },
+      { name: 'pet_before_photo_urls', kind: 'listNL' }, { name: 'pet_after_photo_urls', kind: 'listNL' },
+      { name: 'proof_photo_urls', kind: 'listNL' }, { name: 'answers_json', kind: 'json' },
+    ] } : null;
+  }
+  if (object === 'inspection') {
+    const { inspection: typeId } = typeIds();
+    return typeId ? { typeId, fields: [
+      { name: 'pdf_attachment_url', kind: 'scalar' }, { name: 'pdf_master_url', kind: 'scalar' },
+      { name: 'pdf_chargeback_url', kind: 'scalar' }, { name: 'pdf_chargeback_xlsx_url', kind: 'scalar' },
+      { name: 'pdf_vendor_urls_json', kind: 'json' },
+    ] } : null;
+  }
+  const { answer: typeId } = typeIds();
+  return typeId ? { typeId, fields: [
+    { name: 'photo_urls', kind: 'listSemi' }, { name: 'after_photo_urls', kind: 'listSemi' },
+    // FC photos live inside the JSON `note`; a plain-text note (no blob URL) is skipped.
+    { name: 'note', kind: 'json' },
+  ] } : null;
+}
+
+export interface RebrandBatchReport { object: RebrandObject; scanned: number; changed: number; patched: number; after: string; done: boolean; error?: string }
+
+/** Rewrite one page (cursor `after`) of an object's blob URLs. Dry-run unless
+ *  `apply`. Returns the next cursor + done flag so the caller can chain pages. */
+export async function rebrandBlobUrlsBatch(opts: { object: RebrandObject; after?: string; apply: boolean; origin: string; limit?: number }): Promise<RebrandBatchReport> {
+  const spec = rebrandFieldSpec(opts.object);
+  const rep: RebrandBatchReport = { object: opts.object, scanned: 0, changed: 0, patched: 0, after: '', done: true };
+  if (!spec) { rep.error = `${opts.object} object not configured`; return rep; }
+  const limit = Math.min(Math.max(opts.limit || 50, 1), 100);
+
+  // Self-healing projection: a field not provisioned on this portal (e.g. answers'
+  // after_photo_urls, proof_photo_urls, pdf_chargeback_xlsx_url) would 400 the GET,
+  // so drop the rejected names and retry.
+  let projection = spec.fields.map((f) => f.name);
+  let resp: any = null;
+  for (;;) {
+    const qs = new URLSearchParams({ limit: String(limit), properties: projection.join(','), archived: 'false' });
+    if (opts.after) qs.set('after', opts.after);
+    try { resp = await hubspotFetch(`/crm/v3/objects/${spec.typeId}?${qs.toString()}`); break; }
+    catch (e) {
+      const rejected = rejectedPropNames(e).filter((n) => projection.includes(n));
+      if (!rejected.length) { rep.error = String((e as any)?.message || e).slice(0, 200); return rep; }
+      projection = projection.filter((n) => !rejected.includes(n));
+      if (!projection.length) { rep.error = 'no projectable fields'; return rep; }
+    }
+  }
+  const liveFields = spec.fields.filter((f) => projection.includes(f.name));
+
+  for (const r of resp.results || []) {
+    rep.scanned++;
+    const p = r.properties || {};
+    const patch: Record<string, any> = {};
+    for (const f of liveFields) {
+      const cur = p[f.name];
+      if (cur == null || cur === '' || !hasBlobUrl(cur)) continue;
+      if (f.kind === 'scalar') { const nv = rebrandUrl(cur, opts.origin); if (nv !== String(cur)) patch[f.name] = nv; }
+      else if (f.kind === 'json') { const res = rebrandJsonBlob(cur, opts.origin); if (res.changed) patch[f.name] = res.value; }
+      else { const res = rebrandDelimitedList(cur, f.kind === 'listNL' ? '\n' : ';', opts.origin); if (res.changed) patch[f.name] = res.value; }
+    }
+    if (Object.keys(patch).length) {
+      rep.changed++;
+      if (opts.apply) {
+        try {
+          if (opts.object === 'service') await patchServiceWorkOrder(r.id, patch);
+          else if (opts.object === 'inspection') await updateInspection(r.id, patch);
+          else await hubspotFetch(`/crm/v3/objects/${spec.typeId}/${r.id}`, { method: 'PATCH', body: JSON.stringify({ properties: patch }) });
+          rep.patched++;
+        } catch (e) { rep.error = `patch ${r.id}: ${String((e as any)?.message || e).slice(0, 140)}`; }
+      }
+    }
+  }
+  rep.after = resp.paging?.next?.after || '';
+  rep.done = !rep.after;
+  return rep;
 }
 
 /**
