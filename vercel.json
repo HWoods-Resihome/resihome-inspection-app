@@ -10,10 +10,10 @@
       "maxDuration": 10
     },
     "pages/api/inspections/[id]/finalize.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
     "pages/api/inspections/[id]/qc-finalize.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
     "pages/api/cron/sftp-watch.ts": {
       "maxDuration": 60

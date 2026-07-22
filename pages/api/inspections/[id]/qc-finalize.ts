@@ -47,7 +47,10 @@ const inFlightQcFinalize = new Set<string>();
 // the per-instance guard + terminal check and render/attach TWO QC reports. A
 // short-lived stamp on the record closes that window. Best-effort (HubSpot has no
 // conditional write); time-boxed so a crash can't wedge it.
-const QC_LOCK_MS = 120_000;
+// Aligned to this route's maxDuration (vercel.json = 300s): the platform kills the
+// function at that ceiling, so a lock older than it is provably stale (holder dead)
+// and a timed-out run frees up for retry right after. Keep equal to maxDuration.
+const QC_LOCK_MS = 300_000;
 const QC_LOCK_PROP = process.env.QC_FINALIZE_LOCK_PROPERTY || 'qc_finalize_in_progress';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {

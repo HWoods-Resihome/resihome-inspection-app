@@ -75,8 +75,15 @@ export const config = {
 // the same inspection. A Map with a start timestamp so a crashed/abandoned
 // finalize can't wedge the lock forever — entries older than the window are
 // treated as stale and overwritten.
+//
+// The TTL is aligned to this route's `maxDuration` (vercel.json = 300s): the
+// platform kills the function at that ceiling, so a lock older than it is
+// PROVABLY stale (its holder is dead). Keeping them equal means a finalize that
+// timed out (504, which skips the finally that releases the lock) frees up for a
+// retry within seconds of the timeout instead of blocking for minutes. If you
+// change maxDuration, change this to match.
 const inFlightFinalize = new Map<string, number>();
-const FINALIZE_LOCK_MS = 5 * 60 * 1000;
+const FINALIZE_LOCK_MS = 5 * 60 * 1000;   // 300s — must equal finalize maxDuration (vercel.json)
 
 // Durable cross-instance lock. Serverless instances don't share the Map above,
 // so we mark a HubSpot datetime/text property while finalize runs to guard
