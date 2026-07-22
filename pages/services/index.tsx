@@ -56,9 +56,10 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 };
 
 
-type SortField = 'due' | 'address' | 'worktype' | 'vendor' | 'status' | 'region' | 'community';
+type SortField = 'due' | 'updated' | 'address' | 'worktype' | 'vendor' | 'status' | 'region' | 'community';
 const SORT_OPTIONS: { value: SortField; label: string }[] = [
-  { value: 'due', label: 'Due date' }, { value: 'address', label: 'Address' },
+  { value: 'due', label: 'Due date' }, { value: 'updated', label: 'Updated' },
+  { value: 'address', label: 'Address' },
   { value: 'worktype', label: 'Work type' }, { value: 'vendor', label: 'Vendor' },
   { value: 'region', label: 'Region' }, { value: 'community', label: 'Community' },
   { value: 'status', label: 'Status' },
@@ -173,6 +174,19 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const regionOptions = useMemo(() => Array.from(new Set(services.map((s) => s.region).filter(Boolean))).sort(), [services]);
   // Community filter options — the distinct community names present in the list.
   const communityOptions = useMemo(() => Array.from(new Set(services.map((s) => s.community || '').filter(Boolean))).sort(), [services]);
+  // Type + Vendor options are ALSO derived from the loaded services (like Region /
+  // Community) — so each dropdown only offers values that actually appear in the
+  // list, not the full worktype catalog or the entire approved-vendor roster.
+  const worktypeOptions = useMemo(() => {
+    const present = new Set(services.map((s) => s.worktype).filter(Boolean));
+    return WORKTYPES.filter((w) => present.has(w.id)).map((w) => ({ value: w.id, label: w.label }));
+  }, [services]);
+  const vendorFilterOptions = useMemo(() => {
+    const names = Array.from(new Set(services.map((s) => s.vendor).filter(Boolean) as string[])).sort();
+    const opts = names.map((n) => ({ value: n, label: n }));
+    if (services.some((s) => !s.vendor)) opts.push({ value: '—', label: 'Unassigned' });
+    return opts;
+  }, [services]);
   // 'all' = everything (incl. completed); 'all_open' = everything except completed.
   // Tapping the All chip cycles between the two.
   // Vendors land on all OPEN services sorted by status (Assigned first); everyone
@@ -316,7 +330,8 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
     else if (status !== 'all') list = list.filter((s) => s.status === status);
     const dir = sortDir === 'asc' ? 1 : -1;
     const key = (s: typeof list[number]) => ({
-      due: s.dueDate, address: s.address.toLowerCase(), worktype: worktypeLabel(s.worktype),
+      due: s.dueDate, updated: s.updatedAt || s.completedAt || s.estimatedAt || '',
+      address: s.address.toLowerCase(), worktype: worktypeLabel(s.worktype),
       vendor: (s.vendor || '~').toLowerCase(), status: (STATUS_LABEL[s.status] || String(s.status)).toLowerCase(),
       region: s.region.toLowerCase(), community: (s.community || '~').toLowerCase(),
     }[sortField]);
@@ -497,11 +512,11 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
             <div className="flex items-center gap-2 pt-1">
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Type" selected={worktype} onChange={setWorktype} className={pickerCls(worktype.length > 0)}
-                  options={WORKTYPES.map((w) => ({ value: w.id, label: w.label }))} />
+                  options={worktypeOptions} />
               </div>
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Vendor" selected={vendor} onChange={setVendor} className={pickerCls(vendor.length > 0)}
-                  options={[...vendorNames.map((v) => ({ value: v, label: v })), { value: '—', label: 'Unassigned' }]} />
+                  options={vendorFilterOptions} />
               </div>
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}

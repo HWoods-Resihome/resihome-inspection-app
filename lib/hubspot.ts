@@ -1631,7 +1631,7 @@ const SERVICE_LIST_PROPS = [
   'property_status_snapshot', 'latitude', 'longitude', 'vendor_name', 'pet_stations',
   'property_id_ref', 'community_id_ref', 'submitted_at', 'completed_at', 'ontime',
   'master_service_id', 'for_billing',
-  'hs_createdate',
+  'hs_createdate', 'hs_lastmodifieddate',
 ];
 
 function normServiceDate(v: any): string {
@@ -1676,6 +1676,15 @@ function mapServiceRow(r: any): ServiceRecord {
   }
   // Creation date → the "estimated" date shown for estimated (bid) services.
   if (p.hs_createdate) { const e = normServiceDate(p.hs_createdate); if (e) rec.estimatedAt = e; }
+  // Last-updated timestamp for the "Updated" sort. hs_lastmodifieddate bumps on
+  // every write (create, submit, edit), so it captures "created or submitted counts
+  // as updated". Falls back to the latest of submitted/completed/created.
+  {
+    const cands = [p.hs_lastmodifieddate, p.submitted_at, p.completed_at, p.hs_createdate]
+      .map((v) => { const t = String(v ?? '').trim(); if (!t) return 0; const d = /^\d{10,}$/.test(t) ? new Date(Number(t)) : new Date(t); return isNaN(+d) ? 0 : +d; });
+    const latest = Math.max(...cands);
+    if (latest > 0) rec.updatedAt = new Date(latest).toISOString();
+  }
   const lat = num(p.latitude); if (lat !== null) rec.lat = lat;
   const lng = num(p.longitude); if (lng !== null) rec.lng = lng;
   // Property (or Community) ref so the map can geocode via the property's stored

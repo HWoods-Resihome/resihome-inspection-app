@@ -43,6 +43,7 @@ export interface ServiceRecord {
   dueDate: string;        // ISO date (YYYY-MM-DD)
   estimatedAt?: string;   // ISO date — when an estimated (bid) service was created
   completedAt?: string;   // ISO datetime — completed services only (drives day-view route order)
+  updatedAt?: string;     // ISO datetime — last modified (create/submit/edit all bump it); drives the "Updated" sort
   onTime?: boolean;       // completed services only — landed on/before due date
   lat?: number;           // approximate property coordinates (for the map view)
   lng?: number;
