@@ -766,12 +766,13 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
       if (!r.ok) { setGenMsg(d.error || 'Generation failed.'); return; }
       if (d.configured === false) { setGenMsg('Services objects aren’t configured yet.'); return; }
       if (!d.rulesActive) { setGenMsg('This rule is inactive — nothing generated.'); return; }
-      const created = d.created ?? 0, skipped = d.skippedExisting ?? 0, errors = d.errors ?? 0;
+      const created = d.created ?? 0, skipped = d.skippedExisting ?? 0, canceled = d.canceled ?? 0, errors = d.errors ?? 0;
       const parts: string[] = [];
       if (created) parts.push(`Created ${created} work order${created === 1 ? '' : 's'}`);
+      if (canceled) parts.push(`auto-canceled ${canceled} (stop criteria)`);
       if (skipped) parts.push(`${skipped} already open`);
       if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-      setGenMsg(created ? parts.join(' · ') : (skipped ? `Up to date — ${skipped} already open` : 'No missing work orders to create.'));
+      setGenMsg((created || canceled) ? parts.join(' · ') : (skipped ? `Up to date — ${skipped} already open` : 'No missing work orders to create.'));
       setWcReload((n) => n + 1);   // refresh the would-create count (some are now open)
     } catch { setGenMsg('Couldn’t reach the server. Try again.'); }
     finally { setGenBusy(false); }

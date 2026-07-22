@@ -21,12 +21,13 @@
  * follow the active cadence (else First Order Due, else +5); vendors are assigned by
  * equal-volume rotation with sticky-per-address (see ./rotation).
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool, readGenEnrollSeen, writeGenEnrollSeen } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, patchServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool, readGenEnrollSeen, writeGenEnrollSeen } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { DEFAULT_GRASS_TIERS } from './grassPricing';
 import { buildRotationState, pickVendor } from './rotation';
 import { notifyServiceAssigned } from '@/lib/notifications/triggers';
+import { recordServiceAudit } from './serviceAudit';
 import { appBaseUrl } from '@/lib/notifications/send';
 
 const parseArr = (s: any): any[] => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
@@ -200,15 +201,18 @@ interface Target { id: string; scope: 'property' | 'community'; address: string;
  *    status matches the enroll value, exact or prefix — e.g. "Vacant" → "Vacant - *").
  *    'list' mode restricts to the explicitly included property ids.
  */
-async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
+async function targetsForRule(p: Record<string, any>): Promise<{ targets: Target[]; stopped: { id: string; address: string }[] }> {
   const scope = p.scope === 'community' ? 'community' : 'property';
   if (scope === 'community') {
-    return parseArr(p.communities_json).map((name: string) => ({
-      id: name, scope: 'community' as const, address: name, locality: '', region: '', community: name,
-    }));
+    return {
+      targets: parseArr(p.communities_json).map((name: string) => ({
+        id: name, scope: 'community' as const, address: name, locality: '', region: '', community: name,
+      })),
+      stopped: [],
+    };
   }
   const portfolios = parseArr(p.portfolios_json);
-  if (!portfolios.length) return [];
+  if (!portfolios.length) return { targets: [], stopped: [] };
   const regions = parseArr(p.regions_json);
   const props = await searchPropertiesForCoverage({ portfolios, regions, limit: 2000 });
 
@@ -272,11 +276,15 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
   const poolHeldOut = (prop: EvalProp): boolean =>
     isPools && isTenantServicedPool(prop.poolServicer);
 
-  const enrolled = candidates
+  // Partition the enrolled set by the stop condition: stop-met properties are
+  // excluded from generation AND reported back so the run can auto-cancel their
+  // still-untouched assigned orders (see the caller).
+  const preStop = candidates
     .map(enrich)
     .filter((prop) => enrollOk(prop))
-    .filter((prop) => !stopHit(prop))    // stop condition met → exclude
     .filter((prop) => !poolHeldOut(prop));   // Tenant-Service pool → excluded
+  const stopped = preStop.filter((prop) => stopHit(prop)).map((prop) => ({ id: prop.id, address: prop.address }));
+  const enrolled = preStop.filter((prop) => !stopHit(prop));
 
   const out: Target[] = [];
   for (const prop of enrolled) {
@@ -293,7 +301,7 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
     }
     out.push(propBase);
   }
-  return out;
+  return { targets: out, stopped };
 }
 
 // A criterion is evaluable at generation time only for the fields we can read on
@@ -331,11 +339,16 @@ export interface GenerateResult {
   wouldCreate: number;
   created: number;
   skippedExisting: number;
+  // Stop-criteria auto-cancel: assigned orders whose property now meets the
+  // rule's stop condition (or whose rule passed its stop date), cancelled when
+  // due 3+ days out or already past due — never within the 2 days before due.
+  wouldCancel: number;
+  canceled: number;
   errors: number;
   items: {
     ruleId: string; ruleName: string; target: string; worktype: string; subtype: string;
     dueDate: string; vendor: string | null; enrollmentKey: string;
-    action: 'CREATE' | 'created' | 'skip-open' | 'error'; recordId?: string; error?: string;
+    action: 'CREATE' | 'created' | 'skip-open' | 'error' | 'CANCEL' | 'auto-canceled'; recordId?: string; error?: string;
   }[];
   notes: string[];
   // Community contracts that have ≥3 open orders of the same type stacked up (the
@@ -439,15 +452,46 @@ export async function runServiceGeneration(
 
   const result: GenerateResult = {
     mode: apply ? 'apply' : 'dry-run', today: todayISO, configured: true,
-    rulesActive: 0, rulesSkipped: 0, wouldCreate: 0, created: 0, skippedExisting: 0, errors: 0,
+    rulesActive: 0, rulesSkipped: 0, wouldCreate: 0, created: 0, skippedExisting: 0, wouldCancel: 0, canceled: 0, errors: 0,
     items: [], communityBacklogAlerts: [], notes: [
       'Property targets: live Property records in the rule’s portfolios/regions, filtered by the enrollment criteria (Property Status / RRQC), combined with the rule’s AND/OR. Community targets: one per selected community.',
       'Property (self-healing): one open order per property. The next is created immediately after the current closes, due = max(scheduled due, service-completion date) + one cadence step — a late finish re-anchors the rhythm to when the work was actually done.',
       'Community (contract calendar): occurrences generate on a fixed schedule regardless of completion — the day after each due date mints the next (due = prior due + a step), so open orders can stack. ≥3 open of the same type raises a backlog alert.',
       'Cadence is “every N days” (weekday anchor seeds the first order) or “monthly on day X”. Skip months are respected by the DUE date’s month; a due rolled across a skip month isn’t created until within one step of it. First Order Due lets the first one land earlier.',
       'Vendor rotation: an address keeps its vendor for the enrollment’s life (sticky); net-new enrollments balance toward the rule vendor with the lowest open volume, ties by vendor order.',
+      'Stop auto-cancel: when a property meets the stop condition (or a rule passes its stop date), its ASSIGNED orders are cancelled — but only when due 3+ days out or already past due; orders due within 2 days are left for the vendor to finish. Submitted/review work is never touched.',
     ],
   };
+
+  // ── Stop-criteria AUTO-CANCEL ────────────────────────────────────────────
+  // Cancels ASSIGNED orders only (never estimated/submitted/review — a bid isn't
+  // dispatched work, and submitted work is owed its review/payout), and only when
+  // the timing says the vendor almost certainly hasn't gone out: due 3+ days from
+  // now, or already past due. Orders due within the next 2 days are left alone.
+  const shouldCancelDue = (dueRaw: string): boolean => {
+    const due = dateOnly(dueRaw);
+    if (!due) return true;                            // no due date → nothing imminent
+    if (due < todayISO) return true;                  // past due
+    return due > addDays(todayISO, 2);                // still 3+ days out
+  };
+  const autoCancel = async (ruleId: string, ruleName: string, orders: typeof existing, reason: string, targetLabel?: string): Promise<void> => {
+    for (const o of orders) {
+      const item = { ruleId, ruleName, target: targetLabel || o.key, worktype: '', subtype: '', dueDate: dateOnly(o.dueDate), vendor: o.vendor || null, enrollmentKey: o.key } as const;
+      if (!apply) { result.wouldCancel++; result.items.push({ ...item, action: 'CANCEL' }); continue; }
+      try {
+        await patchServiceWorkOrder(o.id, { status: 'canceled' });
+        result.canceled++;
+        result.items.push({ ...item, action: 'auto-canceled', recordId: o.id });
+        void recordServiceAudit({ serviceId: o.id, action: 'cancel', actorName: 'Rules Engine', detail: `Auto-canceled — ${reason}` });
+      } catch (e: any) {
+        result.errors++;
+        result.items.push({ ...item, action: 'error', error: String(e?.message || e).slice(0, 300) });
+      }
+    }
+  };
+  // Assigned, cancel-eligible orders under a key prefix (a rule, or one target).
+  const assignedUnder = (prefix: string) => existing.filter((e) =>
+    e.id && e.status === 'assigned' && (e.key === prefix || e.key.startsWith(`${prefix}:`)) && shouldCancelDue(e.dueDate));
 
   for (const { id: ruleId, props: p } of rules) {
     if (p.active !== 'true') { result.rulesSkipped++; continue; }
@@ -460,7 +504,12 @@ export async function runServiceGeneration(
     const stopMode = String(p.stop_mode || 'condition');
     if (stopEnabled && stopMode === 'date') {
       const sd = String(p.stop_date || '').trim();
-      if (sd && todayISO >= sd) { result.rulesSkipped++; continue; }
+      if (sd && todayISO >= sd) {
+        // The rule has ended — also cancel its still-untouched assigned orders
+        // (this is what the stop-date helper text always promised).
+        await autoCancel(ruleId, p.rule_name || 'Rule', assignedUnder(`gen:${ruleId}`), `rule stop date ${sd} reached`);
+        result.rulesSkipped++; continue;
+      }
     }
     // Stop COUNT mode: per target, once N orders have been generated (all statuses),
     // stop making more.
@@ -597,7 +646,13 @@ export async function runServiceGeneration(
       result.skippedExisting++;
       result.items.push({ ruleId, ruleName, target: t.address, worktype, subtype, dueDate, vendor: rotation.stickyByKey.get(key) ?? null, enrollmentKey: key, action: 'skip-open' });
     };
-    const targets = await targetsForRule(p);
+    const { targets, stopped } = await targetsForRule(p);
+    // Properties that now MEET the stop condition: no new orders (they're already
+    // excluded from targets) — and their untouched assigned orders get cancelled.
+    for (const sp of stopped) {
+      const orders = assignedUnder(`gen:${ruleId}:${sp.id}`);
+      if (orders.length) await autoCancel(ruleId, p.rule_name || 'Rule', orders, 'property meets the rule’s stop criteria', sp.address);
+    }
 
     // Enroll DELAY: "Starts on → N days after it meets the criteria" (blank = no
     // delay). Gates the FIRST creation only — a target isn't created until it has

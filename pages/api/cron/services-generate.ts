@@ -26,7 +26,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const report = await runServiceGeneration(true, today);
     if (report === null) return res.status(200).json({ ok: true, skipped: true, reason: 'Service objects not configured.' });
-    console.log('[cron/services-generate]', JSON.stringify({ created: report.created, skipped: report.skippedExisting, errors: report.errors, backlog: report.communityBacklogAlerts.length }));
+    console.log('[cron/services-generate]', JSON.stringify({ created: report.created, skipped: report.skippedExisting, canceled: report.canceled, errors: report.errors, backlog: report.communityBacklogAlerts.length }));
     // Community contract backlog (≥3 open orders of the same type on one community
     // → the vendor is behind) → Admin ▸ Error Log so it's visible, not a hard stop.
     if (report.communityBacklogAlerts.length) {
@@ -52,7 +52,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         meta: { created: report.created, skippedExisting: report.skippedExisting, errors: report.errors, today },
       });
     }
-    return res.status(200).json({ ok: true, created: report.created, skippedExisting: report.skippedExisting, errors: report.errors });
+    return res.status(200).json({ ok: true, created: report.created, skippedExisting: report.skippedExisting, canceled: report.canceled, errors: report.errors });
   } catch (e: any) {
     console.error('[cron/services-generate] failed:', e);
     // A hard failure of the whole run → Admin ▸ Error Log (best-effort).

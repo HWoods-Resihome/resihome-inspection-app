@@ -2116,6 +2116,7 @@ const HUBSPOT_SEARCH_MAX = 10_000;
  *  read error THROWS (so generation fails loudly instead of silently reading the
  *  null as "not configured" and creating nothing). */
 export interface ServiceWorkOrderKey {
+  id: string;   // work-order record id (needed by the stop-criteria auto-cancel)
   key: string; status: string; vendor: string;
   // Cadence anchors for recurring regeneration, in priority order:
   // serviceCompletedDate (vendor-entered date the work was DONE — the self-healing
@@ -2150,6 +2151,7 @@ export async function readServiceWorkOrderKeys(): Promise<ServiceWorkOrderKey[] 
     for (const r of resp.results || []) {
       const p = r.properties || {};
       out.push({
+        id: String(r.id || ''),
         key: String(p.enrollment_key || ''), status: String(p.status || ''), vendor: String(p.vendor_name || ''),
         serviceCompletedDate: String(p.service_completed_date || ''),
         submittedAt: String(p.submitted_at || ''), completedAt: String(p.completed_at || ''), dueDate: String(p.due_date || ''),
