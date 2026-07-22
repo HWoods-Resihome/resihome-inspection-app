@@ -98,7 +98,7 @@ export function SiteFooter() {
         </div>
         <FooterCol title="Platform" links={[['Inspections', '/sitepreview#platform'], ['Pricing & Scoping', '/sitepreview#pricing'], ['AI Reviews', '/sitepreview#ai'], ['Services & Vendors', '/sitepreview#services'], ['Insights', '/sitepreview#insights']]} />
         <FooterCol title="Resources" links={[['FAQ', '/sitepreview/faq'], ['Integrations', '/sitepreview#integrations'], ['Contact us', '/sitepreview#contact']]} />
-        <FooterCol title="Company" links={[['Log in', '/login'], ['Book a demo', '/sitepreview#contact'], ['eric.williams@resihome.com', 'mailto:eric.williams@resihome.com']]} />
+        <FooterCol title="Company" links={[['Log in', '/login'], ['Book a demo', '/sitepreview#contact'], ['Built for SFR & BTR', '/sitepreview#platform']]} />
       </div>
       <div className="border-t border-white/10">
         <div className="max-w-7xl mx-auto px-5 lg:px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">

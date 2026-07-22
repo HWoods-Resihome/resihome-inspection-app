@@ -1,61 +1,64 @@
 /**
  * /sitepreview — ResiWalk marketing / product site (PREVIEW).
  *
- * A public, enterprise-grade landing page for review before promotion to the
- * main site. Self-contained Next page: sticky nav, video hero, platform feature
- * sections (inspections, real-world pricing & scoping, AI reviews + self-learning
- * knowledge base, scheduled services + vendor management + billing, rules engine,
- * insights dashboard), integrations, "built by veterans" band, metrics, contact
- * form (emails eric.williams@ + hwoods@ via /api/sitepreview/contact), footer.
- *
- * Brand: pink #ff0060 (brand), teal #73e3df (accent), ink dark. Not indexed while
- * it lives under /sitepreview.
+ * Enterprise, product-led marketing page in the spirit of CompanyCam / HappyCo:
+ * device-framed product screenshots (rendered in CSS/SVG), real ResiHome data
+ * points, categorized integrations with brand logos, workflow, markets map,
+ * testimonial, and a contact form that emails the ResiWalk team. Public + noindex
+ * while it lives under /sitepreview. Brand: pink #ff0060, teal #73e3df.
  */
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { SiteNav, SiteFooter, Reveal } from '@/components/sitepreview/Chrome';
+import {
+  BrowserFrame, PhoneFrame, InsightsScreen, RateCardScreen, ServicesScreen,
+  InspectionPhone, AICameraCard, RulesFlow, MarketsMap,
+} from '@/components/sitepreview/Mockups';
+import { HubSpotMark, DriveMark, CalendarMark, SlackMark, GoogleMark, WordMark } from '@/components/sitepreview/Logos';
 
-// ---------- small inline icons (stroke, currentColor) ----------
 type IconProps = { className?: string };
 const I = {
   clipboard: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M9 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3"/><path d="M9 12l2 2 4-4"/></svg>,
   dollar: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>,
-  spark: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><path d="M12 3l1.8 4.7L18.5 9l-4.7 1.3L12 15l-1.8-4.7L5.5 9l4.7-1.3L12 3z"/><path d="M19 15l.9 2.3L22 18l-2.1.7L19 21l-.9-2.3L16 18l2.1-.7L19 15z"/></svg>,
-  calendar: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M8 14l3 3 5-5"/></svg>,
-  wallet: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M16 15h2"/></svg>,
+  brain: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><path d="M9 3a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8A3 3 0 0 0 7 17a3 3 0 0 0 5 1 3 3 0 0 0 5-1 3 3 0 0 0 2-5.2A3 3 0 0 0 18 6a3 3 0 0 0-3-3 3 3 0 0 0-3 1.5A3 3 0 0 0 9 3z"/></svg>,
+  calendar: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>,
   flow: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><rect x="3" y="3" width="7" height="5" rx="1"/><rect x="14" y="16" width="7" height="5" rx="1"/><path d="M6.5 8v4a3 3 0 0 0 3 3h5"/></svg>,
   chart: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><path d="M4 20V4M4 20h16M8 16l3-4 3 3 5-7"/></svg>,
-  camera: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg>,
-  brain: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><path d="M9 3a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8A3 3 0 0 0 7 17a3 3 0 0 0 5 1 3 3 0 0 0 5-1 3 3 0 0 0 2-5.2A3 3 0 0 0 18 6a3 3 0 0 0-3-3 3 3 0 0 0-3 1.5A3 3 0 0 0 9 3z"/></svg>,
   check: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={p.className}><path d="M20 6L9 17l-5-5"/></svg>,
   bolt: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>,
   shield: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><path d="M12 3l8 3v5c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>,
+  cloud: (p: IconProps) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.2 9.3 4 4 0 0 0 7 19z"/></svg>,
+  play: (p: IconProps) => <svg viewBox="0 0 24 24" fill="currentColor" className={p.className}><path d="M8 5v14l11-7z"/></svg>,
 };
 
-const STATS = [
-  { value: '2.6d → 0.1d', label: 'Scope-to-ticket turnaround' },
-  { value: '6', label: 'Inspection templates, one platform' },
-  { value: '100%', label: 'Field-priced against live rate cards' },
-  { value: 'Real-time', label: 'Insights across every region' },
-];
-
 const FEATURES = [
-  { id: 'inspections', icon: I.clipboard, tag: 'Inspections', title: 'A full suite of property inspections', body: 'Scope Rate Card, 1099 Leasing-Agent, Turn Re-Inspect QC, Vacancy/Occupancy, Community, and New-Construction RRQC — one app, offline-ready, photo-evidenced, GPS-stamped. Purpose-built for the field teams who actually walk the homes.', points: ['Works offline; syncs the moment signal returns', 'GPS + timestamp evidence on every photo', 'Configurable templates per program'] },
-  { id: 'pricing', icon: I.dollar, tag: 'Pricing & Scoping', title: 'Real-world pricing and scoping, on site', body: 'Every line item priced against live regional rate cards — labor, materials, markup, and tenant bill-back computed instantly as the inspector scopes. No spreadsheets, no guesswork, no back-office re-pricing.', points: ['Region-aware labor & material rates', 'Instant vendor / client / tenant cost splits', 'Consistent, defensible pricing every time'] },
-  { id: 'ai', icon: I.brain, tag: 'AI Reviews', title: 'AI reviews + a self-learning knowledge base', body: 'On-device camera and voice AI suggest the right line items and catch issues in the moment, while a self-learning knowledge base absorbs every human override to get sharper over time — your standards, encoded and always improving.', points: ['Photo & voice AI line-item capture', 'Learns from every reviewer override', 'Your playbook, enforced automatically'] },
-  { id: 'services', icon: I.calendar, tag: 'Services & Vendors', title: 'Scheduled services, vendor management & billing', body: 'Bring recurring services in-house — grass, cleans, pools — with a scheduling engine, vendor dispatch, field evidence, and clean vendor & client billing end to end. Replace the middlemen without losing the controls.', points: ['Recurring scheduling & vendor rotation', 'Field-evidenced completion', 'Vendor + client invoicing built in'] },
-  { id: 'rules', icon: I.flow, tag: 'Rules Engine', title: 'An integrated rules engine', body: 'Codify the way your business actually runs: approval routing by dollar and region, auto-dispatch on failed findings, escalation ladders, and service triggers — all configurable, all auditable, no code.', points: ['NTE-based approval routing', 'Condition-driven automations', 'Fully auditable decisions'] },
-  { id: 'insights', icon: I.chart, tag: 'Insights', title: 'A full-service insights dashboard', body: 'Live analytics across inspections, pass/fail trends, scope cost, inspector performance, AI overrides, and service throughput — banked daily and sliced by region, program, and person. The command center for the whole operation.', points: ['Region, program & inspector breakdowns', 'Trend history banked automatically', 'Exec-ready, real-time'] },
+  { id: 'inspections', icon: I.clipboard, tag: 'Field Inspections', title: 'A full suite of inspections, offline-ready', body: 'Scope Rate Card, 1099 Leasing-Agent, Turn Re-Inspect QC, Vacancy/Occupancy, Community, and New-Construction RRQC — one app your field teams actually enjoy. Captures work offline in dead zones and syncs the instant signal returns, every photo GPS- and time-stamped.', points: ['Six configurable templates, one platform', 'Fully offline; auto-syncs on reconnect', 'GPS + timestamp evidence on every photo'], visual: <InspectionPhone />, visualWide: false },
+  { id: 'pricing', icon: I.dollar, tag: 'Pricing & Scoping', title: 'Real-world pricing, computed on site', body: 'Every line item is priced against live regional rate cards as the inspector scopes — labor, materials, regional adjustments, markup, and tenant bill-back resolved instantly. No spreadsheets, no back-office re-pricing, and consistent, defensible numbers every time.', points: ['Region-aware labor & material rates', 'Instant vendor / client / tenant splits', 'One source of truth for cost'], visual: <RateCardScreen />, visualWide: true },
+  { id: 'ai', icon: I.brain, tag: 'AI Reviews', title: 'AI reviews + a self-learning knowledge base', body: 'On-device camera and voice AI suggest the right line items and catch issues in the moment, while a knowledge base absorbs every human override to get sharper over time — your standards, encoded and always improving.', points: ['Photo & voice AI line-item capture', 'Learns from every reviewer override', 'Your playbook, enforced automatically'], visual: <AICameraCard />, visualWide: false },
+  { id: 'services', icon: I.calendar, tag: 'Services & Vendors', title: 'Scheduled services, vendors & billing', body: 'Bring recurring services in-house — grass, cleans, pools — with a scheduling engine, vendor dispatch and rotation, field-evidenced completion, and clean vendor & client billing end to end. Replace the middlemen without losing the controls.', points: ['Recurring scheduling & vendor rotation', 'Field-evidenced completion', 'Vendor + client invoicing built in'], visual: <ServicesScreen />, visualWide: true },
+  { id: 'rules', icon: I.flow, tag: 'Rules Engine', title: 'An integrated, no-code rules engine', body: 'Codify how your business actually runs: NTE-based approval routing by dollar and region, condition-driven automations, escalation ladders, and service triggers — all configurable and fully auditable.', points: ['NTE-based approval routing', 'Condition-driven automations', 'Every decision auditable'], visual: <RulesFlow />, visualWide: false },
+  { id: 'insights', icon: I.chart, tag: 'Insights', title: 'A full-service insights command center', body: 'Live analytics across inspections, pass/fail trends, scope cost, inspector performance, AI acceptance, and service throughput — banked daily and sliced by region, program, and person. Exec-ready and always current.', points: ['Region, program & inspector breakdowns', 'Trend history banked automatically', 'Real-time, decision-ready'], visual: <InsightsScreen />, visualWide: true },
 ];
 
-const INTEGRATIONS = [
-  { name: 'HubSpot', desc: 'CRM system of record — properties, listings, tickets & workflows.' },
-  { name: 'Google Drive', desc: 'Documents, reports & evidence, synced where your teams work.' },
-  { name: 'Google Calendar', desc: 'Scheduling and dispatch that lands on the right calendars.' },
-  { name: 'Slack', desc: 'Real-time approvals, dispatch alerts & a conversational assistant.' },
-  { name: 'RentCast', desc: 'Live market comps to inform listing & scoping decisions.' },
-  { name: 'Maintenance Systems', desc: 'Ticketing & work-order sync into your existing MM stack.' },
+const INTEGRATION_GROUPS: { category: string; items: { name: string; desc: string; logo: ReactNode }[] }[] = [
+  { category: 'CRM & System of Record', items: [
+    { name: 'HubSpot', desc: 'Properties, listings, tickets & workflows — the system of record.', logo: <HubSpotMark className="w-8 h-8" /> },
+  ] },
+  { category: 'Storage & Documents', items: [
+    { name: 'Google Drive', desc: 'Reports, evidence & documents synced where teams work.', logo: <DriveMark className="w-8 h-8" /> },
+  ] },
+  { category: 'Scheduling', items: [
+    { name: 'Google Calendar', desc: 'Scheduling & dispatch on the right calendars.', logo: <CalendarMark className="w-8 h-8" /> },
+    { name: 'Google Workspace', desc: 'Single sign-on and identity for your staff.', logo: <GoogleMark className="w-8 h-8" /> },
+  ] },
+  { category: 'Communication', items: [
+    { name: 'Slack', desc: 'Real-time approvals, dispatch alerts & a conversational assistant.', logo: <SlackMark className="w-8 h-8" /> },
+  ] },
+  { category: 'Market Data & Maintenance', items: [
+    { name: 'RentCast', desc: 'Live market comps to inform listing & scoping.', logo: <span className="w-8 h-8 rounded-lg bg-[#0f172a] flex items-center justify-center text-[10px] text-white font-extrabold">RC</span> },
+    { name: 'Maintenance / MM', desc: 'Two-way work-order & ticket sync with your MM stack.', logo: <span className="w-8 h-8 rounded-lg bg-[#ff0060]/10 flex items-center justify-center"><I.cloud className="w-5 h-5 text-[#ff0060]" /></span> },
+  ] },
 ];
 
 export default function SitePreview() {
@@ -73,180 +76,204 @@ export default function SitePreview() {
         <SiteNav />
 
         {/* ============ HERO ============ */}
-        <section className="relative pt-28 pb-20 lg:pt-36 lg:pb-28 overflow-hidden">
-          <div aria-hidden className="absolute inset-0 -z-10">
-            <div className="absolute -top-40 -right-40 w-[46rem] h-[46rem] rounded-full bg-brand/15 blur-3xl" />
-            <div className="absolute top-40 -left-40 w-[38rem] h-[38rem] rounded-full bg-accent/20 blur-3xl" />
-          </div>
-          <div className="max-w-7xl mx-auto px-5 lg:px-8 grid lg:grid-cols-[1.05fr_1fr] gap-12 items-center">
+        <section className="relative pt-28 lg:pt-36 pb-16 lg:pb-24">
+          <HeroBackground />
+          <div className="relative max-w-7xl mx-auto px-5 lg:px-8 grid lg:grid-cols-[1.05fr_1fr] gap-14 items-center">
             <div>
               <Reveal>
-                <span className="inline-flex items-center gap-2 rounded-full bg-brand/10 text-brand px-3.5 py-1.5 text-xs font-heading font-bold tracking-wide uppercase">
-                  <I.bolt className="w-3.5 h-3.5" /> Built for SFR &amp; BTR at scale
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/70 backdrop-blur ring-1 ring-black/5 text-brand px-3.5 py-1.5 text-xs font-heading font-bold tracking-wide uppercase shadow-sm">
+                  <I.bolt className="w-3.5 h-3.5" /> The property operations platform
                 </span>
               </Reveal>
               <Reveal delay={60}>
-                <h1 className="mt-5 font-heading font-extrabold text-4xl sm:text-5xl lg:text-[3.4rem] leading-[1.05] text-ink">
-                  The property operations platform that <span className="text-brand">walks with your team.</span>
+                <h1 className="mt-5 font-heading font-extrabold text-4xl sm:text-5xl lg:text-[3.6rem] leading-[1.03] text-ink">
+                  Every property walk,<br /><span className="bg-gradient-to-r from-brand to-brand-deeper bg-clip-text text-transparent">priced, dispatched &amp; measured.</span>
                 </h1>
               </Reveal>
               <Reveal delay={120}>
                 <p className="mt-6 text-lg text-ink/70 leading-relaxed max-w-xl">
-                  Inspections, real-world pricing &amp; scoping, AI reviews, scheduled services, vendor billing, a self-learning knowledge base, an integrated rules engine, and a live insights dashboard — one platform, built by industry veterans.
+                  ResiWalk unifies inspections, real-world pricing &amp; scoping, AI reviews, scheduled services, vendor billing, a self-learning knowledge base, a rules engine, and live insights — one platform, built by industry veterans for SFR &amp; BTR.
                 </p>
               </Reveal>
               <Reveal delay={180}>
                 <div className="mt-8 flex flex-wrap items-center gap-3">
-                  <Link href="#contact" className="inline-flex items-center h-12 px-7 rounded-full bg-brand text-white font-heading font-bold hover:bg-brand-dark transition-colors shadow-lg shadow-brand/20">Book a demo</Link>
-                  <Link href="/login" className="inline-flex items-center h-12 px-7 rounded-full border border-gray-300 text-ink font-heading font-bold hover:border-brand hover:text-brand transition-colors">Log in to the portal</Link>
+                  <Link href="#contact" className="inline-flex items-center h-12 px-7 rounded-full bg-brand text-white font-heading font-bold hover:bg-brand-dark transition-colors shadow-lg shadow-brand/25">Book a demo</Link>
+                  <Link href="#showcase" className="inline-flex items-center gap-2 h-12 px-6 rounded-full bg-white ring-1 ring-black/10 text-ink font-heading font-bold hover:ring-brand hover:text-brand transition-colors"><I.play className="w-4 h-4" /> Watch it work</Link>
                 </div>
               </Reveal>
               <Reveal delay={240}>
-                <div className="mt-8 flex items-center gap-6 text-sm text-ink/60">
-                  <span className="inline-flex items-center gap-1.5"><I.shield className="w-4 h-4 text-accent-dark" /> Enterprise-grade</span>
+                <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-ink/60">
+                  <span className="inline-flex items-center gap-1.5"><I.shield className="w-4 h-4 text-accent-dark" /> Enterprise-grade &amp; auditable</span>
                   <span className="inline-flex items-center gap-1.5"><I.check className="w-4 h-4 text-accent-dark" /> Offline-ready field app</span>
                 </div>
               </Reveal>
             </div>
-            <Reveal delay={160}>
-              <div className="relative rounded-2xl overflow-hidden shadow-2xl ring-1 ring-black/5 bg-ink">
-                <video
-                  className="w-full h-auto block"
-                  controls
-                  playsInline
-                  preload="metadata"
-                  poster="/resiwalk-logo.svg"
-                >
+
+            {/* hero product composition */}
+            <Reveal delay={140}>
+              <div className="relative mx-auto max-w-md lg:max-w-none">
+                <div className="hidden sm:block absolute -top-6 -left-6 w-56 z-20 rotate-[-4deg]">
+                  <div className="rounded-xl bg-white shadow-2xl ring-1 ring-black/5 p-3">
+                    <div className="text-[10px] text-gray-400">Rate-card total</div>
+                    <div className="font-heading font-extrabold text-brand text-lg">$3,205.00</div>
+                    <div className="mt-1 h-1.5 rounded-full bg-gray-100 overflow-hidden"><div className="h-full w-4/5 bg-gradient-to-r from-brand to-accent" /></div>
+                  </div>
+                </div>
+                <div className="flex justify-center"><InspectionPhone /></div>
+                <div className="hidden sm:block absolute -bottom-8 -right-4 w-64 z-20 rotate-[3deg]">
+                  <div className="rounded-xl bg-ink text-white shadow-2xl ring-1 ring-white/10 p-3">
+                    <div className="text-[10px] text-white/50 mb-1.5">Pass rate · this month</div>
+                    <div className="flex items-end gap-1 h-10">{[40,55,48,66,60,74,88].map((h,i)=><div key={i} className="flex-1 rounded-t bg-gradient-to-t from-brand to-accent" style={{height:`${h}%`}} />)}</div>
+                    <div className="mt-1 font-heading font-extrabold text-accent text-sm">96.4%</div>
+                  </div>
+                </div>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
+        {/* ============ STATS / TRUST ============ */}
+        <section className="border-y border-gray-100 bg-white">
+          <div className="max-w-7xl mx-auto px-5 lg:px-8 py-10">
+            <Reveal>
+              <p className="text-center text-xs font-heading font-bold uppercase tracking-widest text-ink/40">Proven across the Southeast SFR &amp; BTR landscape</p>
+            </Reveal>
+            <div className="mt-7 grid grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-4">
+              {[['6,000+', 'Homes under active management'], ['32,000+', 'Homes managed, all-time'], ['15', 'Markets across the Southeast'], ['4,200+', 'BTR homes delivered']].map((s, i) => (
+                <Reveal key={s[1]} delay={i * 70}>
+                  <div className="text-center">
+                    <div className="font-heading font-extrabold text-3xl lg:text-4xl bg-gradient-to-br from-brand to-brand-deeper bg-clip-text text-transparent">{s[0]}</div>
+                    <div className="mt-1 text-[13px] text-ink/60 leading-snug">{s[1]}</div>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ============ SHOWCASE (video + one platform) ============ */}
+        <section id="showcase" className="py-20 lg:py-28 bg-gray-50">
+          <div className="max-w-7xl mx-auto px-5 lg:px-8">
+            <Reveal>
+              <div className="max-w-3xl mx-auto text-center">
+                <span className="text-brand font-heading font-bold text-sm uppercase tracking-wide">One platform</span>
+                <h2 className="mt-3 font-heading font-extrabold text-3xl lg:text-4xl text-ink leading-tight">Replace a stack of disconnected tools</h2>
+                <p className="mt-4 text-lg text-ink/70">From the first walk to the final invoice, ResiWalk runs the entire property-operations lifecycle in one integrated system.</p>
+              </div>
+            </Reveal>
+            <Reveal delay={100}>
+              <div className="mt-12 max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl ring-1 ring-black/5 bg-ink">
+                <video className="w-full h-auto block" controls playsInline preload="metadata" poster="/resiwalk-logo.svg">
                   <source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" />
                 </video>
               </div>
             </Reveal>
-          </div>
-
-          {/* stats strip */}
-          <div className="max-w-7xl mx-auto px-5 lg:px-8 mt-16">
-            <Reveal>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-px rounded-2xl overflow-hidden bg-gray-100 ring-1 ring-gray-100">
-                {STATS.map((s) => (
-                  <div key={s.label} className="bg-white p-6 text-center">
-                    <div className="font-heading font-extrabold text-2xl lg:text-3xl text-brand">{s.value}</div>
-                    <div className="mt-1 text-[13px] text-ink/60 leading-snug">{s.label}</div>
-                  </div>
-                ))}
-              </div>
-            </Reveal>
-          </div>
-        </section>
-
-        {/* ============ PLATFORM / FEATURES ============ */}
-        <section id="platform" className="py-20 lg:py-28 bg-gray-50">
-          <div className="max-w-7xl mx-auto px-5 lg:px-8">
-            <Reveal>
-              <div className="max-w-3xl">
-                <span className="text-brand font-heading font-bold text-sm uppercase tracking-wide">The platform</span>
-                <h2 className="mt-3 font-heading font-extrabold text-3xl lg:text-4xl text-ink leading-tight">Everything property operations needs — in one place</h2>
-                <p className="mt-4 text-lg text-ink/70">From the first walk to the final invoice, ResiWalk replaces a stack of disconnected tools with a single, integrated system your teams actually enjoy using.</p>
-              </div>
-            </Reveal>
-
-            <div className="mt-14 space-y-8">
-              {FEATURES.map((f, i) => (
-                <Reveal key={f.id} delay={(i % 2) * 80}>
-                  <div id={f.id} className={`grid lg:grid-cols-2 gap-8 lg:gap-14 items-center rounded-3xl bg-white ring-1 ring-gray-100 shadow-sm p-7 lg:p-10 ${i % 2 ? 'lg:[&>*:first-child]:order-2' : ''}`}>
-                    <div>
-                      <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-brand/10 text-brand mb-4">
-                        <f.icon className="w-6 h-6" />
-                      </div>
-                      <span className="text-xs font-heading font-bold uppercase tracking-wide text-accent-dark">{f.tag}</span>
-                      <h3 className="mt-1.5 font-heading font-extrabold text-2xl lg:text-[1.7rem] text-ink leading-tight">{f.title}</h3>
-                      <p className="mt-3 text-ink/70 leading-relaxed">{f.body}</p>
-                      <ul className="mt-5 space-y-2.5">
-                        {f.points.map((pt) => (
-                          <li key={pt} className="flex items-start gap-2.5 text-[15px] text-ink/80">
-                            <I.check className="w-5 h-5 text-brand shrink-0 mt-0.5" /> {pt}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                    <FeatureVisual id={f.id} />
+            <div className="mt-10 grid md:grid-cols-3 gap-5">
+              {[['Inspect', 'Walk the home once — offline-ready, photo-evidenced.'], ['Price & scope', 'Live rate-card pricing computed on the spot.'], ['Dispatch & measure', 'Auto-route, invoice, and track it all in insights.']].map((s, i) => (
+                <Reveal key={s[0]} delay={i * 80}>
+                  <div className="rounded-2xl bg-white ring-1 ring-gray-100 p-6">
+                    <div className="w-8 h-8 rounded-full bg-brand text-white font-heading font-bold text-sm flex items-center justify-center">{i + 1}</div>
+                    <h3 className="mt-3 font-heading font-bold text-lg text-ink">{s[0]}</h3>
+                    <p className="mt-1.5 text-[15px] text-ink/65">{s[1]}</p>
                   </div>
                 </Reveal>
               ))}
             </div>
+          </div>
+        </section>
+
+        {/* ============ FEATURES ============ */}
+        <section id="platform" className="py-20 lg:py-28">
+          <div className="max-w-7xl mx-auto px-5 lg:px-8 space-y-20 lg:space-y-28">
+            {FEATURES.map((f, i) => (
+              <Reveal key={f.id}>
+                <div id={f.id} className={`grid lg:grid-cols-2 gap-10 lg:gap-16 items-center`}>
+                  <div className={i % 2 ? 'lg:order-2' : ''}>
+                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-brand/10 text-brand mb-4"><f.icon className="w-6 h-6" /></div>
+                    <span className="text-xs font-heading font-bold uppercase tracking-wide text-accent-dark">{f.tag}</span>
+                    <h3 className="mt-1.5 font-heading font-extrabold text-2xl lg:text-[2rem] text-ink leading-tight">{f.title}</h3>
+                    <p className="mt-4 text-ink/70 leading-relaxed text-[17px]">{f.body}</p>
+                    <ul className="mt-6 space-y-3">
+                      {f.points.map((pt) => (
+                        <li key={pt} className="flex items-start gap-2.5 text-[15px] text-ink/80"><span className="mt-0.5 w-5 h-5 rounded-full bg-brand/10 text-brand flex items-center justify-center shrink-0"><I.check className="w-3.5 h-3.5" /></span> {pt}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className={`${i % 2 ? 'lg:order-1' : ''} flex justify-center`}>
+                    <div className={f.visualWide ? 'w-full' : ''}>{f.visual}</div>
+                  </div>
+                </div>
+              </Reveal>
+            ))}
           </div>
         </section>
 
         {/* ============ INTEGRATIONS ============ */}
-        <section id="integrations" className="py-20 lg:py-28">
+        <section id="integrations" className="py-20 lg:py-28 bg-gray-50">
           <div className="max-w-7xl mx-auto px-5 lg:px-8">
             <Reveal>
               <div className="text-center max-w-2xl mx-auto">
                 <span className="text-brand font-heading font-bold text-sm uppercase tracking-wide">Integrations</span>
-                <h2 className="mt-3 font-heading font-extrabold text-3xl lg:text-4xl text-ink">Plugs into the tools you already run</h2>
-                <p className="mt-4 text-lg text-ink/70">ResiWalk is the connective tissue of your operation — syncing cleanly with your CRM, calendar, storage, and comms so data flows where it needs to, automatically.</p>
+                <h2 className="mt-3 font-heading font-extrabold text-3xl lg:text-4xl text-ink">Connected to the tools you already run</h2>
+                <p className="mt-4 text-lg text-ink/70">ResiWalk is the connective tissue of your operation — data flows cleanly across your CRM, storage, calendar, and comms, automatically.</p>
               </div>
             </Reveal>
-            <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {INTEGRATIONS.map((n, i) => (
-                <Reveal key={n.name} delay={(i % 3) * 70}>
-                  <div className="h-full rounded-2xl border border-gray-100 bg-white p-6 hover:shadow-lg hover:-translate-y-0.5 transition-all">
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-brand/15 to-accent/20 flex items-center justify-center font-heading font-extrabold text-brand">{n.name[0]}</div>
-                      <h3 className="font-heading font-bold text-lg text-ink">{n.name}</h3>
+            <div className="mt-12 space-y-10">
+              {INTEGRATION_GROUPS.map((g, gi) => (
+                <Reveal key={g.category} delay={gi * 40}>
+                  <div>
+                    <div className="text-xs font-heading font-bold uppercase tracking-widest text-ink/40 mb-3">{g.category}</div>
+                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {g.items.map((it) => (
+                        <div key={it.name} className="flex items-start gap-4 rounded-2xl bg-white ring-1 ring-gray-100 p-5 hover:shadow-lg hover:-translate-y-0.5 transition-all">
+                          <div className="shrink-0 w-12 h-12 rounded-xl bg-gray-50 ring-1 ring-gray-100 flex items-center justify-center">{it.logo}</div>
+                          <div><h3 className="font-heading font-bold text-ink">{it.name}</h3><p className="mt-1 text-[13.5px] text-ink/60 leading-snug">{it.desc}</p></div>
+                        </div>
+                      ))}
                     </div>
-                    <p className="mt-3 text-[15px] text-ink/65 leading-relaxed">{n.desc}</p>
                   </div>
                 </Reveal>
               ))}
             </div>
-            <Reveal>
-              <p className="mt-8 text-center text-sm text-ink/50">…and an open, API-first foundation for the next integration on your roadmap.</p>
-            </Reveal>
+            <Reveal><p className="mt-8 text-center text-sm text-ink/45">…plus an API-first foundation for the next integration on your roadmap.</p></Reveal>
           </div>
         </section>
 
-        {/* ============ INSIGHTS BAND ============ */}
-        <section id="insights" className="py-20 lg:py-28 bg-ink text-white relative overflow-hidden">
-          <div aria-hidden className="absolute inset-0 -z-0 opacity-30">
-            <div className="absolute -bottom-40 -right-24 w-[40rem] h-[40rem] rounded-full bg-brand/40 blur-3xl" />
-            <div className="absolute -top-32 -left-24 w-[32rem] h-[32rem] rounded-full bg-accent/30 blur-3xl" />
-          </div>
-          <div className="relative max-w-7xl mx-auto px-5 lg:px-8 grid lg:grid-cols-2 gap-12 items-center">
-            <Reveal>
+        {/* ============ MARKETS + INSIGHTS BAND ============ */}
+        <section id="insights" className="py-20 lg:py-28">
+          <div className="max-w-7xl mx-auto px-5 lg:px-8 grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
+            <Reveal><MarketsMap /></Reveal>
+            <Reveal delay={100}>
               <div>
-                <span className="text-accent font-heading font-bold text-sm uppercase tracking-wide">Insights &amp; control</span>
-                <h2 className="mt-3 font-heading font-extrabold text-3xl lg:text-4xl leading-tight">See the whole operation — in real time</h2>
-                <p className="mt-4 text-lg text-white/70 leading-relaxed">Pass/fail trends, scope cost by region and category, inspector throughput, AI override rates, service completion — banked daily and always current. Decisions backed by the same verified data your field teams generate.</p>
-                <div className="mt-7 flex flex-wrap gap-3">
-                  <Link href="#contact" className="inline-flex items-center h-11 px-6 rounded-full bg-brand text-white font-heading font-bold hover:bg-brand-dark transition-colors">See it live</Link>
-                  <Link href="/login" className="inline-flex items-center h-11 px-6 rounded-full border border-white/25 text-white font-heading font-bold hover:bg-white/10 transition-colors">Log in</Link>
-                </div>
-              </div>
-            </Reveal>
-            <Reveal delay={120}>
-              <div className="rounded-2xl bg-white/5 ring-1 ring-white/10 p-6 backdrop-blur">
-                <div className="grid grid-cols-2 gap-4">
-                  {[['Pass rate', '96.4%', 'accent'], ['Avg scope', '$1,284', 'brand'], ['On-time services', '98%', 'accent'], ['AI acceptance', '91%', 'brand']].map(([l, v, c]) => (
-                    <div key={l} className="rounded-xl bg-white/5 p-5">
-                      <div className={`font-heading font-extrabold text-2xl ${c === 'brand' ? 'text-brand-light' : 'text-accent'}`}>{v}</div>
-                      <div className="mt-1 text-xs text-white/60">{l}</div>
-                    </div>
+                <span className="text-brand font-heading font-bold text-sm uppercase tracking-wide">Built for scale</span>
+                <h2 className="mt-3 font-heading font-extrabold text-3xl lg:text-4xl text-ink leading-tight">One command center, every region</h2>
+                <p className="mt-4 text-lg text-ink/70 leading-relaxed">Whether it&apos;s 600 doors or 60,000, ResiWalk keeps pricing consistent, dispatch fast, and leadership looking at the same verified numbers your field teams generate — across every market you operate.</p>
+                <div className="mt-7 grid grid-cols-3 gap-3">
+                  {[['2.6d → 0.1d', 'Scope-to-ticket'], ['98%', 'Services on-time'], ['91%', 'AI acceptance']].map((s) => (
+                    <div key={s[1]} className="rounded-xl bg-gray-50 ring-1 ring-gray-100 p-4 text-center"><div className="font-heading font-extrabold text-xl text-brand">{s[0]}</div><div className="text-[11px] text-ink/50 mt-0.5">{s[1]}</div></div>
                   ))}
                 </div>
-                <div className="mt-4 rounded-xl bg-white/5 p-5">
-                  <div className="flex items-end gap-1.5 h-24">
-                    {[38, 52, 45, 63, 58, 72, 68, 80, 76, 88, 84, 95].map((h, idx) => (
-                      <div key={idx} className="flex-1 rounded-t bg-gradient-to-t from-brand to-accent" style={{ height: `${h}%` }} />
-                    ))}
-                  </div>
-                  <div className="mt-2 text-xs text-white/50">Completed inspections, trailing 12 periods</div>
-                </div>
+                <div className="mt-7"><Link href="#contact" className="inline-flex items-center h-11 px-6 rounded-full bg-brand text-white font-heading font-bold hover:bg-brand-dark transition-colors">See your data live</Link></div>
               </div>
             </Reveal>
           </div>
         </section>
 
-        {/* ============ VETERANS BAND ============ */}
+        {/* ============ TESTIMONIAL ============ */}
+        <section className="py-16 lg:py-20 bg-ink text-white relative overflow-hidden">
+          <div aria-hidden className="absolute -top-24 -right-16 w-[30rem] h-[30rem] rounded-full bg-brand/30 blur-3xl" />
+          <div className="relative max-w-4xl mx-auto px-5 lg:px-8 text-center">
+            <Reveal>
+              <div className="text-accent font-heading font-bold tracking-widest text-xs uppercase">Why teams switch</div>
+              <blockquote className="mt-5 font-heading font-extrabold text-2xl lg:text-[2rem] leading-snug">
+                &ldquo;We went from re-pricing scopes for days to dispatched, invoiced work the same afternoon — with the whole portfolio visible in one dashboard.&rdquo;
+              </blockquote>
+              <div className="mt-6 text-white/60 text-sm">Operations leadership · SFR &amp; BTR portfolio</div>
+            </Reveal>
+          </div>
+        </section>
+
+        {/* ============ VETERANS ============ */}
         <section className="py-16 lg:py-20">
           <div className="max-w-5xl mx-auto px-5 lg:px-8 text-center">
             <Reveal>
@@ -265,16 +292,13 @@ export default function SitePreview() {
                 <h2 className="mt-3 font-heading font-extrabold text-3xl lg:text-4xl text-ink leading-tight">Let&apos;s walk your portfolio forward</h2>
                 <p className="mt-4 text-lg text-ink/70 leading-relaxed">Tell us about your operation and we&apos;ll show you exactly how ResiWalk fits — inspections, pricing, services, and the analytics tying it all together.</p>
                 <ul className="mt-6 space-y-3 text-[15px] text-ink/80">
-                  <li className="flex items-center gap-2.5"><I.check className="w-5 h-5 text-brand" /> A tailored walkthrough of the platform</li>
-                  <li className="flex items-center gap-2.5"><I.check className="w-5 h-5 text-brand" /> Real pricing &amp; scoping on your regions</li>
-                  <li className="flex items-center gap-2.5"><I.check className="w-5 h-5 text-brand" /> A migration path from your current tools</li>
+                  {['A tailored walkthrough of the platform', 'Real pricing & scoping on your regions', 'A migration path from your current tools'].map((t) => (
+                    <li key={t} className="flex items-center gap-2.5"><span className="w-5 h-5 rounded-full bg-brand/10 text-brand flex items-center justify-center"><I.check className="w-3.5 h-3.5" /></span> {t}</li>
+                  ))}
                 </ul>
-                <p className="mt-8 text-sm text-ink/50">Prefer email? <a href="mailto:eric.williams@resihome.com" className="text-brand font-semibold underline">eric.williams@resihome.com</a></p>
               </div>
             </Reveal>
-            <Reveal delay={120}>
-              <ContactForm />
-            </Reveal>
+            <Reveal delay={120}><ContactForm /></Reveal>
           </div>
         </section>
 
@@ -298,111 +322,33 @@ export default function SitePreview() {
   );
 }
 
-/** Lightweight, brand-styled visual per feature (no external images). */
-function FeatureVisual({ id }: { id: string }) {
-  if (id === 'pricing') {
-    return (
-      <div className="rounded-2xl bg-gradient-to-br from-gray-50 to-white ring-1 ring-gray-100 p-6">
-        {[['Replace carpet & pad — LR', '$842.00'], ['Repair mailbox post', '$118.50'], ['Interior paint — whole home', '$1,960.00']].map(([k, v]) => (
-          <div key={k} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
-            <span className="text-sm text-ink/70">{k}</span>
-            <span className="font-heading font-bold text-ink">{v}</span>
-          </div>
-        ))}
-        <div className="mt-3 flex items-center justify-between rounded-xl bg-brand/10 px-4 py-3">
-          <span className="font-heading font-bold text-brand">Client total</span>
-          <span className="font-heading font-extrabold text-brand">$2,920.50</span>
-        </div>
-      </div>
-    );
-  }
-  if (id === 'ai') {
-    return (
-      <div className="rounded-2xl bg-ink text-white p-6">
-        <div className="flex items-center gap-2 text-accent"><I.camera className="w-5 h-5" /><span className="text-sm font-heading font-semibold">AI camera review</span></div>
-        <div className="mt-4 space-y-2.5">
-          {['Detected: water stain — ceiling', 'Suggested: drywall repair + paint', 'Confidence 0.94 · confirm to add'].map((t, i) => (
-            <div key={t} className={`rounded-lg px-4 py-3 text-sm ${i === 2 ? 'bg-brand/20 text-brand-light' : 'bg-white/5 text-white/80'}`}>{t}</div>
-          ))}
-        </div>
-        <div className="mt-4 text-xs text-white/50">Every override teaches the knowledge base.</div>
-      </div>
-    );
-  }
-  if (id === 'services') {
-    return (
-      <div className="rounded-2xl bg-gradient-to-br from-gray-50 to-white ring-1 ring-gray-100 p-6">
-        {[['Grass cut — biweekly', 'Vendor assigned', 'accent'], ['Pool service — weekly', 'Scheduled', 'brand'], ['Turn clean', 'Invoiced', 'accent']].map(([k, s, c]) => (
-          <div key={k} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
-            <span className="text-sm text-ink/75">{k}</span>
-            <span className={`text-xs font-heading font-bold px-2.5 py-1 rounded-full ${c === 'brand' ? 'bg-brand/10 text-brand' : 'bg-accent/20 text-accent-dark'}`}>{s}</span>
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (id === 'rules') {
-    return (
-      <div className="rounded-2xl bg-gradient-to-br from-gray-50 to-white ring-1 ring-gray-100 p-6 text-sm">
-        <div className="font-heading font-bold text-ink mb-3">When a scope exceeds NTE →</div>
-        <div className="space-y-2">
-          <div className="rounded-lg bg-white ring-1 ring-gray-100 px-4 py-2.5">IF amount ≤ region NTE → tag PM + Sr. PM</div>
-          <div className="rounded-lg bg-white ring-1 ring-gray-100 px-4 py-2.5">ELSE IF ≤ RM ceiling → tag RM</div>
-          <div className="rounded-lg bg-brand/10 text-brand px-4 py-2.5 font-semibold">ELSE → escalate to directors</div>
-        </div>
-      </div>
-    );
-  }
-  if (id === 'insights') {
-    return (
-      <div className="rounded-2xl bg-gradient-to-br from-gray-50 to-white ring-1 ring-gray-100 p-6">
-        <div className="flex items-end gap-1.5 h-28">
-          {[45, 60, 52, 70, 66, 82, 78, 90].map((h, idx) => (
-            <div key={idx} className="flex-1 rounded-t bg-gradient-to-t from-brand to-accent" style={{ height: `${h}%` }} />
-          ))}
-        </div>
-        <div className="mt-3 grid grid-cols-3 gap-3 text-center">
-          {[['Pass', '96%'], ['On-time', '98%'], ['AI accept', '91%']].map(([l, v]) => (
-            <div key={l} className="rounded-lg bg-white ring-1 ring-gray-100 py-2"><div className="font-heading font-extrabold text-brand">{v}</div><div className="text-[11px] text-ink/50">{l}</div></div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-  // inspections (default)
+/** Layered mesh-gradient + dot-grid hero background. */
+function HeroBackground() {
   return (
-    <div className="rounded-2xl bg-gradient-to-br from-gray-50 to-white ring-1 ring-gray-100 p-6">
-      <div className="grid grid-cols-2 gap-3">
-        {['Scope Rate Card', '1099 Leasing Agent', 'Turn Re-Inspect QC', 'Vacancy / Occupancy', 'Community / Visit', 'New-Construction RRQC'].map((t) => (
-          <div key={t} className="rounded-xl bg-white ring-1 ring-gray-100 px-4 py-3 text-sm font-heading font-semibold text-ink/80 flex items-center gap-2">
-            <I.clipboard className="w-4 h-4 text-brand shrink-0" /> {t}
-          </div>
-        ))}
-      </div>
+    <div aria-hidden className="absolute inset-0 -z-10 overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-b from-white via-white to-gray-50" />
+      <div className="absolute -top-48 -right-40 w-[52rem] h-[52rem] rounded-full bg-brand/15 blur-3xl" />
+      <div className="absolute top-24 -left-48 w-[42rem] h-[42rem] rounded-full bg-accent/25 blur-3xl" />
+      <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, #0f172a 1px, transparent 0)', backgroundSize: '26px 26px' }} />
     </div>
   );
 }
 
-/** Contact form → /api/sitepreview/contact (emails eric + hwoods). */
+/** Contact form → /api/sitepreview/contact (emails the ResiWalk team). */
 function ContactForm() {
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [error, setError] = useState('');
-
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setStatus('sending'); setError('');
     const fd = new FormData(e.currentTarget);
-    const body = Object.fromEntries(fd.entries());
     try {
-      const r = await fetch('/api/sitepreview/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const r = await fetch('/api/sitepreview/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.fromEntries(fd.entries())) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.error || 'Something went wrong. Please try again.'); setStatus('error'); return; }
       setStatus('sent');
-    } catch (err: any) {
-      setError(String(err?.message || err)); setStatus('error');
-    }
+    } catch (err: any) { setError(String(err?.message || err)); setStatus('error'); }
   }
-
   if (status === 'sent') {
     return (
       <div className="rounded-2xl bg-white ring-1 ring-gray-100 shadow-sm p-8 text-center">
@@ -412,11 +358,9 @@ function ContactForm() {
       </div>
     );
   }
-
   const input = 'w-full h-12 rounded-xl border border-gray-300 px-4 text-[15px] focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition';
   return (
-    <form onSubmit={onSubmit} className="rounded-2xl bg-white ring-1 ring-gray-100 shadow-sm p-6 lg:p-8 space-y-4">
-      {/* honeypot */}
+    <form onSubmit={onSubmit} className="rounded-2xl bg-white ring-1 ring-gray-100 shadow-lg p-6 lg:p-8 space-y-4">
       <input type="text" name="website" tabIndex={-1} autoComplete="off" className="hidden" aria-hidden />
       <div className="grid sm:grid-cols-2 gap-4">
         <div><label className="block text-sm font-heading font-semibold text-ink mb-1.5">Name*</label><input name="name" required className={input} placeholder="Jane Doe" /></div>
@@ -431,9 +375,7 @@ function ContactForm() {
         <textarea name="message" required rows={4} className="w-full rounded-xl border border-gray-300 px-4 py-3 text-[15px] focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition resize-y" placeholder="Tell us about your portfolio and what you're trying to solve…" />
       </div>
       {status === 'error' && <div className="text-sm text-brand font-semibold">{error}</div>}
-      <button type="submit" disabled={status === 'sending'} className="w-full h-12 rounded-full bg-brand text-white font-heading font-bold hover:bg-brand-dark transition-colors disabled:bg-gray-300">
-        {status === 'sending' ? 'Sending…' : 'Send message'}
-      </button>
+      <button type="submit" disabled={status === 'sending'} className="w-full h-12 rounded-full bg-brand text-white font-heading font-bold hover:bg-brand-dark transition-colors disabled:bg-gray-300">{status === 'sending' ? 'Sending…' : 'Send message'}</button>
       <p className="text-xs text-ink/45 text-center">We&apos;ll only use your details to respond to this inquiry.</p>
     </form>
   );
