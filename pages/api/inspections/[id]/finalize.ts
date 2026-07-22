@@ -934,21 +934,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // AND freeze the property status for the historical record. Skipped for
     // regenerateOnly — it isn't a completion.
     if (!regenerateOnly) {
-      await stampFirstCompleted(id, nowIso);
-      await stampPropertyStatusAtCompletion(id);
-      await stampListingSnapshotAtCompletion(id);
-      // Guarantee a non-null vendor cost on the completed record ($0, or the
-      // matched agent's value). Best-effort — never blocks finalize.
-      try { await populateBillingFields(id); } catch (e) { console.warn('[finalize] billing populate failed (continuing):', e); }
-      // Smart Home Tech → dedicated inspection fields (Device Installed + Serial
-      // Number). Best-effort; no-op until the fields are provisioned (/admin/setup).
-      if (fcAnswers) {
-        try {
-          const stamps = fcSmartHomeStamps(fcAnswers);
-          const pool = fcPoolStamps(fcAnswers);
-          await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber, pool_condition: pool.poolCondition, pool_feedback: pool.poolFeedback, pool_photo_urls: pool.poolPhotoUrls });
-        } catch (e) { console.warn('[finalize] smart-home field stamp skipped (provision via /admin/setup):', e); }
-      }
+      // These five stamps are mutually independent (each reads its own source and
+      // PATCHes disjoint properties — HubSpot PATCH merges), so run them
+      // CONCURRENTLY instead of five sequential round-trips. Promise.all keeps the
+      // original failure semantics for the three unguarded stamps (any rejection
+      // still fails finalize, same as the old sequential awaits); the two
+      // best-effort ones keep their own catch, exactly as before.
+      await Promise.all([
+        stampFirstCompleted(id, nowIso),
+        stampPropertyStatusAtCompletion(id),
+        stampListingSnapshotAtCompletion(id),
+        // Guarantee a non-null vendor cost on the completed record ($0, or the
+        // matched agent's value). Best-effort — never blocks finalize.
+        populateBillingFields(id).catch((e) => console.warn('[finalize] billing populate failed (continuing):', e)),
+        // Smart Home Tech → dedicated inspection fields (Device Installed + Serial
+        // Number). Best-effort; no-op until the fields are provisioned (/admin/setup).
+        (async () => {
+          if (!fcAnswers) return;
+          try {
+            const stamps = fcSmartHomeStamps(fcAnswers);
+            const pool = fcPoolStamps(fcAnswers);
+            await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber, pool_condition: pool.poolCondition, pool_feedback: pool.poolFeedback, pool_photo_urls: pool.poolPhotoUrls });
+          } catch (e) { console.warn('[finalize] smart-home field stamp skipped (provision via /admin/setup):', e); }
+        })(),
+      ]);
     }
     finalizePhase = 'side-effects'; // status is now persisted; remaining steps are best-effort
 
@@ -978,16 +987,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }).then((r) => console.log(`[push] approval → ${submitter}: ${JSON.stringify(r)}`)).catch(() => {});
       }
 
-      // Scope APPROVED Slack notification (ported from HubSpot Workflow B): post
-      // the threaded blue reply on the original pending card + recolor it APPROVED.
-      // First approval only. Best-effort — never blocks finalize.
-      try {
-        const r = await postScopeApproved(id);
-        console.log(`[finalize] scope approved Slack for ${id}: ${r.status}${r.error ? ' — ' + r.error : ''}`);
-      } catch (e) {
-        console.warn('[finalize] scope approved Slack skipped (continuing):', e);
-      }
     }
+
+    // Scope APPROVED Slack notification (ported from HubSpot Workflow B): post
+    // the threaded blue reply on the original pending card + recolor it APPROVED.
+    // First approval only. Best-effort — never blocks finalize. Started HERE but
+    // awaited below (with the FC materialization) so it runs CONCURRENTLY with
+    // the ticket chain instead of adding its round-trip to the serial tail —
+    // nothing in tickets/email reads its result.
+    const slackApprovedP: Promise<void> = (!regenerateOnly && !isRefinalize)
+      ? postScopeApproved(id)
+          .then((r) => console.log(`[finalize] scope approved Slack for ${id}: ${r.status}${r.error ? ' — ' + r.error : ''}`))
+          .catch((e) => console.warn('[finalize] scope approved Slack skipped (continuing):', e))
+      : Promise.resolve();
 
     // ---- 6c. Materialize the Final Checklist as structured answer records ----
     // The form persists the whole checklist as ONE opaque qa blob (fc__all) so it
@@ -996,8 +1008,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // value (identical to the PDF) plus the raw per-question state in `note`.
     // Idempotent via a stable external id (FC-<inspId>-<questionId>), so a
     // re-finalize updates them in place. Best-effort: it NEVER blocks finalize.
+    // Started as a promise and awaited BELOW (after the ticket chain) so the many
+    // answer-record upserts run CONCURRENTLY with the Maintenance AI ticket calls —
+    // they touch different systems and only the response reads the warning. The
+    // body, gating, and idempotency are byte-for-byte the previous serial logic.
     let fcMaterializeWarning: string | null = null;
-    if (fcAnswers && fcCtx) {
+    const fcMaterializeP: Promise<void> = (async () => {
+      if (!(fcAnswers && fcCtx)) return;
       try {
         const existingByExt = new Map(answers.map((x) => [x.answerIdExternal, x.recordId]));
         const fcUpserts = finalChecklistAnswerRecords(fcAnswers, fcCtx).map((rec) => {
@@ -1026,7 +1043,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         fcMaterializeWarning = `Final Checklist reporting records did not save (${String((e as any)?.message || e).slice(0, 120)}).`;
         console.warn('[finalize] Final Checklist structured-answer materialization failed (non-fatal):', e);
       }
-    }
+    })();
 
     // ---- 7. Create a maintenance ticket (best-effort, first finalize only) ----
     // Runs BEFORE the email so its pass/fail + ticket link can be reported there.
@@ -1184,6 +1201,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     const evictionTicketUrl = evictionTicketResult?.ok ? buildTicketUrl(evictionTicketResult.ticketId) : null;
     const capexTicketUrl = capexTicketResult?.ok ? buildTicketUrl(capexTicketResult.ticketId) : null;
+
+    // Join the side-effects that ran concurrently with the ticket chain (Slack
+    // approved post + Final Checklist materialization) BEFORE composing the email/
+    // response — everything stays awaited inside the request (serverless kills
+    // stragglers after the response), and fcMaterializeWarning is settled for the
+    // response payload below.
+    await Promise.all([slackApprovedP, fcMaterializeP]);
 
     // ---- 8. Email notification (Gmail send) ----
     // Composed regardless of whether Gmail is connected, so the result
