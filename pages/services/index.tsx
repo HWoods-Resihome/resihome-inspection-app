@@ -121,6 +121,9 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
               matches the Field Inspections card. */}
           <div className="flex items-start justify-between gap-3 mb-2">
             <div className="flex-1 min-w-0">
+              {/* Card header: service number — for referencing/searching (matches
+                  the SVC# in notifications). Searchable by any fragment. */}
+              <p className="text-[11px] font-heading font-semibold text-gray-400 tabular-nums mb-0.5">SVC #{s.id}</p>
               <p className="text-[13px] font-heading font-bold uppercase tracking-wide text-brand mb-1 truncate">
                 {worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)}
               </p>
@@ -134,9 +137,6 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
               {localityLine && (
                 <p className="text-[13px] text-gray-500 break-words leading-snug mt-0.5">{localityLine}</p>
               )}
-              {/* Service number — for referencing/searching (matches the SVC# in
-                  notifications). Searchable by any fragment via the search box. */}
-              <p className="text-[11px] text-gray-400 mt-0.5 tabular-nums">SVC #{s.id}</p>
             </div>
             <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>
               {serviceStatusText(s.status, isAdmin)}
