@@ -49,7 +49,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // CREATED — date/time + WHY it exists, so an internal user can trace a service
       // back to the Rules Engine rule that made it (or a bid / re-issue / manual add).
       const key = String(p.enrollment_key || '');
-      const ruleId = String(p.generated_by_rule_id || '').trim();
+      // Rule id from the explicit prop, else parsed from the enrollment key
+      // (gen:<ruleId>:<targetId>...) so older orders still name their rule.
+      const ruleId = String(p.generated_by_rule_id || '').trim() || (key.startsWith('gen:') ? (key.split(':')[1] || '') : '');
       let createdDetail = 'Created manually';
       let createdMeta: Record<string, any> = {};
       if (key.startsWith('gen:')) {
