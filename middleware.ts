@@ -83,6 +83,10 @@ const PUBLIC_PATHS = new Set<string>([
   // Safe: it is SSRF-guarded to HubSpot file hosts and only ever returns files
   // that are already public (PUBLIC_INDEXABLE) — it exposes nothing new.
   '/api/photo-proxy',
+  // ResiWalk marketing PREVIEW site — public by design (no session). The contact
+  // form self-validates + rate-limits inside the handler. The pages themselves
+  // are allowed via the /sitepreview prefix check in the middleware body.
+  '/api/sitepreview/contact',
 ]);
 
 function isStaticAsset(pathname: string): boolean {
@@ -172,6 +176,13 @@ export async function middleware(req: NextRequest) {
   // Public marketing/legal pages for the "ResiWalk - 1099" Google OAuth app
   // (home, privacy, terms) — must be reachable WITHOUT login for verification.
   if (pathname === '/1099' || pathname.startsWith('/1099/')) {
+    return NextResponse.next();
+  }
+
+  // ResiWalk marketing PREVIEW site (and its assets, e.g. the intro .mp4) — public
+  // by design so prospects can view it without a login. Covers /sitepreview and
+  // /sitepreview/faq plus /sitepreview/*.mp4 served from public/.
+  if (pathname === '/sitepreview' || pathname.startsWith('/sitepreview/')) {
     return NextResponse.next();
   }
 
