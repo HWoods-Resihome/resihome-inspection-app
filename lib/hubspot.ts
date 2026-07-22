@@ -120,6 +120,17 @@ async function rateCardTypeIds(): Promise<{ lineItem: string; regionRate: string
   return _rateCardTypeIds;
 }
 
+/** Every custom-object schema in the portal (name/label → objectTypeId) — the
+ *  env-check diagnostic uses this to validate the HUBSPOT_*_TYPE_ID variables. */
+export async function listAllSchemas(): Promise<{ name: string; label: string; objectTypeId: string }[]> {
+  const resp = await hubspotFetch('/crm/v3/schemas');
+  return (resp?.results || []).map((s: any) => ({
+    name: String(s.name || ''),
+    label: String(s.labels?.singular || s.name || ''),
+    objectTypeId: String(s.objectTypeId || ''),
+  }));
+}
+
 async function hubspotFetch(path: string, init: RequestInit = {}): Promise<any> {
   const url = `${API_BASE}${path}`;
   const method = init.method || 'GET';
