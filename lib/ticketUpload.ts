@@ -86,23 +86,30 @@ async function downloadToTmp(file: TicketUploadFile, dir: string, idx: number): 
 /**
  * Upload the given files to a ticket via the HoneyBadger UI. Best-effort.
  */
-export async function uploadTicketDocuments(args: { ticketId: number; files: TicketUploadFile[]; ticketTypeTarget?: string }): Promise<TicketUploadResult> {
+export async function uploadTicketDocuments(args: { ticketId: number; files: TicketUploadFile[]; ticketTypeTarget?: string; typeOnly?: boolean }): Promise<TicketUploadResult> {
   const steps: string[] = [];
   const log = (s: string) => { steps.push(s); };
+  // typeOnly (the admin ticket-type test) runs login → navigate → enforce the
+  // ticket type, then RETURNS without uploading — no PDFs required.
+  const typeOnly = !!args.typeOnly;
   // The visible ticket-type to ENFORCE via the UI (the API type-set isn't
   // reliable, so this is the authoritative step). The Turnkey ticket passes
   // "Turnkey", the Eviction ticket "Evictions"; CapEx (and the 1099/vacancy flow)
   // pass empty → leave the type alone. Falls back to env when unspecified.
   const target = ((args.ticketTypeTarget ?? env('HBMM_TICKET_TYPE_TARGET', 'Turnkey')) || '').trim();
-  const ensureType = !!target && (env('HBMM_ENSURE_TICKET_TYPE', '1') !== '0');
+  // typeOnly ALWAYS enforces (ignores the global HBMM_ENSURE_TICKET_TYPE kill-switch).
+  const ensureType = !!target && (typeOnly || env('HBMM_ENSURE_TICKET_TYPE', '1') !== '0');
 
   const username = (process.env.HBMM_USERNAME || '').trim();
   const password = process.env.HBMM_PASSWORD || '';
   if (!username || !password) {
     return { ok: false, configured: false, uploaded: 0, steps, error: 'Browser upload not configured (set HBMM_USERNAME / HBMM_PASSWORD).' };
   }
-  if (!args.files.length) {
+  if (!args.files.length && !typeOnly) {
     return { ok: false, configured: true, uploaded: 0, steps, error: 'No files to upload.' };
+  }
+  if (typeOnly && !ensureType) {
+    return { ok: false, configured: true, uploaded: 0, steps, error: 'Type-only test needs a ticket-type target (none resolved).' };
   }
 
   const loginUrl = env('HBMM_LOGIN_URL', DEFAULTS.loginUrl);
@@ -315,6 +322,7 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     // "Maintenance"), so we confirm via the UI and fix it: read the Ticket Type,
     // and if it isn't the target, click Edit → select Turnkey → Save. Entirely
     // best-effort and env-tunable — it NEVER blocks the upload.
+    let typeConfirmed = false;
     if (ensureType) {
       // `target` is resolved up top (Turnkey / Evictions / …).
       const targetRe = new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -349,8 +357,15 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
         const before = await readType();
         if (before && targetRe.test(before)) {
           log(`ticket type already "${before}" — no change needed`);
+          typeConfirmed = true;
         } else {
-          log(`ticket type is "${before || '(unknown)'}" — switching to ${target}`);
+          // Bulletproof: retry the whole edit→select→save→reload→verify up to N
+          // times. A single pass can silently fail to persist (Angular digest race
+          // or a slow save round-trip) — the "still Maintenance" symptom — so we
+          // re-attempt until the reloaded ticket actually reads back as the target.
+          const maxAttempts = Math.max(1, Number(process.env.HBMM_TICKET_TYPE_ATTEMPTS || 3) || 3);
+          for (let attempt = 1; attempt <= maxAttempts && !typeConfirmed; attempt++) {
+          log(`ticket type is "${before || '(unknown)'}" — switching to ${target} (attempt ${attempt}/${maxAttempts})`);
           // Click Edit (ng-click="EditTicketDetails()"), else by visible text.
           const editSel = env('HBMM_SEL_TICKET_EDIT', '[ng-click="EditTicketDetails()"]');
           let clickedEdit = await page.evaluate((sel: string) => { const el = document.querySelector(sel) as HTMLElement | null; if (el) { el.scrollIntoView({ block: 'center' }); el.click(); return true; } return false; }, editSel).catch(() => false);
@@ -447,11 +462,24 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
           }, { timeout: Math.min(navTimeout, 10000) }).catch(() => {});
           await sleep(600);
           const after = await readType();
-          const confirmed = !!after && targetRe.test(after);
-          log(`reloaded ticket; type after save: "${after || '(unknown)'}"${confirmed ? ' ✓' : ' ✗ (NOT confirmed — still not ' + target + ')'}`);
+          typeConfirmed = !!after && targetRe.test(after);
+          log(`reloaded ticket; type after save: "${after || '(unknown)'}"${typeConfirmed ? ' ✓' : ` ✗ (attempt ${attempt}/${maxAttempts} did not stick)`}`);
+          if (!typeConfirmed && attempt < maxAttempts) await sleep(1500);
+          } // end retry loop
+          if (!typeConfirmed) log(`ticket type STILL not "${target}" after ${maxAttempts} attempt(s) — selectors may need tuning (HBMM_SEL_TICKET_EDIT / _SAVE)`);
         }
       } catch (e: any) {
-        log(`ensure-turnkey step failed (continuing to upload): ${String(e?.message || e).slice(0, 160)}`);
+        log(`ensure-type step failed${typeOnly ? '' : ' (continuing to upload)'}: ${String(e?.message || e).slice(0, 160)}`);
+      }
+      // Type-only test (admin tool): stop here and report the verified result —
+      // don't fall through into the document-upload steps.
+      if (typeOnly) {
+        const shot = await screenshotB64();
+        return {
+          ok: typeConfirmed, configured: true, uploaded: 0, steps,
+          error: typeConfirmed ? undefined : `Ticket type could not be confirmed as "${target}" (see steps).`,
+          screenshot: shot,
+        };
       }
     }
 
@@ -659,4 +687,19 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     try { if (browser) await browser.close(); } catch { /* ignore */ }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
+}
+
+/**
+ * Admin test / bulletproof enforcement helper: log in, open the ticket, and force
+ * its type to `target` (default "Turnkey") via the UI — retried until the reloaded
+ * ticket confirms it — WITHOUT uploading any documents. Returns the same step log +
+ * failure screenshot as the upload path (ok = the type was confirmed).
+ */
+export async function setTicketTypeViaUi(args: { ticketId: number; target?: string }): Promise<TicketUploadResult> {
+  return uploadTicketDocuments({
+    ticketId: args.ticketId,
+    files: [],
+    ticketTypeTarget: (args.target && args.target.trim()) || env('HBMM_TICKET_TYPE_TARGET', 'Turnkey'),
+    typeOnly: true,
+  });
 }

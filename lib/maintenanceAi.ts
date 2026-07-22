@@ -64,6 +64,23 @@ export function buildTicketUrl(ticketId: number | null | undefined): string | nu
   return tmpl.replace('{ticketId}', String(ticketId));
 }
 
+/**
+ * Parse a HoneyBadger ("MM") ticket id from either a raw number or a ticket URL
+ * (e.g. https://honeybadgermm.com/Maintenance#/EditTicket/12345, or a link with
+ * ?ticketId=12345). Returns null when no id can be found.
+ */
+export function parseMmTicketId(input: string | number | null | undefined): number | null {
+  if (input == null) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return Number(s);
+  const m =
+    s.match(/EditTicket\/(\d+)/i) ||
+    s.match(/ticket(?:id)?[/=](\d+)/i) ||
+    s.match(/(\d{2,})(?!.*\d)/); // last run of digits as a last resort
+  return m ? Number(m[1]) : null;
+}
+
 export interface CreateTicketResult {
   ok: boolean;
   configured: boolean;
@@ -210,6 +227,22 @@ async function updateTicketType(baseUrl: string, version: string, apiKey: string
     console.warn(`[maintenanceAi] ticket #${ticketId} type update threw: ${error}`);
     return { ok: false, error };
   }
+}
+
+/**
+ * Public wrapper to set a ticket's type via the External API (the authoritative
+ * PUT /ticket/{id}). Defaults to Turnkey. Used by the admin ticket-type test to
+ * exercise the API path alongside the UI path. Reads base/key/version from env;
+ * returns { configured:false } when the API key isn't set. Never throws.
+ */
+export async function setMaintenanceTicketType(ticketId: number, ticketTypeId?: number): Promise<TicketTypeUpdateResult & { configured: boolean; ticketTypeId: number }> {
+  const apiKey = (process.env.MAINTENANCE_AI_API_KEY || '').trim();
+  const baseUrl = (process.env.MAINTENANCE_AI_BASE_URL || 'https://hbmm-admin-int.resicapdev.com').trim().replace(/\/+$/, '');
+  const version = (process.env.MAINTENANCE_AI_API_VERSION || 'v1').trim();
+  const typeId = ticketTypeId ?? TICKET_TYPE_TURNKEY;
+  if (!apiKey) return { ok: false, configured: false, ticketTypeId: typeId, error: 'MAINTENANCE_AI_API_KEY not set' };
+  const res = await updateTicketType(baseUrl, version, apiKey, ticketId, typeId);
+  return { ...res, configured: true, ticketTypeId: typeId };
 }
 
 /**
