@@ -7,7 +7,7 @@
  * testimonial, and a contact form that emails the ResiWalk team. Public + noindex
  * while it lives under /sitepreview. Brand: pink #ff0060, teal #73e3df.
  */
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { SiteNav, SiteFooter, Reveal } from '@/components/sitepreview/Chrome';
@@ -51,6 +51,19 @@ const INTEGRATIONS: { name: string; category: string; desc: string; logo: ReactN
   { name: 'Maintenance / MM', category: 'Work Orders', desc: 'Two-way work-order & ticket sync with your MM stack.', logo: <span className="w-8 h-8 rounded-lg bg-[#ff0060]/10 flex items-center justify-center"><I.cloud className="w-5 h-5 text-[#ff0060]" /></span> },
 ];
 
+const PLANS: { name: string; who: string; featured?: boolean; points: string[] }[] = [
+  { name: 'Growth', who: 'Emerging portfolios getting field ops under control.', points: ['Core inspection templates', 'Real-world rate-card pricing', 'Offline field app + evidence', 'Standard integrations', 'Email support'] },
+  { name: 'Professional', who: 'Scaling operators standardizing across markets.', featured: true, points: ['Everything in Growth', 'AI reviews + knowledge base', 'Scheduled services & vendor billing', 'Rules engine + approval routing', 'Insights dashboard', 'Priority support'] },
+  { name: 'Enterprise', who: 'National portfolios that need it all, governed.', points: ['Everything in Professional', 'SSO & role-based access', 'Custom templates & workflows', 'Dedicated success manager', 'SLA & onboarding services', 'API & custom integrations'] },
+];
+
+const SECURITY: { icon: (p: IconProps) => JSX.Element; title: string; body: string }[] = [
+  { icon: I.shield, title: 'Role-based access & audit trails', body: 'Every action attributed and logged — who did what, and when.' },
+  { icon: I.cloud, title: 'Your data, your system of record', body: 'Syncs to your HubSpot and Drive — you own it, always.' },
+  { icon: I.bolt, title: 'SSO via Google Workspace', body: 'One identity for your staff; provision and revoke centrally.' },
+  { icon: I.check, title: 'Evidence integrity', body: 'GPS- and time-stamped photos make findings defensible.' },
+];
+
 export default function SitePreview() {
   return (
     <>
@@ -64,6 +77,7 @@ export default function SitePreview() {
 
       <div className="min-h-screen bg-white text-ink font-body antialiased overflow-x-hidden">
         <SiteNav />
+        <StickyDemoBar />
 
         {/* ============ HERO ============ */}
         <section className="relative pt-28 lg:pt-36 pb-16 lg:pb-24">
@@ -267,6 +281,67 @@ export default function SitePreview() {
           </div>
         </section>
 
+        {/* ============ PRICING ============ */}
+        <section id="pricing" className="py-20 lg:py-28 bg-gray-50">
+          <div className="max-w-7xl mx-auto px-5 lg:px-8">
+            <Reveal>
+              <div className="text-center max-w-2xl mx-auto">
+                <span className="text-brand font-heading font-bold text-sm uppercase tracking-wide">Pricing</span>
+                <h2 className="mt-3 font-heading font-extrabold text-3xl lg:text-4xl text-ink">Pricing that scales with your portfolio</h2>
+                <p className="mt-4 text-lg text-ink/70">Per-door, not per-seat — so your whole field team is in without a headcount penalty. Pick the tier that fits where you are today.</p>
+              </div>
+            </Reveal>
+            <div className="mt-12 grid md:grid-cols-3 gap-6 items-stretch">
+              {PLANS.map((p, i) => (
+                <Reveal key={p.name} delay={i * 80} className="h-full">
+                  <div className={`relative h-full flex flex-col rounded-3xl p-7 ${p.featured ? 'bg-ink text-white ring-2 ring-brand shadow-2xl lg:scale-[1.03]' : 'bg-white ring-1 ring-gray-100 shadow-sm'}`}>
+                    {p.featured && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-brand text-white text-[11px] font-heading font-bold px-3 py-1 rounded-full">Most popular</span>}
+                    <h3 className={`font-heading font-extrabold text-xl ${p.featured ? 'text-white' : 'text-ink'}`}>{p.name}</h3>
+                    <p className={`mt-1.5 text-[14px] leading-snug ${p.featured ? 'text-white/70' : 'text-ink/60'}`}>{p.who}</p>
+                    <div className={`mt-5 pb-5 border-b ${p.featured ? 'border-white/15' : 'border-gray-100'}`}>
+                      <span className={`font-heading font-extrabold text-3xl ${p.featured ? 'text-white' : 'text-ink'}`}>Custom</span>
+                      <span className={`ml-1.5 text-sm ${p.featured ? 'text-white/50' : 'text-ink/45'}`}>/ per door</span>
+                    </div>
+                    <ul className="mt-5 space-y-3 flex-1">
+                      {p.points.map((pt) => (
+                        <li key={pt} className={`flex items-start gap-2.5 text-[14px] ${p.featured ? 'text-white/85' : 'text-ink/75'}`}>
+                          <I.check className={`w-4 h-4 shrink-0 mt-0.5 ${p.featured ? 'text-accent' : 'text-brand'}`} /> {pt}
+                        </li>
+                      ))}
+                    </ul>
+                    <Link href="#contact" className={`mt-7 inline-flex items-center justify-center h-11 rounded-full font-heading font-bold transition-colors ${p.featured ? 'bg-brand text-white hover:bg-brand-dark' : 'bg-ink text-white hover:bg-gray-800'}`}>Book a demo</Link>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+            <Reveal><p className="mt-8 text-center text-sm text-ink/45">Every plan includes unlimited photos, the offline field app, and evidence storage. Volume &amp; multi-brand pricing available.</p></Reveal>
+          </div>
+        </section>
+
+        {/* ============ SECURITY / TRUST ============ */}
+        <section className="py-20 lg:py-24 bg-white">
+          <div className="max-w-7xl mx-auto px-5 lg:px-8">
+            <Reveal>
+              <div className="max-w-2xl">
+                <span className="text-brand font-heading font-bold text-sm uppercase tracking-wide">Security &amp; governance</span>
+                <h2 className="mt-3 font-heading font-extrabold text-3xl lg:text-4xl text-ink leading-tight">Built to enterprise standards</h2>
+                <p className="mt-4 text-lg text-ink/70">The controls large operators require — access, attribution, data ownership, and integrity — baked in from day one.</p>
+              </div>
+            </Reveal>
+            <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {SECURITY.map((s, i) => (
+                <Reveal key={s.title} delay={(i % 4) * 60} className="h-full">
+                  <div className="h-full rounded-2xl bg-gray-50 ring-1 ring-gray-100 p-6">
+                    <div className="w-11 h-11 rounded-xl bg-brand/10 text-brand flex items-center justify-center"><s.icon className="w-6 h-6" /></div>
+                    <h3 className="mt-4 font-heading font-bold text-ink">{s.title}</h3>
+                    <p className="mt-1.5 text-[14px] text-ink/60 leading-relaxed">{s.body}</p>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* ============ TESTIMONIAL ============ */}
         <section className="py-16 lg:py-20 bg-ink text-white relative overflow-hidden">
           <div aria-hidden className="absolute -top-24 -right-16 w-[30rem] h-[30rem] rounded-full bg-brand/30 blur-3xl" />
@@ -327,6 +402,31 @@ export default function SitePreview() {
         <SiteFooter />
       </div>
     </>
+  );
+}
+
+/** Slim, dismissible "Book a demo" bar that slides up after the hero scrolls by. */
+function StickyDemoBar() {
+  const [show, setShow] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShow(window.scrollY > 700);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  if (dismissed) return null;
+  return (
+    <div className={`fixed inset-x-0 bottom-0 z-40 transition-transform duration-300 ${show ? 'translate-y-0' : 'translate-y-full'}`}>
+      <div className="mx-auto max-w-3xl m-3 rounded-2xl bg-ink/95 backdrop-blur text-white shadow-2xl ring-1 ring-white/10 px-5 py-3.5 flex items-center gap-4">
+        <span className="hidden sm:block text-sm text-white/85 font-heading font-semibold">See ResiWalk run on your portfolio.</span>
+        <div className="flex-1" />
+        <Link href="#contact" className="inline-flex items-center h-10 px-5 rounded-full bg-brand text-white font-heading font-bold text-sm hover:bg-brand-dark transition-colors">Book a demo</Link>
+        <button type="button" onClick={() => setDismissed(true)} aria-label="Dismiss" className="text-white/50 hover:text-white w-8 h-8 flex items-center justify-center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>
+        </button>
+      </div>
+    </div>
   );
 }
 

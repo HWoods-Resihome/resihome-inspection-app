@@ -39,6 +39,7 @@ export function Reveal({ children, delay = 0, className = '' }: { children: Reac
 const NAV = [
   { label: 'Platform', href: '/sitepreview#platform' },
   { label: 'Integrations', href: '/sitepreview#integrations' },
+  { label: 'Pricing', href: '/sitepreview#pricing' },
   { label: 'Insights', href: '/sitepreview#insights' },
   { label: 'FAQ', href: '/sitepreview/faq' },
 ];
