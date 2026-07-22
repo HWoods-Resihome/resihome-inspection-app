@@ -720,9 +720,15 @@ export async function runServiceGeneration(
         if ((genCountByKey.get(key) || 0) >= 1 || openKeys.has(key)) { skipItem(t, key, oneTimeDue); continue; }
         if (!startGateOk(key)) continue;   // enroll delay hasn't elapsed yet
         if (leaseAnchor && t.scope === 'property') {
-          // Resolve the lease start date (Property → Listing → Deal); compute the
-          // anchored due. If the lease is already today/tomorrow, skip creating (no
-          // runway). Stamp the anchor config so the cron can re-finalize the due.
+          // DRY-RUN preview ("would create" count): do NOT do the per-target
+          // Property→Listing→Deal lookup — sequentially resolving lease dates for
+          // every target is what made the count spin on "…". The count only needs
+          // whether an order would be created, so count it (fallback due) and skip
+          // the lookup. The REAL due (and the imminent-lease cancel) is resolved on
+          // APPLY and by the hourly re-sync cron.
+          if (!apply) { await emitOrder(t, oneTimeDue, key, { due_anchor: 'lease_start', days_before_lease_start: daysBefore }); continue; }
+          // Apply: resolve the lease start date; compute the anchored due. If the
+          // lease is already today/tomorrow, skip creating (no runway).
           let lease = '';
           try { lease = String((await fetchPropertyMoveInDate(t.id)) || ''); } catch { lease = ''; }
           const r = computeLeaseAnchoredDue({ leaseStart: lease, daysBefore, fallbackDays: initDue, todayISO });
