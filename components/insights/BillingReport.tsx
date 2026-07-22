@@ -225,7 +225,7 @@ export function BillingReport({ object }: { object: Obj }) {
 
       {schedOpen && (
         <ScheduleManager object={object} personLabel={personLabel} facets={facets}
-          current={{ regions: applied.regions, portfolios: applied.portfolios, inspectors: applied.inspectors, types: applied.types, range: range === 'custom' ? 'last_7_days' : range }}
+          current={{ regions: applied.regions, portfolios: applied.portfolios, inspectors: applied.inspectors, types: applied.types, range: range === 'custom' ? 'last_7_days' : range, includeToday }}
           onClose={() => setSchedOpen(false)} />
       )}
     </section>
@@ -242,14 +242,14 @@ function rowFromObj(o: any): Row {
 // ── Schedule manager modal ───────────────────────────────────────────────────
 interface Sched {
   id: string; name: string; object: Obj; recipients: string[]; regions: string[]; portfolios: string[]; inspectors: string[]; types: string[];
-  range: string; cadence: 'daily' | 'weekly' | 'monthly'; hourET: number; dayOfWeek?: number; dayOfMonth?: number; enabled: boolean; lastRunAt?: string;
+  range: string; includeToday?: boolean; cadence: 'daily' | 'weekly' | 'monthly'; hourET: number; dayOfWeek?: number; dayOfMonth?: number; enabled: boolean; lastRunAt?: string;
 }
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 function hourLabel(h: number) { const am = h < 12; const h12 = h % 12 === 0 ? 12 : h % 12; return `${h12}:00 ${am ? 'AM' : 'PM'} ET`; }
 
 function ScheduleManager({ object, personLabel, facets, current, onClose }: {
   object: Obj; personLabel: string; facets: Facets;
-  current: { regions: string[]; portfolios: string[]; inspectors: string[]; types: string[]; range: string };
+  current: { regions: string[]; portfolios: string[]; inspectors: string[]; types: string[]; range: string; includeToday: boolean };
   onClose: () => void;
 }) {
   const [list, setList] = useState<Sched[]>([]);
@@ -264,6 +264,7 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
   const [dayOfWeek, setDayOfWeek] = useState(1);
   const [dayOfMonth, setDayOfMonth] = useState(1);
   const [range, setRange] = useState(current.range || 'last_7_days');
+  const [inclToday, setInclToday] = useState(current.includeToday !== false);
   // When editing an existing schedule: its id + the filters it carries (so an
   // edit preserves the schedule's OWN filters rather than the page's current ones).
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -279,12 +280,12 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
   const resetForm = () => {
     setEditingId(null); setEditFilters(null); setRecipients('');
     setName(`${object === 'services' ? 'Services' : 'Inspections'} Billing`);
-    setCadence('weekly'); setHourET(8); setDayOfWeek(1); setDayOfMonth(1); setRange(current.range || 'last_7_days');
+    setCadence('weekly'); setHourET(8); setDayOfWeek(1); setDayOfMonth(1); setRange(current.range || 'last_7_days'); setInclToday(current.includeToday !== false);
   };
   const startEdit = (s: Sched) => {
     setEditingId(s.id); setEditFilters({ regions: s.regions || [], portfolios: s.portfolios || [], inspectors: s.inspectors || [], types: s.types || [] });
     setName(s.name); setRecipients((s.recipients || []).join(', ')); setCadence(s.cadence); setHourET(s.hourET);
-    setDayOfWeek(s.dayOfWeek ?? 1); setDayOfMonth(s.dayOfMonth ?? 1); setRange(s.range);
+    setDayOfWeek(s.dayOfWeek ?? 1); setDayOfMonth(s.dayOfMonth ?? 1); setRange(s.range); setInclToday(s.includeToday !== false);
     setMsg(null);
   };
 
@@ -294,7 +295,7 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
       object, name: name.trim(),
       recipients: recipients.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean),
       regions: f.regions, portfolios: f.portfolios, inspectors: f.inspectors, types: f.types,
-      range, cadence, hourET, dayOfWeek, dayOfMonth, enabled: true,
+      range, includeToday: inclToday, cadence, hourET, dayOfWeek, dayOfMonth, enabled: true,
       ...(editingId ? { id: editingId } : {}),
     };
   };
@@ -354,6 +355,14 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
               <select value={range} onChange={(e) => setRange(e.target.value)} className={`${CTRL} w-full mt-1`}>
                 {RANGES.filter((r) => r.value !== 'custom').map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
+              {/* Off = the window ends the day BEFORE each send (rolling presets
+                  keep full width — trailing 7 days before send day). */}
+              {TODAY_ENDING.has(range) && (
+                <span className="mt-1.5 flex items-center gap-1.5 font-normal normal-case text-[12px] text-[#a1a1aa] cursor-pointer select-none">
+                  <input type="checkbox" checked={inclToday} onChange={(e) => setInclToday(e.target.checked)} className="accent-[#ff0060]" />
+                  Include send day{inclToday ? '' : ' — ends the day before'}
+                </span>
+              )}
             </label>
             <label className="block text-[12px] font-heading font-semibold text-[#a1a1aa]">Cadence
               <select value={cadence} onChange={(e) => setCadence(e.target.value as any)} className={`${CTRL} w-full mt-1`}>

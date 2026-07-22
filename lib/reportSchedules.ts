@@ -37,6 +37,10 @@ export interface ReportSchedule {
   inspectors: string[];
   types: string[];             // template/service type labels
   range: RelativeRange;        // completed-date window (relative)
+  // Today-ending presets only (last_7/30_days, this_week/month/year): false =
+  // the window ends YESTERDAY at send time (rolling presets keep full width —
+  // Last 7 days = the trailing 7 days before today). Absent/true = include today.
+  includeToday?: boolean;
   cadence: Cadence;
   hourET: number;              // 0–23, Eastern
   dayOfWeek?: number;          // weekly: 0=Sun … 6=Sat
@@ -70,19 +74,22 @@ export function addDaysISO(day: string, n: number): string {
 }
 
 /** Resolve a relative range to { from, to } (inclusive YYYY-MM-DD, ET-anchored). */
-export function resolveRange(range: RelativeRange, now: Date = new Date()): { from?: string; to?: string } {
+export function resolveRange(range: RelativeRange, now: Date = new Date(), includeToday = true): { from?: string; to?: string } {
   const p = etParts(now);
   const today = iso(p.y, p.m, p.d);
+  // End of a today-ending window: today, or yesterday when today is excluded
+  // (rolling presets shift their start too, keeping the full window width).
+  const end = includeToday ? today : addDaysISO(today, -1);
   switch (range) {
     case 'today': return { from: today, to: today };
     case 'yesterday': { const y = addDaysISO(today, -1); return { from: y, to: y }; }
-    case 'last_7_days': return { from: addDaysISO(today, -6), to: today };
-    case 'last_30_days': return { from: addDaysISO(today, -29), to: today };
-    case 'this_week': { const start = addDaysISO(today, -p.dow); return { from: start, to: today }; }       // Sun-start
+    case 'last_7_days': return { from: addDaysISO(today, includeToday ? -6 : -7), to: end };
+    case 'last_30_days': return { from: addDaysISO(today, includeToday ? -29 : -30), to: end };
+    case 'this_week': { const start = addDaysISO(today, -p.dow); return { from: start, to: end }; }       // Sun-start
     case 'last_week': { const thisStart = addDaysISO(today, -p.dow); return { from: addDaysISO(thisStart, -7), to: addDaysISO(thisStart, -1) }; }
-    case 'this_month': return { from: iso(p.y, p.m, 1), to: today };
+    case 'this_month': return { from: iso(p.y, p.m, 1), to: end };
     case 'last_month': { const lm = p.m === 1 ? 12 : p.m - 1; const ly = p.m === 1 ? p.y - 1 : p.y; const lastDay = new Date(Date.UTC(ly, lm, 0)).getUTCDate(); return { from: iso(ly, lm, 1), to: iso(ly, lm, lastDay) }; }
-    case 'this_year': return { from: iso(p.y, 1, 1), to: today };
+    case 'this_year': return { from: iso(p.y, 1, 1), to: end };
     case 'all': default: return {};
   }
 }
@@ -124,7 +131,9 @@ export function normalizeSchedule(input: any, byEmail?: string): ReportSchedule 
     portfolios: strList(input?.portfolios),
     inspectors: strList(input?.inspectors),
     types: strList(input?.types),
-    range, cadence,
+    range,
+    includeToday: input?.includeToday !== false,   // explicit false = exclude today
+    cadence,
     hourET: clampHour(input?.hourET),
     dayOfWeek: cadence === 'weekly' ? Math.min(6, Math.max(0, Math.floor(Number(input?.dayOfWeek) || 0))) : undefined,
     dayOfMonth: cadence === 'monthly' ? Math.min(31, Math.max(1, Math.floor(Number(input?.dayOfMonth) || 1))) : undefined,
@@ -172,7 +181,7 @@ function titleCase(s: string): string {
 }
 
 export async function sendScheduleNow(s: ReportSchedule, req?: { headers: Record<string, any> } | null, now: Date = new Date()): Promise<{ sent: boolean; rows: number; error?: string }> {
-  const { from, to } = resolveRange(s.range, now);
+  const { from, to } = resolveRange(s.range, now, s.includeToday !== false);
   const rows = await fetchBillingRows(s.object, { regions: s.regions, portfolios: s.portfolios, inspectors: s.inspectors, types: s.types, from, to });
   const buf = await buildBillingXlsx(s.object, rows);
   const [to0, ...alsoTo] = s.recipients;
