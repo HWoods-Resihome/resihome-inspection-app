@@ -666,8 +666,13 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   const coveredCount = useMemo(() => (rule ? countFor(rule) : 0), [rule]);
   // Property scope → the accurate live count (…​ while loading); community scope →
   // the catalog unit count.
+  // Covered count: a FIXED-LIST rule covers exactly its included properties (the
+  // live portfolio count would wrongly show every home in the portfolios); 'all'
+  // mode uses the accurate live query.
   const coveredDisplay = rule && rule.scope === 'property'
-    ? (coveredLive != null ? coveredLive.toLocaleString() : '…')
+    ? (rule.propsMode === 'list'
+        ? rule.includedProps.length.toLocaleString()
+        : (coveredLive != null ? coveredLive.toLocaleString() : '…'))
     : countLabel(coveredCount);
 
   // A month is "accounted for" if it's in a cadence OR explicitly set to no service.
