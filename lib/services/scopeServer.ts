@@ -6,14 +6,17 @@
  */
 import { isInternalEmail } from '@/lib/userAccess';
 import { isViewingAsVendor, viewAsVendorEmail } from '@/lib/services/viewAs';
-import { isAppAdmin } from '@/lib/adminAccess';
+import { servicesEnabled } from '@/lib/servicesAccess';
 import { findVendorForAuth, fetchApprovedVendorCompanies } from '@/lib/hubspot';
 import type { ServiceViewer } from '@/lib/services/scope';
 
-/** May this user load the vendor-facing Services pages? App admins (everything)
- *  or an approved vendor company (their own work orders). */
+/** May this user load the Services pages? Internal users with Services access —
+ *  servicesEnabled honors the per-user User Management toggle first, falling back
+ *  to admin (so a non-admin granted Services = Yes gets in, matching the app
+ *  switcher and /api/services/* gates) — or an approved vendor company (their own
+ *  work orders). */
 export async function servicesViewerAllowed(email: string | null | undefined): Promise<boolean> {
-  if (await isAppAdmin(email).catch(() => false)) return true;
+  if (await servicesEnabled(email).catch(() => false)) return true;
   return !!(await findVendorForAuth(email).catch(() => null));
 }
 
