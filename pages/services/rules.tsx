@@ -354,9 +354,10 @@ function ruleToProps(r: Rule): Record<string, any> {
   }
   if (r.initialDueDays !== '') props.initial_due_days = Number(r.initialDueDays);
   // Move-in-clean lease-anchor scheduling (persisted only for that combo).
+  // Move-in cleans are ALWAYS lease-start anchored (no enrollment option).
   const leaseAnchorEligible = r.worktype === 'cleaning' && r.subtype === 'move_in_clean' && r.scope === 'property';
-  props.due_anchor = leaseAnchorEligible && r.dueAnchor === 'lease_start' ? 'lease_start' : 'enroll';
-  if (leaseAnchorEligible && r.dueAnchor === 'lease_start' && r.daysBeforeLeaseStart !== '') props.days_before_lease_start = Number(r.daysBeforeLeaseStart);
+  props.due_anchor = leaseAnchorEligible ? 'lease_start' : 'enroll';
+  if (leaseAnchorEligible && r.daysBeforeLeaseStart !== '') props.days_before_lease_start = Number(r.daysBeforeLeaseStart);
   if (r.startDate) props.start_date = r.startDate;
   if (r.startDelayDays !== '') props.start_delay_days = Number(r.startDelayDays);
   if (r.stopDate) props.stop_date = r.stopDate;
@@ -733,6 +734,17 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   // Trimming) may cover the same property, so they never conflict.
   const overlap = useMemo(() => (rule ? overlapForRule(rule, rules) : null), [rules, rule]);
 
+  // A move-in clean is ALWAYS lease-start anchored and one-time — there is no
+  // enrollment/cadence choice. Coerce the open rule so its persisted config + the
+  // UI stay consistent (the toggle is removed; both day fields are required).
+  const isMoveInClean = !!rule && rule.worktype === 'cleaning' && rule.subtype === 'move_in_clean' && rule.scope === 'property';
+  useEffect(() => {
+    if (rule && isMoveInClean && (rule.dueAnchor !== 'lease_start' || rule.recurring)) {
+      patch({ dueAnchor: 'lease_start', recurring: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rule?.id, rule?.worktype, rule?.subtype, rule?.scope]);
+
   const clientCost = rule ? (parseFloat(rule.vendorCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100)) : 0;
   const commonAreaClient = rule ? (parseFloat(rule.commonAreaCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100)) : 0;
   const saveErrors: string[] = [];
@@ -741,8 +753,8 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
     // parked OFF (persistRule forces active=false) and can't be turned on until the
     // property selection no longer overlaps — surfaced as a warning below, not an error.
     if (rule.recurring && missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
-    if (!rule.recurring && !rule.initialDueDays.trim()) saveErrors.push('Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
-    if (rule.dueAnchor === 'lease_start' && !rule.daysBeforeLeaseStart.trim()) saveErrors.push('Set “days before lease start” for the lease-anchored due date.');
+    if ((!rule.recurring || isMoveInClean) && !rule.initialDueDays.trim()) saveErrors.push(isMoveInClean ? 'Set the fallback “First Order Due (days after enrollment)” — required for the move-in clean logic.' : 'Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
+    if ((rule.dueAnchor === 'lease_start' || isMoveInClean) && !rule.daysBeforeLeaseStart.trim()) saveErrors.push('Set “days before lease start” — required for the move-in clean due date.');
     if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
     // Enrollment criteria are OPTIONAL — with none, every applicable property
     // enrolls immediately. Any criterion that IS present still needs a value.
@@ -1232,45 +1244,41 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
           <section className={sec}>
             <SecHead n={2} title="Cadence" />
             {openSec[2] && (<div className="mt-3">
-            {/* Move-in clean only: anchor the due date to the lease start date. */}
-            {rule.worktype === 'cleaning' && rule.subtype === 'move_in_clean' && rule.scope === 'property' && (
+            {/* Move-in clean: ALWAYS lease-start anchored (no enrollment/cadence
+                choice). Due = a set number of days BEFORE the lease start date;
+                both this and the fallback below are required. */}
+            {isMoveInClean && (
               <div className="mb-3">
                 <label className={lbl}>Due Date Anchor</label>
-                <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
-                  <button type="button" onClick={() => patch({ dueAnchor: 'enroll' })} className={`px-3 py-1.5 rounded-md ${rule.dueAnchor !== 'lease_start' ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>Enrollment</button>
-                  {/* Lease anchor makes it inherently one-time (one clean per lease). */}
-                  <button type="button" onClick={() => patch({ dueAnchor: 'lease_start', recurring: false })} className={`px-3 py-1.5 rounded-md ${rule.dueAnchor === 'lease_start' ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Lease start date</button>
-                </div>
+                <div className="text-[13px] font-heading font-semibold text-ink bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">Lease start date</div>
                 <div className="text-[11px] text-gray-400 mt-1">
-                  {rule.dueAnchor === 'lease_start'
-                    ? 'Due lands a set number of days BEFORE the lease start date (from the leasing deal). The lease start date isn’t always known at enrollment — until it is, the due falls back to “days after enrollment” below and is re-synced automatically once the date populates (and canceled if the lease is already within a day).'
-                    : 'Standard — the due date is “days after enrollment” below.'}
+                  A move-in clean is scheduled from the lease start date (on the leasing deal). Until that date is known the due falls back to “days after enrollment” below, then re-syncs automatically once it populates (and cancels if the lease is already within a day).
                 </div>
-                {rule.dueAnchor === 'lease_start' && (
-                  <div className="bg-brand/5 border border-brand/20 rounded-lg px-3 py-2 mt-2">
-                    <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
-                      <input value={rule.daysBeforeLeaseStart} inputMode="numeric" onChange={(e) => patch({ daysBeforeLeaseStart: e.target.value.replace(/\D/g, '') })} placeholder="—"
-                        className={`${ctl} w-12 text-center tabular-nums ${!rule.daysBeforeLeaseStart.trim() ? 'border-red-300' : ''}`} />
-                      <span className="text-gray-600">days before lease start</span>
-                    </div>
+                <div className="bg-brand/5 border border-brand/20 rounded-lg px-3 py-2 mt-2">
+                  <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
+                    <input value={rule.daysBeforeLeaseStart} inputMode="numeric" onChange={(e) => patch({ daysBeforeLeaseStart: e.target.value.replace(/\D/g, '') })} placeholder="—"
+                      className={`${ctl} w-12 text-center tabular-nums ${!rule.daysBeforeLeaseStart.trim() ? 'border-red-300' : ''}`} />
+                    <span className="text-gray-600">days before lease start</span><span className="text-brand"> *</span>
                   </div>
-                )}
+                </div>
               </div>
             )}
-            {/* First order due — optional (required when one-time); blank = due on the enrollment date. */}
+            {/* First order due — optional (required when one-time OR the move-in fallback). */}
             <div className="mb-3">
-              <label className={lbl}>{rule.dueAnchor === 'lease_start' ? 'Fallback: First Order Due' : 'First Order Due'}{!rule.recurring && <span className="text-brand"> *</span>}</label>
+              <label className={lbl}>{isMoveInClean ? 'Fallback: First Order Due' : 'First Order Due'}{(!rule.recurring || isMoveInClean) && <span className="text-brand"> *</span>}</label>
               <div className="bg-brand/5 border border-brand/20 rounded-lg px-3 py-2">
                 <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
                   <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—"
-                    className={`${ctl} w-12 text-center tabular-nums ${!rule.recurring && !rule.initialDueDays.trim() ? 'border-red-300' : ''}`} />
+                    className={`${ctl} w-12 text-center tabular-nums ${(!rule.recurring || isMoveInClean) && !rule.initialDueDays.trim() ? 'border-red-300' : ''}`} />
                   <span className="text-gray-600">days after enrollment</span>
                 </div>
-                <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Optional — the first order lands this many days after enrollment; the cadence takes over after that.' : 'Required — a one-time service has no cadence to schedule from.'}</div>
+                <div className="text-[11px] text-gray-400 mt-1">{isMoveInClean ? 'Required — the fallback due (days after enrollment) used until the lease start date is known.' : rule.recurring ? 'Optional — the first order lands this many days after enrollment; the cadence takes over after that.' : 'Required — a one-time service has no cadence to schedule from.'}</div>
               </div>
             </div>
 
-            {/* Is this recurring? — gates the cadence UI. */}
+            {/* Is this recurring? — gates the cadence UI. Hidden for move-in cleans,
+                which are always one-time (scheduled off the lease start date). */}
+            {!isMoveInClean && (
             <div className="mb-3">
               <label className={lbl}>Is This Recurring?</label>
               <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
@@ -1279,6 +1287,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
               </div>
               <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Recurs on the cadence below.' : 'One-time — a single service is created on enrollment.'}</div>
             </div>
+            )}
 
             {rule.recurring && (
               <>
