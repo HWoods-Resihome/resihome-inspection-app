@@ -562,7 +562,10 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
     ? { approve: 'Assign as-is', modify: 'Edit pricing', reject: 'Cancel bid' }
     : { approve: 'Complete as-is', modify: 'Edit pricing', reject: 'Deny — $0' };
   const reissueOk = !reissue || Number(reissueDays) > 0;
-  const canSubmit = !!decision && !!notes.trim() && (!needsDays || Number(days) > 0) && reissueOk && !busy;
+  // Note is required for Modify and Reject (the reason lands on the record and
+  // goes to the vendor); a plain Approve may close out without one.
+  const needsNote = decision === 'modify' || decision === 'reject';
+  const canSubmit = !!decision && (!needsNote || !!notes.trim()) && (!needsDays || Number(days) > 0) && reissueOk && !busy;
 
   const diffCls = (d: number) => d > 0 ? 'text-emerald-600' : d < 0 ? 'text-red-600' : 'text-gray-400';
   const signMoney = (d: number) => `${d > 0 ? '+' : d < 0 ? '−' : ''}$${Math.abs(d).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -683,11 +686,13 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
         </div>
       )}
 
-      {/* Notes — below the options; required for every decision. */}
+      {/* Notes — below the options; required for Modify/Reject, optional on Approve. */}
       <div>
-        <label className="block text-[12px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">Decision note <span className="text-brand">*</span></label>
+        <label className="block text-[12px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">
+          Decision note {needsNote ? <span className="text-brand">*</span> : <span className="text-gray-300 normal-case">(optional)</span>}
+        </label>
         <AutoGrowTextarea value={notes} onChange={(e) => setNotes(e.target.value)} minPx={64} className={inputCls}
-          placeholder="Required — the reason for this decision (visible on the record)…" />
+          placeholder={needsNote ? 'Required — the reason for this decision (visible on the record)…' : 'Optional — any context for the record…'} />
       </div>
 
       <button type="button"
@@ -698,7 +703,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
             // out exactly what's missing (the grey hints were easy to miss).
             const missing: string[] = [];
             if (!decision) missing.push('Choose Approve, Modify, or Reject above.');
-            if (!notes.trim()) missing.push('Write a decision note (required — it goes on the record and to the vendor).');
+            if (needsNote && !notes.trim()) missing.push('Write a decision note (required for Modify/Reject — it goes on the record and to the vendor).');
             if (needsDays && !(Number(days) > 0)) missing.push('Enter the days to complete.');
             if (!reissueOk) missing.push('Enter the days to complete the re-issued service (or set Re-Issue to No).');
             setBlockMsg(missing.join('\n'));
@@ -715,7 +720,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
       {blockMsg && (
         <div className="text-[13px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 whitespace-pre-line">{blockMsg}</div>
       )}
-      {decision && !notes.trim() && <div className="text-[12px] font-semibold text-amber-600 text-center -mt-1">A decision note is required to finalize.</div>}
+      {needsNote && !notes.trim() && <div className="text-[12px] font-semibold text-amber-600 text-center -mt-1">A decision note is required for {decision === 'reject' ? 'Reject' : 'Modify'}.</div>}
       {needsDays && !(Number(days) > 0) && <div className="text-[12px] font-semibold text-amber-600 text-center -mt-1">Enter the days to complete.</div>}
       {kind === 'review' && reissue && !reissueOk && <div className="text-[12px] font-semibold text-amber-600 text-center -mt-1">Enter the days to complete the re-issued service.</div>}
       {error && <div className="text-center text-xs text-red-600">{error}</div>}

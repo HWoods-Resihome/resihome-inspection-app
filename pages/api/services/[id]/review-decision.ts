@@ -42,9 +42,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const b = req.body || {};
   const decision = ['approve', 'modify', 'reject'].includes(b.decision) ? b.decision as 'approve' | 'modify' | 'reject' : null;
   if (!decision) return res.status(400).json({ error: 'decision must be approve, modify, or reject' });
-  // Every decision must carry a note (it's the reason, on the record).
+  // Modify/Reject must carry a note (it's the reason, on the record and in the
+  // vendor's email). A plain Approve may close out without one.
   const notes = String(b.notes || '').trim();
-  if (!notes) return res.status(400).json({ error: 'A decision note is required.' });
+  if (!notes && decision !== 'approve') return res.status(400).json({ error: 'A decision note is required for Modify and Reject.' });
 
   try {
     const rec = await fetchServiceWorkOrder(id);
@@ -92,7 +93,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     await patchServiceWorkOrder(id, props);
     const decisionLabel = decision === 'reject' ? 'Rejected — payment denied' : decision === 'modify' ? 'Modified pricing' : 'Approved';
-    void recordServiceAudit({ serviceId: id, action: 'review', actorEmail: email, actorName: session?.name, detail: `${decisionLabel}: ${notes}`.slice(0, 500), meta: { decision } });
+    void recordServiceAudit({ serviceId: id, action: 'review', actorEmail: email, actorName: session?.name, detail: (notes ? `${decisionLabel}: ${notes}` : decisionLabel).slice(0, 500), meta: { decision } });
 
     // Internal Slack alert on a rejection (dark until an admin sets a channel).
     if (decision === 'reject') {

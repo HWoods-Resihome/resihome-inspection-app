@@ -34,7 +34,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const decision = ['approve', 'modify', 'reject'].includes(b.decision) ? b.decision as 'approve' | 'modify' | 'reject' : null;
   if (!decision) return res.status(400).json({ error: 'decision must be approve, modify, or reject' });
   const notes = String(b.notes || '').trim();
-  if (!notes) return res.status(400).json({ error: 'A decision note is required.' });
+  // Modify/Reject must say why; a plain Approve may proceed without a note.
+  if (!notes && decision !== 'approve') return res.status(400).json({ error: 'A decision note is required for Modify and Reject.' });
 
   try {
     const rec = await fetchServiceWorkOrder(id);
@@ -66,7 +67,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       due_date: addDays(dueDays),
     });
     const verb = decision === 'modify' ? 'modified' : 'approved';
-    void recordServiceAudit({ serviceId: id, action: 'bid', actorEmail: email, actorName: session?.name, detail: `Bid ${verb} → Assigned: ${notes}`.slice(0, 500), meta: { decision } });
+    void recordServiceAudit({ serviceId: id, action: 'bid', actorEmail: email, actorName: session?.name, detail: (notes ? `Bid ${verb} → Assigned: ${notes}` : `Bid ${verb} → Assigned`).slice(0, 500), meta: { decision } });
     return res.status(200).json({ ok: true, id, status: 'assigned', vendorCost, markupPct, clientCost });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });
