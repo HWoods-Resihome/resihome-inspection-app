@@ -17,14 +17,18 @@ import { safeProxyFetch, readBodyCapped, ProxyFetchError } from '@/lib/safeProxy
 
 const EMBED_EDGE = 520;     // long-edge px — plenty for a 90×65pt cell, even zoomed
 const EMBED_QUALITY = 70;
-const CONCURRENCY = 6;      // bounded parallel fetch+resize (caps memory/time + CDN throttling)
+const CONCURRENCY = 8;      // bounded parallel fetch+resize (caps memory/time + CDN throttling)
 const FETCH_TIMEOUT_MS = 18000;
 const MAX_ATTEMPTS = 4;
-// Global wall-clock budget for the WHOLE embed pass. finalize/qc-finalize run under
-// a 60s function limit; without this a few permanently-slow photos (4×18s retries
-// each) blow the budget and the entire finalize is KILLED (no PDF, no email). Past
-// the deadline we stop starting/​retrying fetches and let the rest fall back to links.
-const TOTAL_BUDGET_MS = 45000;
+// Global wall-clock budget for the WHOLE embed pass — a safety valve, not a pace:
+// past the deadline we stop starting/retrying fetches and the REST of the photos
+// fall back to "View photo" links (grey boxes) instead of killing the finalize.
+// finalize/qc-finalize now run under a 300s ceiling (vercel.json), so the budget
+// is sized to cover a photo-heavy inspection (hundreds of photos) while still
+// leaving ~2 minutes of headroom for the renders/uploads/tickets/email after it.
+// (The old 45s value was tuned for the former 60s limit and made big reports
+// degrade most of their photos to links.)
+const TOTAL_BUDGET_MS = 150000;
 // Hard ceiling on a fetched source image so a huge/attacker-supplied URL can't
 // OOM the PDF render (mirrors lib/pdf-images.ts).
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024; // output is <=520px; a 12MB source is ample. Bounds peak memory (concurrency x this) so a few oversized uploads can't OOM the render.
@@ -91,21 +95,53 @@ async function fetchAndEmbed(url: string, deadline: number): Promise<string | nu
  * that will appear in the PDF. Keys are the POSTER url (what the PDF embeds), so
  * the renderer can look up `embedded[getPosterUrl(entry)]`.
  */
+// Warm-instance thumbnail cache: uploaded photos are immutable (a HubSpot file
+// URL never changes content), so a poster fetched+downscaled once can be reused
+// by any later render on this instance — a re-finalize / qc pass embeds its
+// already-seen photos instantly and spends the whole budget on NEW ones. Bounded
+// (insertion-order eviction) so a long-lived instance can't grow unbounded:
+// ~60KB per data URI × 600 ≈ 36MB ceiling.
+const _thumbCache = new Map<string, string>();
+const THUMB_CACHE_MAX = 600;
+function cacheThumb(url: string, data: string): void {
+  if (_thumbCache.size >= THUMB_CACHE_MAX) {
+    const oldest = _thumbCache.keys().next().value;
+    if (oldest !== undefined) _thumbCache.delete(oldest);
+  }
+  _thumbCache.set(url, data);
+}
+
 export async function buildEmbeddedPhotoMap(entries: string[]): Promise<Record<string, string>> {
   // Unique poster URLs (http/https only — skip blob:/data: and dedupe).
   const posters = Array.from(new Set(
     entries.map((e) => getPosterUrl(e)).filter((u) => /^https?:\/\//i.test(u))
   ));
   const out: Record<string, string> = {};
+  // Serve cache hits first — they cost nothing and don't touch the budget.
+  const misses: string[] = [];
+  for (const url of posters) {
+    const hit = _thumbCache.get(url);
+    if (hit) out[url] = hit; else misses.push(url);
+  }
   const deadline = Date.now() + TOTAL_BUDGET_MS;
   let cursor = 0;
   const worker = async () => {
-    while (cursor < posters.length && Date.now() < deadline) {
-      const url = posters[cursor++];
+    while (cursor < misses.length && Date.now() < deadline) {
+      const url = misses[cursor++];
       const data = await fetchAndEmbed(url, deadline);
-      if (data) out[url] = data; // else leave unmapped → renderer falls back to the link
+      if (data) { out[url] = data; cacheThumb(url, data); } // else unmapped → link fallback
     }
   };
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, posters.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, misses.length) }, worker));
+  // Coverage visibility: if photos degraded to "View photo" links, say how many
+  // and whether the budget deadline was the cause — the exact signal needed to
+  // diagnose grey-box reports from the field.
+  const embedded = Object.keys(out).length;
+  if (embedded < posters.length) {
+    const ranOut = Date.now() >= deadline;
+    console.warn(`[pdf-images] embedded ${embedded}/${posters.length} photos (${posters.length - embedded} fell back to links${ranOut ? ' — TIME BUDGET EXHAUSTED' : ' — fetch/decode failures'})`);
+  } else if (posters.length > 0) {
+    console.log(`[pdf-images] embedded ${embedded}/${posters.length} photos (${posters.length - misses.length} from cache)`);
+  }
   return out;
 }
