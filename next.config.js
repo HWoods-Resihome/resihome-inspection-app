@@ -1,6 +1,22 @@
 /** @type {import('next').NextConfig} */
 const pkg = require('./package.json');
 
+// Vercel Blob public host, e.g. "7imh0yfpshxqifte.public.blob.vercel-storage.com".
+// When set, stored files are served under OUR domain via a transparent /m/* rewrite
+// (so the address bar shows resiwalk.com and the tab shows the ResiWalk favicon,
+// never "blob.vercel-storage.com"). Prefer the explicit BLOB_PUBLIC_HOST env; else
+// best-effort derive it from the store id embedded in BLOB_READ_WRITE_TOKEN
+// (vercel_blob_rw_<storeId>_<secret>). Empty → the rewrite is NOT added and file
+// URLs stay exactly as today (zero behavior change until configured).
+function resolveBlobHost() {
+  const explicit = (process.env.BLOB_PUBLIC_HOST || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  if (explicit) return explicit;
+  const tok = (process.env.BLOB_READ_WRITE_TOKEN || '').trim();
+  const m = /^vercel_blob_rw_([a-z0-9]+)_/i.exec(tok);
+  return m ? `${m[1].toLowerCase()}.public.blob.vercel-storage.com` : '';
+}
+const BLOB_PUBLIC_HOST = resolveBlobHost();
+
 const nextConfig = {
   reactStrictMode: true,
   // Don't advertise the framework (tiny hardening; removes the X-Powered-By header).
@@ -44,6 +60,16 @@ const nextConfig = {
     // hand-bump package.json. Falls back to package.json for local dev. Short
     // SHA keeps the login footer readable.
     NEXT_PUBLIC_APP_VERSION: (process.env.VERCEL_GIT_COMMIT_SHA || pkg.version).slice(0, 7),
+    // "1" only when a blob host is resolvable → the client rewrites raw blob URLs
+    // to the branded same-origin /m/* path. Empty → display code leaves URLs as-is.
+    NEXT_PUBLIC_BLOB_PROXY: BLOB_PUBLIC_HOST ? '1' : '',
+  },
+  // Transparent same-origin passthrough for stored files: /m/<key> proxies to the
+  // Vercel Blob store, so the browser stays on our domain (branded URL + favicon).
+  // Only added when the store host is known; otherwise a no-op.
+  async rewrites() {
+    if (!BLOB_PUBLIC_HOST) return [];
+    return [{ source: '/m/:path*', destination: `https://${BLOB_PUBLIC_HOST}/:path*` }];
   },
   async headers() {
     // Content-Security-Policy — the primary XSS defense. script-src is locked to

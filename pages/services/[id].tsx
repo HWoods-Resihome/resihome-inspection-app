@@ -16,6 +16,7 @@ import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
 import type { AuditEvent } from '@/lib/auditLog';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
+import { brandedFileUrl } from '@/lib/photoDisplay';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { UnlockButton, lockRingFromProperty, type LockRing } from '@/components/UnlockButton';
 import { FitText } from '@/components/FitText';
@@ -273,7 +274,7 @@ function ProofOfService({ url, name, onChange }: { url: string; name: string; on
               <span className="truncate flex-1 min-w-0" title={displayName}>{displayName}</span>
               <button type="button" onClick={() => onChange('', '')} className="shrink-0 text-[12px] font-semibold text-gray-500 hover:text-red-600">Remove</button>
             </div>
-            <a href={url} target="_blank" rel="noopener noreferrer" className="block text-[12px] text-emerald-700 underline mt-1.5">View attachment</a>
+            <a href={brandedFileUrl(url)} target="_blank" rel="noopener noreferrer" className="block text-[12px] text-emerald-700 underline mt-1.5">View attachment</a>
           </div>
         </div>
       ) : (
@@ -1611,7 +1612,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                           <span className="text-emerald-600 text-lg leading-none">📄</span>
                           <div className="flex-1 min-w-0">
                             <div className="text-[13px] font-semibold text-emerald-800 truncate" title={roName}>{roName}</div>
-                            <a href={roProof} target="_blank" rel="noopener noreferrer" className="text-[12px] text-emerald-700 underline">View attachment</a>
+                            <a href={brandedFileUrl(roProof)} target="_blank" rel="noopener noreferrer" className="text-[12px] text-emerald-700 underline">View attachment</a>
                           </div>
                         </div>
                       </div>

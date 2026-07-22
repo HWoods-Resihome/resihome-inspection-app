@@ -14,6 +14,8 @@
  * logic (semicolon/comma delimited) and HEIC checks are unaffected.
  */
 
+import { brandedFileUrl } from '@/lib/photoDisplay';
+
 const VIDEO_MARKER = '#v=';
 
 /** Build a single photo_urls entry that carries both poster and video. */
@@ -68,5 +70,8 @@ export function playableVideoSrc(entry: string): string {
     const host = new URL(url).hostname;
     if (HUBSPOT_HOST_RE.test(host)) return `/api/video-proxy?url=${encodeURIComponent(url)}`;
   } catch { /* not an absolute URL — return as-is */ }
-  return url;
+  // Vercel Blob clips play direct (Blob honors Range) — but rebrand to our /m/*
+  // domain so the raw blob host never shows. brandedFileUrl no-ops when unconfigured
+  // or for non-blob URLs, preserving the Range-native direct behavior.
+  return brandedFileUrl(url);
 }

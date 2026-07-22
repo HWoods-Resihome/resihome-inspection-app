@@ -192,6 +192,14 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Branded blob passthrough (/m/...): next.config transparently proxies these to
+  // the Vercel Blob store. The objects are already public (access:'public'); serving
+  // them under our domain just hides the raw blob host + shows our favicon. Public
+  // so shared file links open without a session (matching the raw blob URLs today).
+  if (pathname.startsWith('/m/')) {
+    return NextResponse.next();
+  }
+
   const token = req.cookies.get('resihome_session')?.value;
   if (!token) return redirectToLogin(req);
 

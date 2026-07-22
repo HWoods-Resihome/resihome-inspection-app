@@ -19,6 +19,22 @@ const syncedBlobByRealUrl = new Map<string, string>();
 const MAX_SYNCED_BLOBS = 150;
 const stripVideoFragment = (u: string): string => { const i = u.indexOf('#v='); return i === -1 ? u : u.slice(0, i); };
 
+/**
+ * Rebrand a raw Vercel Blob URL to our OWN domain: a
+ * `https://<store>.public.blob.vercel-storage.com/<key>` URL becomes the relative
+ * `/m/<key>` (same-origin), which next.config transparently proxies back to the
+ * blob store. So the browser address bar + tab favicon are ResiWalk's, and nobody
+ * sees the blob host — WITHOUT changing what we store (server fetches, the SSRF
+ * guard, and emails all keep using the raw URL). No-op unless NEXT_PUBLIC_BLOB_PROXY
+ * is on (i.e. a blob host is configured) and the URL is actually a public blob URL.
+ */
+export function brandedFileUrl(url: string): string {
+  if (process.env.NEXT_PUBLIC_BLOB_PROXY !== '1') return url;
+  const s = String(url || '');
+  const m = /^https?:\/\/[^/]*\.public\.blob\.vercel-storage\.com(\/[^?#]*)([?#].*)?$/i.exec(s);
+  return m ? `/m${m[1]}${m[2] || ''}` : url;
+}
+
 /** Remember the local blob a just-synced photo was showing, keyed by its real url. */
 export function registerSyncedBlob(realUrl: string, blobUrl: string): void {
   if (!realUrl || !blobUrl) return;
@@ -69,7 +85,9 @@ export function displayImageSrc(url: string): string {
   if (/\.(heic|heif)$/i.test(path)) {
     return `/api/photo-proxy?url=${encodeURIComponent(clean)}`;
   }
-  return clean;
+  // Full-size images/PDFs are shown directly — rebrand a raw blob URL to /m/* so
+  // the browser stays on our domain (thumbnails already flow through the proxy).
+  return brandedFileUrl(clean);
 }
 
 /**
