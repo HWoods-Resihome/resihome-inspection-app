@@ -7,9 +7,9 @@ describe('decideBackAction — Android back gesture', () => {
     expect(decideBackAction({ pathname: '/inspection/123', overlayOpen: true, canGoBack: true })).toBe('overlay');
   });
 
-  it('leaves the app from the home/root screen', () => {
-    expect(decideBackAction({ pathname: '/', overlayOpen: false, canGoBack: true })).toBe('minimize');
-    expect(decideBackAction({ pathname: '/', overlayOpen: false, canGoBack: false })).toBe('minimize');
+  it('leaves the app from the home screen (/app since the go-live move)', () => {
+    expect(decideBackAction({ pathname: '/app', overlayOpen: false, canGoBack: true })).toBe('minimize');
+    expect(decideBackAction({ pathname: '/app', overlayOpen: false, canGoBack: false })).toBe('minimize');
   });
 
   it('does a history back from inside an inspection (clean history → lands home)', () => {

@@ -377,6 +377,17 @@ export default function SitePreview() {
   const [fab, setFab] = useState(false);
 
   useEffect(() => {
+    // Installed-app launches must NEVER sit on the marketing page: a PWA/WebAPK
+    // (display-mode: standalone / iOS navigator.standalone) or the native
+    // Capacitor shell always forwards to the app shell — signed out, /app just
+    // bounces to /login. This also covers already-installed WebAPKs whose baked
+    // manifest still has the old start_url "/" and any launch navigation that
+    // doesn't carry the typed-arrival headers the middleware keys on.
+    const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches
+      || (navigator as { standalone?: boolean }).standalone === true
+      || !!(window as { Capacitor?: unknown }).Capacitor;
+    if (standalone) { window.location.replace('/app'); return; }
+
     const nav = document.getElementById('sp-nav');
     const onScroll = () => {
       nav?.classList.toggle('is-stuck', window.scrollY > 12);
@@ -413,16 +424,6 @@ export default function SitePreview() {
   }, []);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  // Signed-in visitors (arriving via a link, so not auto-redirected into the
-  // app) get an "Open app" button instead of "Log in" — one tap, no re-auth.
-  // 401 comes from the middleware session gate, so it's the definitive
-  // "logged out" signal; any other status means a session cookie was accepted.
-  const [hasSession, setHasSession] = useState(false);
-  useEffect(() => {
-    fetch('/api/auth/me', { credentials: 'same-origin' }).then((r) => setHasSession(r.status !== 401)).catch(() => {});
-  }, []);
-  const loginHref = hasSession ? '/app' : '/login';
-  const loginLabel = hasSession ? 'Open app' : 'Log in';
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -466,13 +467,13 @@ export default function SitePreview() {
               <a href="#platform">Platform</a><a href="#integrations">Integrations</a><a href="#pricing">Pricing</a><a href="#insights">Insights</a><a href="#faq">FAQ</a>
             </nav>
             <div className="nav__cta">
-              <a href={loginHref} className="nav__login">{loginLabel}</a>
+              <a href="/login" className="nav__login">Log in</a>
               <a href="#contact" className="btn">Book a demo</a>
               <button className="nav__burger" aria-label="Menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><span></span></button>
             </div>
           </div>
           <div className="nav__mobile" onClick={() => setMenuOpen(false)}>
-            <a href="#platform">Platform</a><a href="#integrations">Integrations</a><a href="#pricing">Pricing</a><a href="#insights">Insights</a><a href="#faq">FAQ</a><a href={loginHref}>{loginLabel}</a><a href="#contact" className="btn">Book a demo</a>
+            <a href="#platform">Platform</a><a href="#integrations">Integrations</a><a href="#pricing">Pricing</a><a href="#insights">Insights</a><a href="/login">Log in</a><a href="#contact" className="btn">Book a demo</a>
           </div>
         </header>
         <a href="#contact" className={`fab${fab ? ' on' : ''}`} aria-hidden={!fab} tabIndex={fab ? 0 : -1}>Book a demo</a>
