@@ -37,16 +37,19 @@ export function PhoneFrame({ children, className = '', width = 320 }: { children
 
 /** Stylized interior "photo" (SVG illustration) used wherever a mock needs a
  *  captured room shot — a real scene instead of a blank grey box that reads as a
- *  broken image. Includes the ceiling water stain the AI callouts reference. */
-export function RoomScene({ className = '' }: { className?: string }) {
+ *  broken image. `stain` draws the ceiling water stain some AI callouts point at;
+ *  pass stain={false} for a clean room (e.g. the AI-review card, per owner). */
+export function RoomScene({ className = '', stain = true }: { className?: string; stain?: boolean }) {
   return (
     <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" className={className} aria-hidden>
       <rect width="320" height="200" fill="#eef0f4" />
       <rect width="320" height="26" fill="#f8f9fb" />
       <line x1="0" y1="26" x2="320" y2="26" stroke="#dde1e8" strokeWidth="2" />
       {/* ceiling water stain (target of the AI callout) */}
-      <ellipse cx="238" cy="14" rx="36" ry="12" fill="#c2a179" opacity="0.6" />
-      <ellipse cx="250" cy="17" rx="20" ry="8" fill="#96754e" opacity="0.55" />
+      {stain && <>
+        <ellipse cx="238" cy="14" rx="36" ry="12" fill="#c2a179" opacity="0.6" />
+        <ellipse cx="250" cy="17" rx="20" ry="8" fill="#96754e" opacity="0.55" />
+      </>}
       {/* window */}
       <rect x="34" y="52" width="78" height="62" rx="3" fill="#cfeef7" stroke="#ffffff" strokeWidth="5" />
       <line x1="73" y1="54" x2="73" y2="112" stroke="#ffffff" strokeWidth="4" />
@@ -217,7 +220,7 @@ export function AICameraCard() {
   return (
     <div className="rounded-2xl overflow-hidden ring-1 ring-black/5 shadow-xl bg-ink">
       <div className="h-56 relative">
-        <RoomScene className="absolute inset-0 w-full h-full" />
+        <RoomScene stain={false} className="absolute inset-0 w-full h-full" />
         <div className="absolute inset-0 bg-black/10" />
         <div className="absolute left-4 right-4 bottom-4 rounded-lg bg-white/95 p-3">
           <div className="flex items-center gap-2 text-[11px] font-heading font-bold text-ink"><span className="w-2 h-2 rounded-full bg-[#ff0060]" /> Detected: ceiling water stain</div>
