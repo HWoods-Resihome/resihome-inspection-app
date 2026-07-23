@@ -198,8 +198,6 @@ const CSS = `
 .ai-photo{aspect-ratio:16/10;border-radius:var(--r-sm);position:relative;overflow:hidden;background:linear-gradient(135deg,#cdd4dc,#eef1f5);border:1px solid var(--line)}
 .ai-photo img{width:100%;height:100%;object-fit:cover}
 .ai-photo::after{content:"";position:absolute;inset:0;background:radial-gradient(45% 55% at 62% 30%,rgba(180,190,200,.5),transparent),linear-gradient(180deg,rgba(0,0,0,.02),rgba(0,0,0,.10))}
-.ai-box{position:absolute;left:52%;top:16%;width:34%;height:32%;border:2px dashed var(--pink);border-radius:6px;z-index:2;box-shadow:0 0 0 3px rgba(255,0,102,.12)}
-.ai-box__tag{position:absolute;top:-24px;left:-2px;background:var(--pink);color:#fff;font-size:.62rem;font-weight:700;padding:.2rem .5rem;border-radius:4px;white-space:nowrap}
 .ai-sugg{margin-top:.9rem;background:var(--mist);border:1px solid var(--line);border-radius:var(--r-sm);padding:.8rem .9rem}
 .ai-sugg__t{display:flex;align-items:center;gap:.45rem;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-2);margin-bottom:.35rem}
 .ai-sugg__m{font-size:.92rem;font-weight:600}
@@ -604,7 +602,7 @@ export default function SitePreview() {
                   <div className="ai-chip__meta"><span>Confidence 0.94</span><span>Confirm ✓</span></div>
                 </div>
                 <div className="card"><div className="card__body">
-                  <div className="ai-photo"><img src="/sitepreview/photos/ai-inspection.jpg" alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /><div className="ai-box"><span className="ai-box__tag">water stain · 0.94</span></div></div>
+                  <div className="ai-photo"><img src="/sitepreview/photos/ai-inspection.jpg" alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /></div>
                   <div className="ai-sugg">
                     <div className="ai-sugg__t"><svg width="13" height="13" viewBox="0 0 24 24" fill="#FF0066"><path d="M12 2l1.9 5.9L20 9.8l-5 3.6L16.2 20 12 16.3 7.8 20 9 13.4 4 9.8l6.1-1.9z" /></svg>Detected · ceiling water stain</div>
                     <div className="ai-sugg__m">Suggested: drywall repair + prime &amp; paint</div>
