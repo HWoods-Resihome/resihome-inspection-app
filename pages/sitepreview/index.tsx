@@ -73,20 +73,21 @@ const CSS = `
   .nav__mobile{display:block;position:fixed;inset:72px 0 auto 0;z-index:59;background:#fff;border-bottom:1px solid var(--line);box-shadow:var(--sh-3);padding:1rem var(--gutter) 1.5rem;transform:translateY(-12px);opacity:0;pointer-events:none;transition:.25s}
   .nav.is-open .nav__mobile{transform:translateY(0);opacity:1;pointer-events:auto}
   .nav__mobile a{display:block;padding:.85rem .5rem;font-weight:600;border-bottom:1px solid var(--line);font-size:1.05rem}.nav__mobile .btn{display:flex;width:100%;margin-top:1rem}}
-.hero{position:relative;padding-top:clamp(5.5rem,12vw,9.5rem);padding-bottom:clamp(3rem,6vw,5rem);overflow:hidden}
+.hero{position:relative;padding-top:clamp(5.5rem,12vw,9.5rem);padding-bottom:clamp(2rem,4vw,3.5rem);overflow:hidden}
 .hero__bg{position:absolute;inset:0;z-index:-1;overflow:hidden}
 .hero__bg::before{content:"";position:absolute;width:900px;height:900px;left:-260px;top:-360px;background:radial-gradient(closest-side,rgba(115,227,223,.35),transparent 70%);filter:blur(10px)}
 .hero__bg::after{content:"";position:absolute;width:760px;height:760px;right:-240px;top:-160px;background:radial-gradient(closest-side,rgba(255,0,102,.13),transparent 70%)}
 .hero__grid-lines{position:absolute;inset:0;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:46px 46px;opacity:.35;-webkit-mask-image:radial-gradient(120% 90% at 50% 0,#000 30%,transparent 78%);mask-image:radial-gradient(120% 90% at 50% 0,#000 30%,transparent 78%)}
-.hero__in{display:grid;grid-template-columns:1.02fr 1fr;gap:clamp(2rem,4vw,4rem);align-items:center}
-.hero__copy{max-width:600px}
+.hero__in{display:flex;justify-content:center}
+.hero__copy{max-width:760px;text-align:center}
+.hero__copy .lead{margin-inline:auto}
 .badge{display:inline-flex;align-items:center;gap:.5rem;background:#fff;border:1px solid var(--line);border-radius:var(--r-pill);padding:.5rem 1rem .5rem .8rem;font-size:.74rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--pink);box-shadow:var(--sh-1);margin-bottom:1.5rem}
 .hero h1 .lite{display:block;background:linear-gradient(90deg,var(--pink),#9e003f);-webkit-background-clip:text;background-clip:text;color:transparent}
 .btn--pill{border-radius:var(--r-pill)}
 .fab{position:fixed;right:18px;bottom:18px;z-index:55;display:inline-flex;align-items:center;gap:.5em;background:var(--pink);color:#fff;font-weight:700;font-size:.95rem;padding:.9em 1.5em;border-radius:var(--r-pill);box-shadow:var(--glow-pink),var(--sh-3);opacity:0;transform:translateY(16px);pointer-events:none;transition:opacity .3s,transform .3s}
 .fab.on{opacity:1;transform:none;pointer-events:auto}
 .fab:hover{background:var(--pink-700)}
-.hero__cta{display:flex;flex-wrap:wrap;gap:.8rem;margin-top:.4rem}
+.hero__cta{display:flex;flex-wrap:wrap;gap:.8rem;margin-top:.4rem;justify-content:center}
 .hero__proof{display:flex;flex-wrap:wrap;gap:1.6rem;margin-top:2.4rem;padding-top:1.8rem;border-top:1px solid var(--line)}
 .proof__item{display:flex;flex-direction:column;gap:.1rem}
 .proof__num{font-family:var(--f-display);font-weight:600;font-size:1.5rem;line-height:1;letter-spacing:-.01em}
@@ -142,7 +143,6 @@ const CSS = `
 .ph-ai{background:var(--pink-050);border:1px solid #FFD4E2;border-radius:7px;padding:6px 7px;font-size:.56rem;font-weight:600;color:var(--pink-700);display:flex;align-items:center;gap:4px}
 .ph-sync{margin-top:auto;background:#fff;border-top:1px solid var(--line);padding:7px 10px;font-size:.56rem;font-weight:700;color:#0C8A83;display:flex;align-items:center;gap:5px;flex:none}
 .ph-sync .dot{width:6px;height:6px;border-radius:50%;background:#0FB5AD}
-@media(max-width:980px){.hero__in{grid-template-columns:1fr;gap:2.5rem}.hero__stage{min-height:auto;margin-top:.5rem}}
 @media(max-width:560px){.compo{width:min(430px,94vw);gap:10px}.phone{flex:0 0 118px;width:118px}.ai-chip{width:180px;padding:.6rem .7rem}.ai-chip__txt{font-size:.76rem}}
 .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
 .reveal.in{opacity:1;transform:none}
@@ -325,7 +325,7 @@ const CSS = `
 .foot h4{font-family:var(--f-display);font-weight:500;font-size:.82rem;letter-spacing:.1em;text-transform:uppercase;color:#fff;margin:0 0 1rem}
 .foot ul{list-style:none;margin:0;padding:0;display:grid;gap:.6rem}.foot ul a{font-size:.9rem;color:rgba(255,255,255,.68);transition:color .15s}.foot ul a:hover{color:var(--aqua)}
 .foot__bottom{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding-top:1.8rem;flex-wrap:wrap;font-size:.82rem;color:rgba(255,255,255,.5)}.foot__tag{color:var(--aqua);font-weight:600}
-@media(max-width:820px){.foot__top{grid-template-columns:1fr 1fr}.foot__brand{grid-column:1/-1}}
+@media(max-width:820px){.foot__top{grid-template-columns:repeat(3,1fr);gap:1.2rem}.foot__brand{grid-column:1/-1}}
 @media(prefers-reduced-motion:reduce){.sp *{animation:none!important}.reveal{opacity:1;transform:none;transition:none}}
 `;
 
@@ -471,22 +471,6 @@ export default function SitePreview() {
               <p className="lead">ResiWalk unifies inspections, real-world pricing &amp; scoping, AI reviews, scheduled services, vendor billing, a self-learning knowledge base, a rules engine, and live insights — one platform, built by industry veterans for SFR &amp; BTR.</p>
               <div className="hero__cta">
                 <a href="#contact" className="btn btn--lg btn--pill">Book a demo</a>
-              </div>
-            </div>
-            <div className="hero__stage reveal" aria-hidden="true">
-              <div className="stage-glow" />
-              <div className="compo">
-                <div className="browser">
-                  <div className="browser__bar"><div className="browser__dots"><i /><i /><i /></div><div className="browser__url">app.resiwalk.com/scope</div></div>
-                  <div className="browser__body">
-                    <div className="scope__head"><span className="scope__title">Scope · Rate Card</span><span className="chip chip--region">GA · Atlanta</span></div>
-                    <div className="scope__room">Living Room</div>
-                    <div className="line"><div className="line__l"><span className="line__name">Carpet — replace &amp; pad</span><span className="line__meta">480 SF · labor + material</span></div><span className="line__price">$842.00</span></div>
-                    <div className="line"><div className="line__l"><span className="line__name">Interior paint — whole home</span><span className="line__meta">2BR / 2BA</span></div><span className="line__price">$1,960.00</span></div>
-                    <div className="line"><div className="line__l"><span className="line__name">Deep clean — turn</span><span className="line__meta">1 EA</span></div><span className="line__price">$285.00</span></div>
-                    <div className="totals"><div className="tot"><div className="tot__v">$2,671</div><div className="tot__l">Vendor</div></div><div className="tot"><div className="tot__v">$3,205</div><div className="tot__l">Client</div></div><div className="tot tot--pink"><div className="tot__v">$1,120</div><div className="tot__l">Resident</div></div></div>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
