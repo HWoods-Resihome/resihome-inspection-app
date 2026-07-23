@@ -13,6 +13,7 @@ import { useRouter } from 'next/router';
 import type { Question, ResponseType } from '@/lib/types';
 import { RESPONSE_TYPES, STANDARD_SECTIONS } from '@/lib/formBuilder';
 import { Combobox } from '@/components/Combobox';
+import { loadMe } from '@/lib/me';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -200,7 +201,7 @@ export default function FormBuilderPage({ servicesForms, servicesTaxonomy }: { s
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
-    fetch('/api/auth/me').then((r) => r.json()).then((data) => {
+    loadMe().then((data) => {
       setIsAdmin(!!data.authenticated && !!data.isAdmin);
       setAuthChecked(true);
       if (!data.authenticated) router.replace('/login');

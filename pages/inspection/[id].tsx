@@ -23,6 +23,7 @@ import { reportError } from '@/lib/clientErrorReporter';
 import { isNetworkError } from '@/lib/netError';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 import { getPhotoWindow, clearPhotoWindow } from '@/lib/photoCaptureWindow';
+import { loadMe } from '@/lib/me';
 import { PullToRefresh } from '@/components/PullToRefresh';
 
 
@@ -64,8 +65,7 @@ export default function ExistingInspection() {
   const [isExternal, setIsExternal] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/auth/me')
-      .then((r) => (r.ok ? r.json() : null))
+    loadMe()
       .then((d) => {
         if (cancelled || !d) return;
         if (d.user?.email) setCurrentUserEmail(String(d.user.email));

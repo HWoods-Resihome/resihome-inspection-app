@@ -69,6 +69,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const [view, setView] = useState<View>('month');
   const [items, setItems] = useState<InspectionSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [inspectorFilter, setInspectorFilter] = useState<string[]>([]); // internal only (multi)
   const [regionFilter, setRegionFilter] = useState<string[]>([]); // internal only
@@ -184,7 +185,30 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
       }
     })();
     return () => { cancelled = true; };
-  }, [isInternal]);
+  }, [isInternal, refreshKey]);
+
+  // Silently refetch when the tab regains focus / comes back online / becomes
+  // visible, so returning to the calendar reflects newly-completed or rescheduled
+  // inspections without a manual refresh. Bumping refreshKey re-runs the loader
+  // above; loading is already false so there's no spinner flash. Debounced.
+  useEffect(() => {
+    let last = 0;
+    const revalidate = () => {
+      const now = Date.now();
+      if (now - last < 3000) return;
+      last = now;
+      setRefreshKey((k) => k + 1);
+    };
+    const onVis = () => { if (document.visibilityState === 'visible') revalidate(); };
+    window.addEventListener('focus', revalidate);
+    window.addEventListener('online', revalidate);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', revalidate);
+      window.removeEventListener('online', revalidate);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
 
   // Open = Scheduled + In Progress only, with a scheduled date. External users
   // see ONLY their own assignments; internal users see all and can filter by

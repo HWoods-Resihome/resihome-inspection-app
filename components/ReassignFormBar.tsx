@@ -6,6 +6,7 @@
  * dropped into a page with no extra wiring.
  */
 import { useEffect, useState } from 'react';
+import { loadMe } from '@/lib/me';
 
 interface TemplateInfo { id: string; label: string; custom: boolean; }
 
@@ -18,7 +19,7 @@ export function ReassignFormBar({ inspectionId, templateType }: { inspectionId: 
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/auth/me').then((r) => r.json()).then((d) => setIsAdmin(!!d?.isAdmin)).catch(() => {});
+    loadMe().then((d) => setIsAdmin(!!d?.isAdmin)).catch(() => {});
   }, []);
   useEffect(() => {
     if (!isAdmin) return;

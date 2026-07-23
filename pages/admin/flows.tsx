@@ -10,6 +10,7 @@
  */
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { loadMe } from '@/lib/me';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { PageHeader } from '@/components/PageHeader';
@@ -61,7 +62,7 @@ export default function AdminFlowsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/auth/me').then((r) => r.json()).then((d) => {
+    loadMe().then((d) => {
       setIsAdmin(!!d.authenticated && !!d.isAdmin); setAuthChecked(true);
       if (!d.authenticated) router.replace('/login');
     }).catch(() => setAuthChecked(true));

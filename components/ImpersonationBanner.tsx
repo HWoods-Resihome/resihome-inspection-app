@@ -3,6 +3,7 @@
 // see the impersonated user's view). Mounted in _app so it shows on every page.
 
 import { useEffect, useState } from 'react';
+import { loadMe } from '@/lib/me';
 
 export function ImpersonationBanner() {
   const [viewingAs, setViewingAs] = useState<string | null>(null);
@@ -11,8 +12,7 @@ export function ImpersonationBanner() {
 
   useEffect(() => {
     let alive = true;
-    fetch('/api/auth/me')
-      .then((r) => (r.ok ? r.json() : null))
+    loadMe()
       .then((d) => {
         if (!alive || !d?.impersonating) return;
         setViewingAs(d.user?.name || d.user?.email || 'user');

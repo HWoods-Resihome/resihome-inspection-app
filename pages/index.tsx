@@ -15,6 +15,7 @@ import {
 } from '@/lib/offlineCache';
 import { precacheActiveInspections } from '@/lib/precache';
 import { warmAi } from '@/lib/aiWarm';
+import { loadMe } from '@/lib/me';
 import { templateLabel } from '@/lib/templateLabels';
 import { listPendingInspections, removePendingInspection, type PendingInspection } from '@/lib/pendingInspections';
 import { drainPendingCreates } from '@/lib/deferredCreate';
@@ -246,12 +247,11 @@ export default function Home() {
     // open doesn't read as "signed out" while /api/auth/me is unreachable.
     const cachedMe = loadCachedMe<{ user: MeUser; isAdmin?: boolean; canServices?: boolean }>();
     if (cachedMe?.user) { setMe(cachedMe.user); setIsAdmin(!!cachedMe.isAdmin); setCanServices(!!cachedMe.canServices); }
-    fetch('/api/auth/me')
-      .then((r) => r.json())
+    loadMe()
       .then((data) => {
         if (data.authenticated) {
           const svc = !!(data.access?.services ?? data.isAdmin);
-          setMe(data.user); setIsAdmin(!!data.isAdmin); setCanServices(svc);
+          setMe(data.user as MeUser); setIsAdmin(!!data.isAdmin); setCanServices(svc);
           saveCachedMe({ user: data.user, isAdmin: !!data.isAdmin, canServices: svc });
         }
       })

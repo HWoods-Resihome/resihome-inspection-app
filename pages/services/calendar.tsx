@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import { PageHeader } from '@/components/PageHeader';
 import dynamic from 'next/dynamic';
 import type { GetServerSideProps } from 'next';
@@ -58,6 +59,7 @@ const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.get
 const sameYMD = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 export default function ServicesCalendar({ canSeeAll, services, live }: { canSeeAll: boolean; services: ServiceRecord[]; live: boolean }) {
+  const router = useRouter();
   const [view, setView] = useState<View>('month');
   const [cursorISO, setCursorISO] = useState(easternTodayISO());
   const [regionFilter, setRegionFilter] = useState<string[]>([]);
@@ -71,6 +73,29 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
       if (alive && Array.isArray(d?.vendors)) setVendorNames(d.vendors.map((v: any) => String(v.name)).filter(Boolean));
     }).catch(() => {});
     return () => { alive = false; };
+  }, []);
+
+  // Re-run gSSP when the tab regains focus / comes back online / becomes visible,
+  // so returning to this calendar shows freshly-generated or updated services
+  // without a manual refresh. Debounced to absorb rapid focus churn.
+  useEffect(() => {
+    let last = 0;
+    const revalidate = () => {
+      const now = Date.now();
+      if (now - last < 3000) return;
+      last = now;
+      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});
+    };
+    const onVis = () => { if (document.visibilityState === 'visible') revalidate(); };
+    window.addEventListener('focus', revalidate);
+    window.addEventListener('online', revalidate);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', revalidate);
+      window.removeEventListener('online', revalidate);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [showCompleted, setShowCompleted] = useState(false);   // last-14-day completed

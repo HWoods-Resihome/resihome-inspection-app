@@ -11,6 +11,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { SaveFooter } from '@/components/SaveFooter';
 import { ListPicker } from '@/components/ListPicker';
 import { useRouter } from 'next/router';
+import { loadMe } from '@/lib/me';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -88,8 +89,7 @@ export default function AiKnowledgePage({ servicesChecks, servicesTaxonomy }: { 
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    fetch('/api/auth/me')
-      .then((r) => r.json())
+    loadMe()
       .then((data) => {
         setIsAdmin(!!data.authenticated && !!data.isAdmin);
         setAuthChecked(true);

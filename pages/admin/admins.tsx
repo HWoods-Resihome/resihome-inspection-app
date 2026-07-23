@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { PageHeader } from '@/components/PageHeader';
 import { useRouter } from 'next/router';
 import { InsightsUsersManager } from '@/components/insights/InsightsUsersManager';
+import { loadMe } from '@/lib/me';
 
 interface AdminEntry {
   email: string;
@@ -34,8 +35,7 @@ export default function AdminsPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    fetch('/api/auth/me')
-      .then((r) => r.json())
+    loadMe()
       .then((data) => {
         setIsAdmin(!!data.authenticated && !!data.isAdmin);
         setAuthChecked(true);

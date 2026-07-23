@@ -11,6 +11,7 @@ import { Combobox } from '@/components/Combobox';
 import { NumberField } from '@/components/NumberPad';
 import { DatePicker } from '@/components/DatePicker';
 import { saveCachedProperties, loadCachedMe, saveCachedMe, clearCachedMe, saveCachedInspection, loadCachedQuestions, loadCachedRateCard } from '@/lib/offlineCache';
+import { loadMe } from '@/lib/me';
 import { EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
 import { newLocalIds, addPendingInspection, buildSeedPayload } from '@/lib/pendingInspections';
 import { syncAllProperties, searchCachedProperties, dropPropertyMemCache } from '@/lib/propertyCache';
@@ -237,11 +238,10 @@ export default function NewInspection() {
       if (cached.isExternal) { setIsExternal(true); setSelectedTemplate(EXTERNAL_TEMPLATE); }
       setSessionLoading(false);
     }
-    fetch('/api/auth/me')
-      .then((r) => r.json())
+    loadMe()
       .then((data) => {
         if (data.authenticated) {
-          setSessionUser(data.user);
+          setSessionUser(data.user as any);
           saveCachedMe({ user: data.user, isAdmin: !!data.isAdmin, isExternal: !!data.isExternal });
         }
         if (data.isExternal) {
