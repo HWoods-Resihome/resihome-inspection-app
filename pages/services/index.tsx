@@ -613,9 +613,9 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
             </div>
             <div className="flex items-center gap-2 mt-2">
               <button type="button" disabled={!selectedIds.size || actionBusy} onClick={() => { setReassignVendor(''); setReassignQuery(''); setReassignOpen(true); }}
-                className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-brand text-white disabled:opacity-50">Reassign Vendor</button>
+                className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-brand text-white disabled:bg-gray-200 disabled:text-gray-400">Reassign Vendor</button>
               <button type="button" disabled={!selectedIds.size || actionBusy} onClick={handleBulkCancel}
-                className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-white text-red-600 border border-red-300 disabled:opacity-50">{actionBusy ? '…' : 'Move to Cancelled'}</button>
+                className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-white text-red-600 border border-red-300 disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200">{actionBusy ? '…' : 'Move to Cancelled'}</button>
             </div>
             <p className="text-[11px] text-gray-400 mt-1.5">Tap services to select — <b>Completed</b> and <b>Cancelled</b> services are final and can&apos;t be selected. Reassign applies to <b>Assigned</b> services in the selection; others are skipped.</p>
           </div>
