@@ -1173,7 +1173,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       if (!r.ok) { setAiMsg(d.error || 'Review failed.'); return; }
       setAiResult(d.item || null);
       if (apply) {
-        setAiMsg(d.item?.action === 'completed' ? 'Applied — moved to Completed.' : 'Applied — routed to Review.');
+        setAiOpen(false);   // close the popup once the change is applied
         router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});   // reflect the new status
       }
     } catch { setAiMsg('Couldn’t reach the server. Try again.'); }
