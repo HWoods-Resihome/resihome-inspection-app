@@ -1646,13 +1646,20 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 )}
 
                 <CollapsibleSection title="Photos" subtitle="Tap a photo to enlarge">
+                  {/* Grass height at arrival is a PRE-WORK / arrival shot, so it
+                      reads before the before photos (not tucked at the very end). */}
+                  {(() => {
+                    const gq = form.find((q) => q.id === 'grass_height');
+                    const ph: string[] = gq && Array.isArray(svc.answers['grass_height__photos']) ? svc.answers['grass_height__photos'] : [];
+                    return gq && ph.length ? <PhotoGrid key="grass_height" label={gq.label} urls={ph} onOpen={(i) => setLightbox({ groupId: 'q:grass_height', index: i })} /> : null;
+                  })()}
                   <PhotoGrid label={svc.isBidItem ? 'Bid photos' : 'Before photos'} urls={svc.before} onOpen={(i) => setLightbox({ groupId: 'before', index: i })} />
                   {!svc.isBidItem && <PhotoGrid label="After photos" urls={svc.after} onOpen={(i) => setLightbox({ groupId: 'after', index: i })} />}
                   {!svc.isBidItem && <PhotoGrid label="Pet station — before" urls={svc.petBefore} onOpen={(i) => setLightbox({ groupId: 'petBefore', index: i })} />}
                   {!svc.isBidItem && <PhotoGrid label="Pet station — after" urls={svc.petAfter} onOpen={(i) => setLightbox({ groupId: 'petAfter', index: i })} />}
-                  {/* Per-question answer photos as their own labeled sections in the
-                      unified gallery — same tile size + full lightbox navigation. */}
-                  {form.map((q) => {
+                  {/* Remaining per-question answer photos as their own labeled
+                      sections (grass height already shown above). */}
+                  {form.filter((q) => q.id !== 'grass_height').map((q) => {
                     const ph: string[] = Array.isArray(svc.answers[`${q.id}__photos`]) ? svc.answers[`${q.id}__photos`] : [];
                     return ph.length ? <PhotoGrid key={q.id} label={q.label} urls={ph} onOpen={(i) => setLightbox({ groupId: `q:${q.id}`, index: i })} /> : null;
                   })}

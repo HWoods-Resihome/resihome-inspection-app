@@ -20,6 +20,9 @@ export interface ServicePdfData {
   aiVerdict: string; aiNotes: string;
   reviewDecision: string; reviewNotes: string; reviewedBy: string;
   answers: { label: string; value: string }[];
+  // Grass-height-at-arrival photos (data URIs) — an ARRIVAL shot, shown before
+  // the before photos.
+  arrival: string[];
   before: string[]; after: string[]; petBefore: string[]; petAfter: string[];  // data URIs
   // Proof-of-service (vendor closed out with their OWN PDF report): the AI's
   // neutral summary of that document, the job photos extracted from inside it
@@ -120,7 +123,7 @@ function PhotoBlock({ title, urls, group, galleryBase }: { title: string; urls: 
 }
 
 export function ServicePdf({ d }: { d: ServicePdfData }) {
-  const anyPhotos = d.before.length || d.after.length || d.petBefore.length || d.petAfter.length;
+  const anyPhotos = d.arrival.length || d.before.length || d.after.length || d.petBefore.length || d.petAfter.length;
   const copyLabel = d.variant === 'client' ? 'Client Copy' : 'Vendor Copy';
   return (
     <Document>
@@ -181,6 +184,7 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
 
         {!!anyPhotos && (
           <Section title="Photos" breakable>
+            <PhotoBlock title="Grass height at arrival" urls={d.arrival} group="q:grass_height" galleryBase={d.galleryBase} />
             <PhotoBlock title="Before photos" urls={d.before} group="before" galleryBase={d.galleryBase} />
             <PhotoBlock title="After photos" urls={d.after} group="after" galleryBase={d.galleryBase} />
             <PhotoBlock title="Pet station - before" urls={d.petBefore} group="petBefore" galleryBase={d.galleryBase} />

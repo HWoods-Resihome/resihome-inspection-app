@@ -91,11 +91,17 @@ export async function renderServicePdfBuffer(id: string, opts: { variant: 'vendo
       return { label: q.label, value: note ? `${base} — ${note}` : base };
     });
 
-  const [before, after, petBefore, petAfter, proofPhotos] = await Promise.all([
+  // Grass-height-at-arrival photos live inside the completion answers blob
+  // (grass_height__photos). They're an ARRIVAL/pre-work shot, so the PDF shows
+  // them BEFORE the before photos (see ServicePdf).
+  const arrivalUrlsRaw = (answersRaw as any)['grass_height__photos'];
+  const arrivalUrls: string[] = Array.isArray(arrivalUrlsRaw) ? arrivalUrlsRaw.map(String) : splitUrls(arrivalUrlsRaw);
+  const [before, after, petBefore, petAfter, proofPhotos, arrival] = await Promise.all([
     encodeAll(splitUrls(p.before_photo_urls)), encodeAll(splitUrls(p.after_photo_urls)),
     encodeAll(splitUrls(p.pet_before_photo_urls)), encodeAll(splitUrls(p.pet_after_photo_urls)),
     // Photos extracted from the vendor's proof-of-service PDF (AI-review step).
     encodeAll(splitUrls(p.proof_photo_urls), 12),
+    encodeAll(arrivalUrls),
   ]);
   // Link to the vendor's original proof document (from their completion answers).
   const proofLinkRaw = String(answersRaw[PROOF_URL_KEY] || '').trim();
@@ -133,7 +139,7 @@ export async function renderServicePdfBuffer(id: string, opts: { variant: 'vendo
     adjustment: p.vendor_cost_adjustment && Number(p.vendor_cost_adjustment) > 0 ? money(p.vendor_cost_adjustment) : '', adjustmentReason: p.vendor_cost_adjustment_reason || '',
     aiVerdict: p.ai_verdict || '', aiNotes: p.ai_notes || '',
     reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: await reviewerDisplayName(p.reviewed_by),
-    answers, before, after, petBefore, petAfter, bids,
+    answers, arrival, before, after, petBefore, petAfter, bids,
     proofSummary: String(p.proof_summary || '').trim(), proofPhotos, proofLink,
     galleryBase: `${baseUrlClean(opts.baseUrl)}/services/${encodeURIComponent(id)}/photos`,
     isInternal: opts.internal,
