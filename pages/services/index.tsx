@@ -617,7 +617,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
               <button type="button" disabled={!selectedIds.size || actionBusy} onClick={handleBulkCancel}
                 className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-white text-red-600 border border-red-300 disabled:opacity-50">{actionBusy ? '…' : 'Move to Cancelled'}</button>
             </div>
-            <p className="text-[11px] text-gray-400 mt-1.5">Tap services to select. Reassign applies to <b>Assigned</b> services in the selection; others are skipped.</p>
+            <p className="text-[11px] text-gray-400 mt-1.5">Tap services to select — <b>Completed</b> and <b>Cancelled</b> services are final and can&apos;t be selected. Reassign applies to <b>Assigned</b> services in the selection; others are skipped.</p>
           </div>
         )}
 
