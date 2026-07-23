@@ -14,6 +14,7 @@ import sharp from 'sharp';
 import { safeProxyFetch, readBodyCapped, isAllowedPhotoHost } from '@/lib/safeProxyFetch';
 import { searchServiceWorkOrdersByStatus, fetchServiceWorkOrder, patchServiceWorkOrder, readServiceAiChecks } from '@/lib/hubspot';
 import { recordServiceAudit } from './serviceAudit';
+import { notifyServicesInboxStatus } from '@/lib/notifications/triggers';
 import { recordAiUsage } from '@/lib/aiUsage';
 import { SAMPLE_AI_CHECKS, type AiCheck } from './aiKnowledge';
 import { worktypeLabel, subtypeLabel, type Worktype } from './worktypes';
@@ -347,6 +348,16 @@ async function reviewOrderAndApply(
       detail: clean ? 'AI review clean → Completed' : `AI review flagged → Review${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).length ? ` (${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).join(', ')})` : ''}`,
       meta: { verdict: v.verdict, workEvidenced: v.workEvidenced, geofenceOk: v.geofenceOk },
     });
+    // Services team inbox: the AI just moved this order into Review.
+    if (!clean) {
+      const op = order.props;
+      void notifyServicesInboxStatus({
+        serviceId: order.id, status: 'review',
+        address: String(op.address_snapshot || op.service_name || ''), locality: String(op.locality_snapshot || ''),
+        worktypeLabel: worktypeLabel(String(op.worktype || '')), subtypeLabel: subtypeLabel(String(op.worktype || ''), String(op.subtype || '')),
+        vendorName: op.vendor_name || null, note: String(props.ai_notes || '').trim() || null,
+      });
+    }
   }
   const item = { id: order.id, service, verdict: v.verdict, notes: v.notes, issues: v.issues, timeOnSite: v.timeOnSite, action: apply ? (clean ? 'completed' : 'review') : (clean ? 'would-complete' : 'would-review') };
   return { clean, verdict: v, item };

@@ -16,7 +16,8 @@ import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder, r
 import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { notifyServiceSubmittedSlack, notifyServiceBidCreatedSlack } from '@/lib/services/serviceSlack';
-import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
+import { notifyServicesInboxStatus } from '@/lib/notifications/triggers';
+import { BID_SUBTYPE, defaultRateFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { easternTodayISO } from '@/lib/services/time';
 import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
 import { DEFAULT_SERVICE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
@@ -233,11 +234,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       vendorName: pSlack.vendor_name || null,
     };
     if (bidId) void notifyServiceBidCreatedSlack({ ...slackCtx, bidId, description: String(bid?.description || ''), vendorCost: Number(bid?.vendorCost) || null });
+    // Services team inbox: a new ESTIMATED (bid) service now exists.
+    if (bidId) void notifyServicesInboxStatus({
+      serviceId: bidId, status: 'estimated',
+      address: slackCtx.address, locality: String(pSlack.locality_snapshot || ''),
+      worktypeLabel: worktypeLabel(String(pSlack.worktype || '')), subtypeLabel: 'Bid Item',
+      vendorName: pSlack.vendor_name || null, note: String(bid?.description || '').trim() || null,
+    });
 
     // Not completed → we already routed straight to Review and skipped AI.
     if (routeToReview) {
       void recordServiceAudit({ serviceId: id, action: 'ai_review', actorName: 'System', detail: 'Not completed — AI skipped, routed to Review', meta: { skipped: true } });
       void notifyServiceSubmittedSlack(slackCtx);
+      // Services team inbox: this order is now sitting in Review.
+      void notifyServicesInboxStatus({
+        serviceId: id, status: 'review',
+        address: slackCtx.address, locality: String(pSlack.locality_snapshot || ''),
+        worktypeLabel: worktypeLabel(String(pSlack.worktype || '')), subtypeLabel: subtypeLabel(String(pSlack.worktype || ''), String(pSlack.subtype || '')),
+        vendorName: pSlack.vendor_name || null, note: String(props.ai_notes || '').trim() || null,
+      });
       return res.status(200).json({ ok: true, id, status: 'review', review: null, reviewError: null, skippedAi: true, bidId, bidError });
     }
 

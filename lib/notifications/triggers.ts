@@ -5,8 +5,12 @@
  * key (the vendor/inspector manages their own toggles under the same address).
  */
 import { isNotificationEnabled } from './prefs';
-import { sendNotificationEmail, fetchToBuffer } from './send';
+import { sendNotificationEmail, fetchToBuffer, appBaseUrl } from './send';
 import { renderServicePdfBuffer } from '@/lib/servicePdfRender';
+
+// Shared services-team inbox for status alerts (a service hitting Estimated or
+// Review) — same group box the vendor-note copies go to. Overridable via env.
+const SERVICES_ALERTS_INBOX = (process.env.SERVICES_ALERTS_INBOX || process.env.SERVICE_NOTES_INBOX || 'services@resihome.com').trim();
 
 const validEmail = (e?: string | null) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(e || '').trim());
 const pdfName = (kind: string, id: string) => `${kind}-${id}.pdf`;
@@ -125,6 +129,35 @@ export async function notifyServicePastDue(o: {
   } catch (e: any) { console.warn('[notify] service_past_due failed:', String(e?.message || e).slice(0, 160)); }
 }
 
+/** Team-inbox alert: a service just hit ESTIMATED (a vendor filed a bid) or
+ *  REVIEW (a completion needs a human decision). Goes to the shared services
+ *  inbox unconditionally — a team box, not a per-user pref. Best-effort. */
+export async function notifyServicesInboxStatus(o: {
+  serviceId: string; status: 'estimated' | 'review';
+  address: string; locality?: string | null; worktypeLabel: string; subtypeLabel: string;
+  vendorName?: string | null; note?: string | null; baseUrl?: string;
+}): Promise<void> {
+  try {
+    const to = SERVICES_ALERTS_INBOX;
+    if (!validEmail(to)) return;
+    const addr = fullAddr(o.address, o.locality);
+    const isEst = o.status === 'estimated';
+    const base = o.baseUrl || appBaseUrl();
+    await sendNotificationEmail({
+      to,
+      subject: `${isEst ? 'New Estimate' : 'Needs Review'}: ${addr} [SVC#${o.serviceId}]`,
+      heading: isEst ? 'New Estimate (Bid) Created' : 'Service Needs Review',
+      intro: isEst
+        ? `A new estimate was created${o.vendorName ? ` by ${o.vendorName}` : ''} and is awaiting a decision.`
+        : `A service completion moved to Review${o.vendorName ? ` (vendor: ${o.vendorName})` : ''} and needs a decision.`,
+      ...(o.note ? { callout: String(o.note).slice(0, 800) } : {}),
+      rows: [['Property', addr], ['Service', `${o.worktypeLabel} (${o.subtypeLabel})`], ['Vendor', o.vendorName || ''], ['Status', isEst ? 'Estimated' : 'Review']],
+      linkUrl: `${base}/services/${encodeURIComponent(o.serviceId)}`,
+      linkLabel: 'Open Service',
+    });
+  } catch (e: any) { console.warn('[notify] services_inbox_status failed:', String(e?.message || e).slice(0, 160)); }
+}
+
 /** Daily DIGEST: one email per vendor listing ALL of their past-due open services
  *  (a running summary, so a service keeps appearing until it's completed — this is
  *  the standing past-due nudge + escalation). Respects the vendor's past-due
@@ -132,11 +165,12 @@ export async function notifyServicePastDue(o: {
 export async function notifyVendorPastDueDigest(o: {
   vendorEmail?: string | null; vendorName?: string | null; baseUrl: string; force?: boolean;
   services: { serviceId: string; address: string; locality?: string; worktypeLabel: string; subtypeLabel: string; dueDate?: string; daysOverdue: number }[];
-}): Promise<void> {
+}): Promise<'sent' | 'no_services' | 'invalid_email' | 'pref_off' | 'send_failed'> {
   try {
     const to = String(o.vendorEmail || '').trim();
-    if (!o.services.length) return;
-    if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'service_past_due')))) return;
+    if (!o.services.length) return 'no_services';
+    if (!validEmail(to)) return 'invalid_email';
+    if (!o.force && !(await isNotificationEnabled(to, 'service_past_due'))) return 'pref_off';
     // Most overdue first; cap the emailed list so a big backlog can't bloat the email.
     const sorted = [...o.services].sort((a, b) => b.daysOverdue - a.daysOverdue);
     const CAP = 40;
@@ -147,12 +181,14 @@ export async function notifyVendorPastDueDigest(o: {
       `${fullAddr(s.address, s.locality)} — was due ${fmtMDY(s.dueDate)} · ${s.daysOverdue}d overdue`,
     ]);
     if (n > CAP) rows.push(['…and more', `${n - CAP} additional past-due service(s) — open My Services to see them all`]);
-    await sendNotificationEmail({
+    const r = await sendNotificationEmail({
       to, subject: `Past Due Summary — ${n} service${n === 1 ? '' : 's'} awaiting completion`,
       heading: 'Past Due Services',
       intro: `You have ${n} past-due service${n === 1 ? '' : 's'}. Please submit ${n === 1 ? 'its' : 'their'} completion as soon as possible.`,
       rows,
       linkUrl: `${o.baseUrl}/services`, linkLabel: 'Open My Services',
     });
-  } catch (e: any) { console.warn('[notify] service_past_due_digest failed:', String(e?.message || e).slice(0, 160)); }
+    if (!r.sent) console.warn('[notify] service_past_due_digest not sent:', r.error);
+    return r.sent ? 'sent' : 'send_failed';
+  } catch (e: any) { console.warn('[notify] service_past_due_digest failed:', String(e?.message || e).slice(0, 160)); return 'send_failed'; }
 }
