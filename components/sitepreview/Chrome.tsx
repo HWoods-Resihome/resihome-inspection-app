@@ -58,7 +58,7 @@ export function SiteNav() {
       <nav className="max-w-7xl mx-auto px-5 lg:px-8 h-16 flex items-center justify-between">
         <Link href="/sitepreview" className="flex items-center gap-2 shrink-0" aria-label="ResiWalk home">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/resiwalk-logo.svg" alt="ResiWalk" className="h-7 w-auto" />
+          <img src="/resiwalk-logo.svg" alt="ResiWalk" className="h-9 w-auto" />
         </Link>
         <div className="hidden md:flex items-center gap-8">
           {NAV.map((n) => (

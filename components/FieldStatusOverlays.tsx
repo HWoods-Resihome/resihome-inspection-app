@@ -17,6 +17,9 @@ export function FieldStatusOverlays() {
   // the user (it covers the sign-in form, and "Sign in again" just reloads
   // /login where the guard re-fires). Suppress it there.
   const onLoginPage = router.pathname === '/login';
+  // The public marketing site (/sitepreview) has no session and no in-progress
+  // field work — app-update and session overlays belong inside the app only.
+  const onMarketingPage = router.pathname.startsWith('/sitepreview');
 
   useEffect(() => {
     const onExpired = () => setSessionExpired(true);
@@ -37,6 +40,8 @@ export function FieldStatusOverlays() {
     window.addEventListener('online', tryApply);
     return () => { clearTimeout(t); window.removeEventListener('online', tryApply); };
   }, [updateReady, router.pathname, sessionExpired, reload]);
+
+  if (onMarketingPage) return null;
 
   return (
     <>

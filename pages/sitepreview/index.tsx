@@ -57,7 +57,7 @@ const CSS = `
 .nav{position:fixed;top:0;left:0;right:0;z-index:60;transition:background .3s,box-shadow .3s,border-color .3s;background:rgba(255,255,255,0);border-bottom:1px solid transparent}
 .nav.is-stuck{background:rgba(255,255,255,.82);backdrop-filter:saturate(180%) blur(14px);-webkit-backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--line);box-shadow:var(--sh-1)}
 .nav__in{display:flex;align-items:center;gap:1.5rem;height:72px}
-.nav__logo{display:flex;align-items:center;gap:.6rem}.nav__logo img{height:26px;width:auto}
+.nav__logo{display:flex;align-items:center;gap:.6rem}.nav__logo img{height:34px;width:auto}
 .nav__links{display:flex;align-items:center;gap:.35rem;margin-inline:auto}
 .nav__links a{font-size:.94rem;font-weight:600;color:var(--ink-800);padding:.55em .8em;border-radius:var(--r-xs);transition:color .15s,background .15s}
 .nav__links a:hover{color:var(--pink);background:var(--pink-050)}
@@ -72,18 +72,17 @@ const CSS = `
   .nav__mobile{display:block;position:fixed;inset:72px 0 auto 0;z-index:59;background:#fff;border-bottom:1px solid var(--line);box-shadow:var(--sh-3);padding:1rem var(--gutter) 1.5rem;transform:translateY(-12px);opacity:0;pointer-events:none;transition:.25s}
   .nav.is-open .nav__mobile{transform:translateY(0);opacity:1;pointer-events:auto}
   .nav__mobile a{display:block;padding:.85rem .5rem;font-weight:600;border-bottom:1px solid var(--line);font-size:1.05rem}.nav__mobile .btn{display:flex;width:100%;margin-top:1rem}}
-.hero{position:relative;padding-top:clamp(7rem,12vw,9.5rem);padding-bottom:clamp(3rem,6vw,5rem);overflow:hidden}
+.hero{position:relative;padding-top:clamp(5.5rem,12vw,9.5rem);padding-bottom:clamp(3rem,6vw,5rem);overflow:hidden}
 .hero__bg{position:absolute;inset:0;z-index:-1;overflow:hidden}
 .hero__bg::before{content:"";position:absolute;width:900px;height:900px;left:-260px;top:-360px;background:radial-gradient(closest-side,rgba(115,227,223,.35),transparent 70%);filter:blur(10px)}
 .hero__bg::after{content:"";position:absolute;width:760px;height:760px;right:-240px;top:-160px;background:radial-gradient(closest-side,rgba(255,0,102,.13),transparent 70%)}
 .hero__grid-lines{position:absolute;inset:0;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:46px 46px;opacity:.35;-webkit-mask-image:radial-gradient(120% 90% at 50% 0,#000 30%,transparent 78%);mask-image:radial-gradient(120% 90% at 50% 0,#000 30%,transparent 78%)}
 .hero__in{display:grid;grid-template-columns:1.02fr 1fr;gap:clamp(2rem,4vw,4rem);align-items:center}
 .hero__copy{max-width:600px}
-.badge{display:inline-flex;align-items:center;gap:.5rem;background:#fff;border:1px solid var(--line);border-radius:var(--r-pill);padding:.4rem .9rem .4rem .5rem;font-size:var(--fs-xs);font-weight:600;color:var(--muted);box-shadow:var(--sh-1);margin-bottom:1.5rem}
-.badge__dot{width:8px;height:8px;border-radius:50%;background:var(--pink);position:relative}
-.badge__dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--pink);opacity:.4;animation:ping 2.4s ease-out infinite}
-@keyframes ping{0%{transform:scale(.8);opacity:.6}80%,100%{transform:scale(2);opacity:0}}
-.hero h1 .lite{color:var(--muted-2);display:block}
+.badge{display:inline-flex;align-items:center;gap:.5rem;background:#fff;border:1px solid var(--line);border-radius:var(--r-pill);padding:.5rem 1rem .5rem .8rem;font-size:.74rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--pink);box-shadow:var(--sh-1);margin-bottom:1.5rem}
+.hero h1 .lite{display:block;background:linear-gradient(90deg,var(--pink),#9e003f);-webkit-background-clip:text;background-clip:text;color:transparent}
+.btn--pill{border-radius:var(--r-pill)}
+.proof__tick{display:inline-flex;align-items:center;gap:.55rem;font-size:.95rem;color:var(--muted);font-weight:500}
 .hero__cta{display:flex;flex-wrap:wrap;gap:.8rem;margin-top:.4rem}
 .hero__proof{display:flex;flex-wrap:wrap;gap:1.6rem;margin-top:2.4rem;padding-top:1.8rem;border-top:1px solid var(--line)}
 .proof__item{display:flex;flex-direction:column;gap:.1rem}
@@ -427,18 +426,16 @@ export default function SitePreview() {
           <div className="hero__bg"><div className="hero__grid-lines" /></div>
           <div className="wrap-lg hero__in">
             <div className="hero__copy reveal">
-              <span className="badge"><span className="badge__dot" /> Built by SFR &amp; BTR operators</span>
-              <h1 className="h1">Every property walk —<br /><span className="lite">priced, dispatched &amp; measured.</span></h1>
-              <p className="lead">ResiWalk unifies inspections, real-world pricing &amp; scoping, AI reviews, scheduled services, vendor billing, a rules engine, and live insights — one platform that turns a field walk into invoiced work the same afternoon.</p>
+              <span className="badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg> The property operations platform</span>
+              <h1 className="h1">Every property walk,<br /><span className="lite">priced, dispatched &amp; measured.</span></h1>
+              <p className="lead">ResiWalk unifies inspections, real-world pricing &amp; scoping, AI reviews, scheduled services, vendor billing, a self-learning knowledge base, a rules engine, and live insights — one platform, built by industry veterans for SFR &amp; BTR.</p>
               <div className="hero__cta">
-                <a href="#contact" className="btn btn--lg">Book a demo <span className="btn__arrow">→</span></a>
-                <a href="#platform" className="btn btn--ghost btn--lg">See the platform</a>
+                <a href="#contact" className="btn btn--lg btn--pill">Book a demo</a>
+                <a href="#showcase" className="btn btn--ghost btn--lg btn--pill"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg> Watch it work</a>
               </div>
               <div className="hero__proof">
-                <div className="proof__item"><span className="proof__num" data-count="15">15</span><span className="proof__lab">Markets live</span></div>
-                <div className="proof__item"><span className="proof__num" data-count="98" data-suffix="%">98%</span><span className="proof__lab">Services on-time</span></div>
-                <div className="proof__item"><span className="proof__num" data-count="26" data-suffix="×">26×</span><span className="proof__lab">Faster scope-to-ticket</span></div>
-                <div className="proof__item"><span className="proof__num">100%</span><span className="proof__lab">Priced on-site</span></div>
+                <span className="proof__tick"><Tick /> From first walk to final invoice</span>
+                <span className="proof__tick"><Tick /> Priced on-site against live rate cards</span>
               </div>
             </div>
             <div className="hero__stage reveal" aria-hidden="true">
@@ -511,10 +508,10 @@ export default function SitePreview() {
         </section>
 
         {/* VIDEO */}
-        <section className="section section--tight section--mist">
+        <section className="section section--tight section--mist" id="showcase">
           <div className="wrap">
             <div className="section-head center reveal"><span className="eyebrow eyebrow--center">See it in action</span><h2 className="h2">Watch ResiWalk work</h2></div>
-            <div className="video-wrap reveal"><video controls playsInline preload="metadata"><source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" /></video></div>
+            <div className="video-wrap reveal"><video controls playsInline preload="metadata" poster="/sitepreview/intro-poster.jpg"><source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" /></video></div>
           </div>
         </section>
 
@@ -526,15 +523,15 @@ export default function SitePreview() {
               <div className="feature__text">
                 <span className="eyebrow">Field inspections</span>
                 <h3 className="feature__title">A full suite of inspections, offline-ready</h3>
-                <p className="feature__lead">Scope Rate Card, 1099 Leasing-Agent, Turn Re-Inspect QC, Vacancy/Occupancy, Community, and New-Construction RRQC — six configurable templates in one app your field teams actually enjoy. Captures work offline and syncs the instant signal returns.</p>
-                <ul className="ticks"><li><Tick />Six configurable templates, one platform</li><li><Tick />Fully offline; auto-syncs on reconnect</li><li><Tick />GPS + timestamp evidence on every photo</li></ul>
+                <p className="feature__lead">A fully customizable form builder meets — and grows with — your business needs, alongside out-of-the-box Estimate and QC inspection types. Unlimited templates, customization, and possibilities, in one app your field teams actually enjoy — capturing work offline and syncing the instant signal returns.</p>
+                <ul className="ticks"><li><Tick />Fully customizable form builder</li><li><Tick />Estimate &amp; QC inspection types out of the box</li><li><Tick />Unlimited templates, customization &amp; possibilities</li><li><Tick />GPS + timestamp evidence on every photo</li></ul>
               </div>
               <div className="feature__media">
                 <div className="visual" style={{ display: 'grid', placeItems: 'center' }}>
                   <div className="phone" style={{ position: 'relative', width: 'min(230px,64vw)' }}>
                     <div className="phone__notch" />
                     <div className="phone__screen">
-                      <div className="ph-top"><div className="ph-top__t">Turn Re-Inspect QC</div><div className="ph-top__s">1408 Oak Hill Trl · Kitchen</div></div>
+                      <div className="ph-top"><div className="ph-top__t">QC Inspection</div><div className="ph-top__s">1408 Oak Hill Trl · Kitchen</div></div>
                       <div className="ph-body">
                         <div className="ph-shot"><span className="ph-gps">📍 GPS · 33.74,-84.39</span></div>
                         <div className="ph-thumbs"><i /><i /><i /></div>
@@ -670,15 +667,15 @@ export default function SitePreview() {
           <div className="wrap band__in">
             <div className="reveal">
               <span className="eyebrow eyebrow--light">Built for scale</span>
-              <h2 className="h2">One command center, every region</h2>
-              <p className="lead">Whether it&apos;s 600 doors or 60,000, ResiWalk keeps pricing consistent, dispatch fast, and leadership looking at the same verified numbers your field teams generate — across every market you operate.</p>
-              <div className="markets"><span className="market">Atlanta</span><span className="market">Charlotte</span><span className="market">Greenville</span><span className="market">Savannah</span><span className="market">Orlando</span><span className="market">Tampa</span><span className="market">Huntsville</span><span className="market">Miami</span><span className="market market--more">+7 markets</span></div>
+              <h2 className="h2">One command center, any market</h2>
+              <p className="lead">Whether it&apos;s 600 doors or 60,000, ResiWalk keeps pricing consistent, dispatch fast, and leadership looking at the same verified numbers your field teams generate — anywhere you operate.</p>
+              <div className="markets"><span className="market">SFR</span><span className="market">BTR</span><span className="market">Scattered-site</span><span className="market">Communities</span><span className="market market--more">Any market — anywhere</span></div>
             </div>
             <div className="metrics reveal d1">
               <div className="metric"><div className="metric__v">2.6d → 0.1d</div><div className="metric__l">Scope-to-ticket</div></div>
               <div className="metric"><div className="metric__v" data-count="98" data-suffix="%">98%</div><div className="metric__l">Services on-time</div></div>
               <div className="metric"><div className="metric__v" data-count="91" data-suffix="%">91%</div><div className="metric__l">AI acceptance</div></div>
-              <div className="metric"><div className="metric__v" data-count="15">15</div><div className="metric__l">Markets live</div></div>
+              <div className="metric"><div className="metric__v">Anywhere</div><div className="metric__l">Any market, any state</div></div>
             </div>
           </div>
         </section>
@@ -764,6 +761,7 @@ export default function SitePreview() {
             <div className="section-head center reveal"><span className="eyebrow eyebrow--center">FAQ</span><h2 className="h2">Questions, answered</h2></div>
             <div className="faq reveal">
               <details open><summary>How does offline capture actually work?</summary><div className="faq__a">Field teams walk and document homes with no connection required — photos, line items, and GPS stamps are stored on-device and sync automatically the moment signal returns. Nothing is lost in a dead zone.</div></details>
+              <details><summary>Which inspection types are supported?</summary><div className="faq__a">Any you need. ResiWalk ships with Estimate and QC inspection types out of the box, and a fully customizable form builder lets you create unlimited templates of your own — so inspections meet, and grow with, your business needs.</div></details>
               <details><summary>Where does pricing come from?</summary><div className="faq__a">Every line item is priced against live, region-aware rate cards as the inspector scopes — labor, materials, regional adjustments, markup, and vendor/client/resident splits are resolved on-site, so the numbers are consistent and defensible every time.</div></details>
               <details><summary>Do we keep our own system of record?</summary><div className="faq__a">Yes. ResiWalk syncs cleanly into your HubSpot and Google Drive. Your properties, evidence, and reports live in the systems you already own — ResiWalk is the connective tissue, not a walled garden.</div></details>
               <details><summary>How is pricing structured?</summary><div className="faq__a">Per-door, not per-seat — so your entire field team is included without a headcount penalty. Volume and multi-brand pricing is available; book a demo and we&apos;ll scope it to your portfolio.</div></details>

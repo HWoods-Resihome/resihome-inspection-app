@@ -23,13 +23,46 @@ export function BrowserFrame({ url = 'app.resiwalk.com', children, className = '
   );
 }
 
-/** Phone frame with notch. */
+/** Phone frame with notch. The screen keeps a true handset aspect ratio (9:19)
+ *  so the mock reads as a full phone, not a cropped half-phone card — content
+ *  inside should flex to fill (see InspectionPhone). */
 export function PhoneFrame({ children, className = '', width = 320 }: { children: React.ReactNode; className?: string; width?: number }) {
   return (
     <div className={`relative rounded-[2.6rem] bg-ink p-3 shadow-2xl ring-1 ring-black/10 ${className}`} style={{ width }}>
-      <div className="absolute left-1/2 -translate-x-1/2 top-3 w-28 h-6 bg-ink rounded-b-2xl z-10" />
-      <div className="rounded-[2rem] overflow-hidden bg-white">{children}</div>
+      <div className="absolute left-1/2 -translate-x-1/2 top-3 w-24 h-5 bg-ink rounded-b-2xl z-10" />
+      <div className="rounded-[2rem] overflow-hidden bg-white flex flex-col" style={{ aspectRatio: '9 / 19' }}>{children}</div>
     </div>
+  );
+}
+
+/** Stylized interior "photo" (SVG illustration) used wherever a mock needs a
+ *  captured room shot — a real scene instead of a blank grey box that reads as a
+ *  broken image. Includes the ceiling water stain the AI callouts reference. */
+export function RoomScene({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" className={className} aria-hidden>
+      <rect width="320" height="200" fill="#eef0f4" />
+      <rect width="320" height="26" fill="#f8f9fb" />
+      <line x1="0" y1="26" x2="320" y2="26" stroke="#dde1e8" strokeWidth="2" />
+      {/* ceiling water stain (target of the AI callout) */}
+      <ellipse cx="238" cy="14" rx="36" ry="12" fill="#c2a179" opacity="0.6" />
+      <ellipse cx="250" cy="17" rx="20" ry="8" fill="#96754e" opacity="0.55" />
+      {/* window */}
+      <rect x="34" y="52" width="78" height="62" rx="3" fill="#cfeef7" stroke="#ffffff" strokeWidth="5" />
+      <line x1="73" y1="54" x2="73" y2="112" stroke="#ffffff" strokeWidth="4" />
+      <line x1="36" y1="83" x2="110" y2="83" stroke="#ffffff" strokeWidth="4" />
+      {/* floor */}
+      <rect y="150" width="320" height="50" fill="#d9c6ac" />
+      <line x1="0" y1="150" x2="320" y2="150" stroke="#c8b294" strokeWidth="2" />
+      {/* sofa */}
+      <rect x="154" y="96" width="116" height="20" rx="8" fill="#a6b2c4" />
+      <rect x="160" y="106" width="104" height="44" rx="8" fill="#93a0b4" />
+      <rect x="162" y="146" width="12" height="10" fill="#7b8798" />
+      <rect x="250" y="146" width="12" height="10" fill="#7b8798" />
+      {/* potted plant */}
+      <path d="M129 128c-10-6-14-16-12-26 8 2 14 10 12 26zM129 128c10-6 14-16 12-26-8 2-14 10-12 26z" fill="#5aa87c" />
+      <rect x="120" y="128" width="18" height="22" rx="2" fill="#c96f4a" />
+    </svg>
   );
 }
 
@@ -43,45 +76,39 @@ function Bars({ data, className = '' }: { data: number[]; className?: string }) 
   );
 }
 
-/** Insights dashboard screen (in a browser frame). */
+/** Insights dashboard screen (in a browser frame).
+ *  NOTE: deliberately no grid-with-hidden-sidebar here — a `display:none` grid
+ *  item is skipped during placement, which used to drop the whole dashboard into
+ *  the 64px sidebar track on mobile (everything crushed + overlapping). */
 export function InsightsScreen() {
   return (
     <BrowserFrame url="app.resiwalk.com/insights">
-      <div className="p-4 grid grid-cols-[64px_1fr] gap-3 text-ink">
-        <div className="hidden sm:flex flex-col gap-3 pt-1">
-          {['grid', 'chart', 'home', 'gear'].map((k, i) => (
-            <div key={k} className={`w-9 h-9 rounded-lg flex items-center justify-center ${i === 1 ? 'bg-[#ff0060] text-white' : 'bg-gray-100 text-gray-400'}`}>
-              <span className="w-4 h-4 rounded-sm border-2 border-current" />
+      <div className="p-4 text-ink">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="font-heading font-extrabold text-sm whitespace-nowrap">ResiWalk Insights</div>
+          <div className="flex gap-1.5 shrink-0">{['GA', 'FL', 'NC'].map((r) => <span key={r} className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{r}</span>)}</div>
+        </div>
+        <div className="flex gap-2 mb-3">
+          {[['Pass rate', '96.4%'], ['Avg scope', '$1,284'], ['Completed', '1,208'], ['On-time', '98%']].map(([l, v], i) => (
+            <div key={l} className="flex-1 min-w-0 rounded-lg bg-white ring-1 ring-gray-100 p-2.5 overflow-hidden">
+              <div className={`font-heading font-extrabold text-[15px] whitespace-nowrap ${i % 2 ? 'text-[#0f172a]' : 'text-[#ff0060]'}`}>{v}</div>
+              <div className="text-[9px] text-gray-400 leading-tight mt-0.5 whitespace-nowrap">{l}</div>
             </div>
           ))}
         </div>
-        <div className="min-w-0">
-          <div className="flex items-center justify-between mb-3">
-            <div className="font-heading font-extrabold text-sm">ResiWalk Insights</div>
-            <div className="flex gap-1.5">{['GA', 'FL', 'NC'].map((r) => <span key={r} className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{r}</span>)}</div>
+        <div className="flex gap-3">
+          <div className="flex-[3] min-w-0 rounded-lg bg-white ring-1 ring-gray-100 p-3">
+            <div className="text-[10px] text-gray-400 mb-2">Completed inspections · trailing 12</div>
+            <Bars data={[38, 52, 45, 63, 58, 72, 68, 80, 76, 88, 84, 95]} className="h-20" />
           </div>
-          <div className="grid grid-cols-4 gap-2 mb-3">
-            {[['Pass rate', '96.4%'], ['Avg scope', '$1,284'], ['Completed', '1,208'], ['On-time', '98%']].map(([l, v], i) => (
-              <div key={l} className="rounded-lg bg-white ring-1 ring-gray-100 p-2.5">
-                <div className={`font-heading font-extrabold text-[15px] ${i % 2 ? 'text-[#0f172a]' : 'text-[#ff0060]'}`}>{v}</div>
-                <div className="text-[9px] text-gray-400 leading-tight mt-0.5">{l}</div>
+          <div className="flex-[2] min-w-0 rounded-lg bg-white ring-1 ring-gray-100 p-3">
+            <div className="text-[10px] text-gray-400 mb-2">Scope cost by category</div>
+            {[['Paint', 72, PINK], ['Flooring', 54, TEAL], ['Clean', 40, PINK], ['Landscape', 28, TEAL]].map(([l, w, c]) => (
+              <div key={l as string} className="mb-1.5">
+                <div className="flex justify-between text-[9px] text-gray-500"><span>{l}</span></div>
+                <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden"><div style={{ width: `${w}%`, background: c as string }} className="h-full rounded-full" /></div>
               </div>
             ))}
-          </div>
-          <div className="grid grid-cols-[1.6fr_1fr] gap-3">
-            <div className="rounded-lg bg-white ring-1 ring-gray-100 p-3">
-              <div className="text-[10px] text-gray-400 mb-2">Completed inspections · trailing 12</div>
-              <Bars data={[38, 52, 45, 63, 58, 72, 68, 80, 76, 88, 84, 95]} className="h-20" />
-            </div>
-            <div className="rounded-lg bg-white ring-1 ring-gray-100 p-3">
-              <div className="text-[10px] text-gray-400 mb-2">Scope cost by category</div>
-              {[['Paint', 72, PINK], ['Flooring', 54, TEAL], ['Clean', 40, PINK], ['Landscape', 28, TEAL]].map(([l, w, c]) => (
-                <div key={l as string} className="mb-1.5">
-                  <div className="flex justify-between text-[9px] text-gray-500"><span>{l}</span></div>
-                  <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden"><div style={{ width: `${w}%`, background: c as string }} className="h-full rounded-full" /></div>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
       </div>
@@ -157,39 +184,44 @@ export function ServicesScreen() {
   );
 }
 
-/** Phone: inspection in progress with AI capture chip. */
+/** Phone: inspection in progress with AI capture chip. Content flexes to fill
+ *  the frame's full-handset screen; the header padding clears the notch. */
 export function InspectionPhone({ width }: { width?: number } = {}) {
   return (
     <PhoneFrame width={width}>
-      <div className="text-ink">
-        <div className="h-11 bg-[#ff0060] flex items-center justify-center text-white text-[12px] font-heading font-bold">Scope · 1408 Oak Hill Trl</div>
-        <div className="p-3 space-y-2">
-          <div className="rounded-lg bg-gray-50 ring-1 ring-gray-100 p-2.5">
+      <div className="text-ink flex-1 min-h-0 flex flex-col">
+        <div className="shrink-0 bg-[#ff0060] pt-8 pb-2.5 flex items-center justify-center text-white text-[12px] font-heading font-bold">Scope · 1408 Oak Hill Trl</div>
+        <div className="p-3 flex-1 min-h-0 flex flex-col gap-2">
+          <div className="shrink-0 rounded-lg bg-gray-50 ring-1 ring-gray-100 p-2.5">
             <div className="text-[10px] text-gray-400 mb-1">Living Room</div>
             <div className="text-[12px] font-semibold">Carpet — replace & pad</div>
             <div className="mt-1 flex items-center justify-between"><span className="text-[10px] text-gray-400">480 SF</span><span className="text-[12px] font-heading font-bold text-[#ff0060]">$842.00</span></div>
           </div>
-          <div className="rounded-lg overflow-hidden ring-1 ring-gray-100">
-            <div className="h-20 bg-gradient-to-br from-gray-200 to-gray-300 relative">
-              <div className="absolute inset-x-2 bottom-2 rounded-md bg-black/70 text-white text-[9px] px-2 py-1 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#73e3df]" /> AI: water stain — suggest drywall + paint
-              </div>
+          <div className="relative flex-1 min-h-[5rem] rounded-lg overflow-hidden ring-1 ring-gray-100">
+            <RoomScene className="absolute inset-0 w-full h-full" />
+            <div className="absolute inset-x-2 bottom-2 rounded-md bg-black/70 text-white text-[9px] px-2 py-1 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#73e3df]" /> AI: water stain — suggest drywall + paint
             </div>
           </div>
-          <button className="w-full h-9 rounded-lg bg-ink text-white text-[11px] font-heading font-bold">Add line · confirm AI</button>
-          <div className="flex items-center justify-between text-[9px] text-gray-400 px-0.5"><span>● GPS stamped</span><span>Synced</span></div>
+          <button className="shrink-0 w-full h-9 rounded-lg bg-ink text-white text-[11px] font-heading font-bold">Add line · confirm AI</button>
+          <div className="shrink-0 flex items-center justify-between text-[9px] text-gray-400 px-0.5"><span>● GPS stamped</span><span>Synced</span></div>
         </div>
       </div>
     </PhoneFrame>
   );
 }
 
-/** AI camera overlay card (standalone). */
+/** AI camera overlay card (standalone) — live viewfinder over a room scene with
+ *  the detection box drawn on the finding. */
 export function AICameraCard() {
   return (
     <div className="rounded-2xl overflow-hidden ring-1 ring-black/5 shadow-xl bg-ink">
-      <div className="h-44 bg-gradient-to-br from-slate-700 to-slate-900 relative">
-        <div className="absolute inset-4 border-2 border-dashed border-white/25 rounded-lg" />
+      <div className="h-56 relative">
+        <RoomScene className="absolute inset-0 w-full h-full" />
+        <div className="absolute inset-0 bg-black/10" />
+        {/* detection box on the ceiling stain (RoomScene places it top-right) */}
+        <div className="absolute right-[8%] top-[2%] w-[34%] h-[16%] border-2 border-[#73e3df] rounded-md" />
+        <span className="absolute right-[8%] top-[19%] text-[9px] font-bold text-white bg-[#0f172a]/80 rounded px-1.5 py-0.5">water stain · 0.94</span>
         <div className="absolute left-4 right-4 bottom-4 rounded-lg bg-white/95 p-3">
           <div className="flex items-center gap-2 text-[11px] font-heading font-bold text-ink"><span className="w-2 h-2 rounded-full bg-[#ff0060]" /> Detected: ceiling water stain</div>
           <div className="mt-1 text-[11px] text-ink/60">Suggested: drywall repair + prime & paint · confidence 0.94</div>
