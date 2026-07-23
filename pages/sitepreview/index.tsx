@@ -9,7 +9,7 @@
  *      fall back to a branded tile until real photos are dropped in.
  * Public + noindex while under /sitepreview.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import Head from 'next/head';
 import { HubSpotMark, DriveMark, CalendarMark, SlackMark, GoogleMark } from '@/components/sitepreview/Logos';
 
@@ -38,8 +38,8 @@ const CSS = `
 .wrap-lg{max-width:1320px;margin-inline:auto;padding-inline:var(--gutter)}
 .section{padding-block:var(--sect)}.section--mist{background:var(--mist)}.section--tight{padding-block:clamp(3rem,5vw,4.5rem)}
 .eyebrow{font-family:var(--f-body);font-weight:700;font-size:var(--fs-eyebrow);letter-spacing:.16em;text-transform:uppercase;color:var(--pink);display:inline-flex;align-items:center;gap:.55em;margin:0 0 1.1rem}
-.eyebrow::before{content:"";width:26px;height:2px;background:var(--pink);border-radius:2px}
-.eyebrow--center{justify-content:center}.eyebrow--light{color:var(--aqua)}.eyebrow--light::before{background:var(--aqua)}
+.eyebrow__ico{width:24px;height:24px;border-radius:7px;background:var(--pink-050);color:var(--pink);display:grid;place-items:center;flex:none}
+.eyebrow--center{justify-content:center}.eyebrow--light{color:var(--aqua)}.eyebrow--light .eyebrow__ico{background:rgba(115,227,223,.14);color:var(--aqua)}
 .h1{font-family:var(--f-display);font-weight:700;font-size:var(--fs-h1);line-height:1.02;letter-spacing:-.015em;margin:0 0 1.3rem}
 .h2{font-family:var(--f-display);font-weight:700;font-size:var(--fs-h2);line-height:1.06;letter-spacing:-.01em;margin:0 0 1.1rem}
 .h3{font-family:var(--f-display);font-weight:600;font-size:var(--fs-h3);line-height:1.2;margin:0 0 .5rem}
@@ -68,7 +68,7 @@ const CSS = `
 .nav__burger span::before{position:absolute;top:-6px}.nav__burger span::after{position:absolute;top:6px}
 .nav.is-open .nav__burger span{background:transparent}.nav.is-open .nav__burger span::before{top:0;transform:rotate(45deg)}.nav.is-open .nav__burger span::after{top:0;transform:rotate(-45deg)}
 .nav__mobile{display:none}
-@media(max-width:980px){.nav__links,.nav__cta .nav__login,.nav__cta .btn{display:none}.nav__burger{display:grid}
+@media(max-width:980px){.nav__links,.nav__cta .nav__login,.nav__cta .btn{display:none}.nav__burger{display:grid}.nav__cta{margin-left:auto}
   .nav__mobile{display:block;position:fixed;inset:72px 0 auto 0;z-index:59;background:#fff;border-bottom:1px solid var(--line);box-shadow:var(--sh-3);padding:1rem var(--gutter) 1.5rem;transform:translateY(-12px);opacity:0;pointer-events:none;transition:.25s}
   .nav.is-open .nav__mobile{transform:translateY(0);opacity:1;pointer-events:auto}
   .nav__mobile a{display:block;padding:.85rem .5rem;font-weight:600;border-bottom:1px solid var(--line);font-size:1.05rem}.nav__mobile .btn{display:flex;width:100%;margin-top:1rem}}
@@ -82,7 +82,9 @@ const CSS = `
 .badge{display:inline-flex;align-items:center;gap:.5rem;background:#fff;border:1px solid var(--line);border-radius:var(--r-pill);padding:.5rem 1rem .5rem .8rem;font-size:.74rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--pink);box-shadow:var(--sh-1);margin-bottom:1.5rem}
 .hero h1 .lite{display:block;background:linear-gradient(90deg,var(--pink),#9e003f);-webkit-background-clip:text;background-clip:text;color:transparent}
 .btn--pill{border-radius:var(--r-pill)}
-.proof__tick{display:inline-flex;align-items:center;gap:.55rem;font-size:.95rem;color:var(--muted);font-weight:500}
+.fab{position:fixed;right:18px;bottom:18px;z-index:55;display:inline-flex;align-items:center;gap:.5em;background:var(--pink);color:#fff;font-weight:700;font-size:.95rem;padding:.9em 1.5em;border-radius:var(--r-pill);box-shadow:var(--glow-pink),var(--sh-3);opacity:0;transform:translateY(16px);pointer-events:none;transition:opacity .3s,transform .3s}
+.fab.on{opacity:1;transform:none;pointer-events:auto}
+.fab:hover{background:var(--pink-700)}
 .hero__cta{display:flex;flex-wrap:wrap;gap:.8rem;margin-top:.4rem}
 .hero__proof{display:flex;flex-wrap:wrap;gap:1.6rem;margin-top:2.4rem;padding-top:1.8rem;border-top:1px solid var(--line)}
 .proof__item{display:flex;flex-direction:column;gap:.1rem}
@@ -258,7 +260,8 @@ const CSS = `
 .band h2{color:#fff}.band .lead{color:rgba(255,255,255,.72)}
 .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.12);border-radius:var(--r-md);overflow:hidden}
 .metric{background:var(--ink);padding:1.5rem 1.4rem}
-.metric__v{font-family:var(--f-display);font-weight:600;font-size:clamp(1.9rem,3.2vw,2.6rem);line-height:1;color:var(--aqua);font-variant-numeric:tabular-nums}
+.metric__v{font-family:var(--f-display);font-weight:600;font-size:clamp(1.9rem,3.2vw,2.6rem);line-height:1;color:var(--aqua);font-variant-numeric:tabular-nums;white-space:nowrap}
+.metric__v--sm{font-size:clamp(1.35rem,2.4vw,1.9rem)}
 .metric__l{font-size:.82rem;color:rgba(255,255,255,.7);margin-top:.4rem}
 @media(max-width:880px){.band__in{grid-template-columns:1fr}}
 .markets{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.4rem}
@@ -323,6 +326,32 @@ const CSS = `
 `;
 
 const Tick = () => <span className="tick-ico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#0FB5AD" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg></span>;
+
+// Per-section eyebrow icons (stroke, 24 viewBox) — a branded chip instead of the dash.
+const EYE_ICONS: Record<string, ReactNode> = {
+  platform: <><path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z" /><path d="M4 13l8 4.5L20 13" /></>,
+  play: <path d="M8 5.5v13l10.5-6.5L8 5.5z" />,
+  inspections: <><rect x="8" y="2.5" width="8" height="4" rx="1" /><path d="M8 4.5H6a2 2 0 00-2 2V19a2 2 0 002 2h12a2 2 0 002-2V6.5a2 2 0 00-2-2h-2" /><path d="M9 13l2 2 4.5-4.5" /></>,
+  pricing: <path d="M12 2.5v19M17 6.5H9.5a3 3 0 000 6h5a3 3 0 010 6H6.5" />,
+  ai: <path d="M12 3l2 5.5L19.5 10 14 12l-2 5.5L10 12 4.5 10 10 8.5 12 3z" />,
+  services: <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M4 10h16M8 3v4M16 3v4" /></>,
+  rules: <><rect x="3.5" y="3.5" width="6.5" height="5" rx="1" /><rect x="14" y="15.5" width="6.5" height="5" rx="1" /><path d="M7 8.5v4a3 3 0 003 3h4" /></>,
+  field: <><path d="M4 8h3l2-2.5h6L17 8h3a1.5 1.5 0 011.5 1.5V19a1.5 1.5 0 01-1.5 1.5H4A1.5 1.5 0 012.5 19V9.5A1.5 1.5 0 014 8z" /><circle cx="12" cy="14" r="3.5" /></>,
+  insights: <path d="M4.5 20V4.5M4.5 20H20M8.5 16l3-4 3 3 5-6.5" />,
+  scale: <><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.5 2.4 3.8 5.3 3.8 8.5s-1.3 6.1-3.8 8.5c-2.5-2.4-3.8-5.3-3.8-8.5s1.3-6.1 3.8-8.5z" /></>,
+  integrations: <path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1.2 1.2M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1.2-1.2" />,
+  tiers: <><path d="M20.5 12l-8.5 8.5L3.5 12V3.5H12L20.5 12z" /><circle cx="8" cy="8" r="1.5" /></>,
+  security: <><path d="M12 3l7.5 3v5.2c0 4.6-3.2 8.2-7.5 10-4.3-1.8-7.5-5.4-7.5-10V6l7.5-3z" /><path d="M9 12l2 2 4-4" /></>,
+  teams: <><circle cx="9" cy="8.5" r="3.5" /><path d="M3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16.5 5.5a3.5 3.5 0 010 6M18 15.2c2 .7 3.5 2 3.5 4.8" /></>,
+  faq: <><circle cx="12" cy="12" r="8.5" /><path d="M9.5 9.5A2.5 2.5 0 0112 7c1.4 0 2.5 1 2.5 2.3 0 1.8-2.5 2-2.5 3.7M12 16.8h.01" /></>,
+  contact: <><rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="M4 7l8 6 8-6" /></>,
+};
+const Eyebrow = ({ icon, className = 'eyebrow', children }: { icon: string; className?: string; children: ReactNode }) => (
+  <span className={className}>
+    <span className="eyebrow__ico" aria-hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">{EYE_ICONS[icon]}</svg></span>
+    {children}
+  </span>
+);
 const TierCheck = ({ c }: { c: string }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke={c} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 
 /** Real photo with a branded fallback tile until /sitepreview/photos/<name> exists. */
@@ -341,9 +370,15 @@ export default function SitePreview() {
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [error, setError] = useState('');
 
+  const [fab, setFab] = useState(false);
+
   useEffect(() => {
     const nav = document.getElementById('sp-nav');
-    const onScroll = () => nav?.classList.toggle('is-stuck', window.scrollY > 12);
+    const onScroll = () => {
+      nav?.classList.toggle('is-stuck', window.scrollY > 12);
+      // Floating "Book a demo" once the hero (and its inline CTA) scrolls away.
+      setFab(window.scrollY > 640);
+    };
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
 
@@ -419,6 +454,7 @@ export default function SitePreview() {
             <a href="#platform">Platform</a><a href="#integrations">Integrations</a><a href="#pricing">Pricing</a><a href="#insights">Insights</a><a href="#faq">FAQ</a><a href="/login">Log in</a><a href="#contact" className="btn">Book a demo</a>
           </div>
         </header>
+        <a href="#contact" className={`fab${fab ? ' on' : ''}`} aria-hidden={!fab} tabIndex={fab ? 0 : -1}>Book a demo</a>
         <span id="top" />
 
         {/* HERO */}
@@ -431,11 +467,6 @@ export default function SitePreview() {
               <p className="lead">ResiWalk unifies inspections, real-world pricing &amp; scoping, AI reviews, scheduled services, vendor billing, a self-learning knowledge base, a rules engine, and live insights — one platform, built by industry veterans for SFR &amp; BTR.</p>
               <div className="hero__cta">
                 <a href="#contact" className="btn btn--lg btn--pill">Book a demo</a>
-                <a href="#showcase" className="btn btn--ghost btn--lg btn--pill"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg> Watch it work</a>
-              </div>
-              <div className="hero__proof">
-                <span className="proof__tick"><Tick /> From first walk to final invoice</span>
-                <span className="proof__tick"><Tick /> Priced on-site against live rate cards</span>
               </div>
             </div>
             <div className="hero__stage reveal" aria-hidden="true">
@@ -494,7 +525,7 @@ export default function SitePreview() {
         <section className="section pipeline">
           <div className="wrap">
             <div className="section-head center reveal">
-              <span className="eyebrow eyebrow--center">One platform</span>
+              <Eyebrow icon="platform" className="eyebrow eyebrow--center">One platform</Eyebrow>
               <h2 className="h2">From the first walk to the final invoice</h2>
               <p className="lead">Replace a stack of disconnected tools. ResiWalk runs the entire property-operations lifecycle in one integrated system — no spreadsheets, no handoffs, no re-pricing in the back office.</p>
             </div>
@@ -507,21 +538,13 @@ export default function SitePreview() {
           </div>
         </section>
 
-        {/* VIDEO */}
-        <section className="section section--tight section--mist" id="showcase">
-          <div className="wrap">
-            <div className="section-head center reveal"><span className="eyebrow eyebrow--center">See it in action</span><h2 className="h2">Watch ResiWalk work</h2></div>
-            <div className="video-wrap reveal"><video controls playsInline preload="metadata" poster="/sitepreview/intro-poster.jpg"><source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" /></video></div>
-          </div>
-        </section>
-
         {/* FEATURES */}
         <section className="section">
           <div className="wrap">
             {/* Inspections */}
             <div className="feature reveal" id="inspections">
               <div className="feature__text">
-                <span className="eyebrow">Field inspections</span>
+                <Eyebrow icon="inspections">Field inspections</Eyebrow>
                 <h3 className="feature__title">A full suite of inspections, offline-ready</h3>
                 <p className="feature__lead">A fully customizable form builder meets — and grows with — your business needs, alongside out-of-the-box Estimate and QC inspection types. Unlimited templates, customization, and possibilities, in one app your field teams actually enjoy — capturing work offline and syncing the instant signal returns.</p>
                 <ul className="ticks"><li><Tick />Fully customizable form builder</li><li><Tick />Estimate &amp; QC inspection types out of the box</li><li><Tick />Unlimited templates, customization &amp; possibilities</li><li><Tick />GPS + timestamp evidence on every photo</li></ul>
@@ -549,7 +572,7 @@ export default function SitePreview() {
             {/* Pricing */}
             <div className="feature feature--rev reveal" id="pricing-feature">
               <div className="feature__text">
-                <span className="eyebrow">Pricing &amp; scoping</span>
+                <Eyebrow icon="pricing">Pricing &amp; scoping</Eyebrow>
                 <h3 className="feature__title">Real-world pricing, computed on site</h3>
                 <p className="feature__lead">Every line item is priced against live regional rate cards as the inspector scopes — labor, materials, regional adjustments, markup, and resident bill-back resolved instantly. No spreadsheets, no back-office re-pricing, and consistent, defensible numbers every time.</p>
                 <ul className="ticks"><li><Tick />Region-aware labor &amp; material rates</li><li><Tick />Instant vendor / client / resident splits</li><li><Tick />One source of truth for cost</li></ul>
@@ -572,7 +595,7 @@ export default function SitePreview() {
             {/* AI */}
             <div className="feature reveal" id="ai">
               <div className="feature__text">
-                <span className="eyebrow">AI reviews</span>
+                <Eyebrow icon="ai">AI reviews</Eyebrow>
                 <h3 className="feature__title">AI reviews and a self-learning knowledge base</h3>
                 <p className="feature__lead">On-device camera and voice AI suggest the right line items and catch issues in the moment, while a knowledge base absorbs every human override to get sharper over time — your standards, encoded and always improving.</p>
                 <ul className="ticks"><li><Tick />Photo &amp; voice AI line-item capture</li><li><Tick />Learns from every reviewer override</li><li><Tick />Your playbook, enforced automatically</li></ul>
@@ -593,7 +616,7 @@ export default function SitePreview() {
             {/* Services */}
             <div className="feature feature--rev reveal" id="services">
               <div className="feature__text">
-                <span className="eyebrow">Services &amp; vendors</span>
+                <Eyebrow icon="services">Services &amp; vendors</Eyebrow>
                 <h3 className="feature__title">Scheduled services, vendors &amp; billing</h3>
                 <p className="feature__lead">Bring recurring services in-house — grass, cleans, pools — with a scheduling engine, vendor dispatch and rotation, field-evidenced completion, and clean vendor and client billing end to end. Replace the middlemen without losing the controls.</p>
                 <ul className="ticks"><li><Tick />Recurring scheduling &amp; vendor rotation</li><li><Tick />Field-evidenced completion</li><li><Tick />Vendor + client invoicing built in</li></ul>
@@ -613,7 +636,7 @@ export default function SitePreview() {
             {/* Rules */}
             <div className="feature reveal" id="rules">
               <div className="feature__text">
-                <span className="eyebrow">Rules engine</span>
+                <Eyebrow icon="rules">Rules engine</Eyebrow>
                 <h3 className="feature__title">An integrated, no-code rules engine</h3>
                 <p className="feature__lead">Codify how your business actually runs: NTE-based approval routing by dollar and region, condition-driven automations, escalation ladders, and service triggers — all configurable and fully auditable.</p>
                 <ul className="ticks"><li><Tick />NTE-based approval routing</li><li><Tick />Condition-driven automations</li><li><Tick />Every decision auditable</li></ul>
@@ -635,7 +658,7 @@ export default function SitePreview() {
         {/* IN THE FIELD (photos) */}
         <section className="section section--mist">
           <div className="wrap">
-            <div className="section-head center reveal"><span className="eyebrow eyebrow--center">In the field</span><h2 className="h2">Built for the people who walk the homes</h2><p className="lead">From turn scopes to recurring services, ResiWalk goes where your teams go — every home, every market.</p></div>
+            <div className="section-head center reveal"><Eyebrow icon="field" className="eyebrow eyebrow--center">In the field</Eyebrow><h2 className="h2">Built for the people who walk the homes</h2><p className="lead">From turn scopes to recurring services, ResiWalk goes where your teams go — every home, every market.</p></div>
             <div className="gallery">
               <PhotoTile src="/sitepreview/photos/field-1.jpg" caption="Scoping a turn, on-site" />
               <PhotoTile src="/sitepreview/photos/field-2.jpg" caption="Documenting a finding with photo evidence" />
@@ -647,7 +670,7 @@ export default function SitePreview() {
         {/* INSIGHTS */}
         <section className="section pipeline" id="insights">
           <div className="wrap">
-            <div className="section-head center reveal"><span className="eyebrow eyebrow--center">Insights</span><h2 className="h2">A full-service insights command center</h2><p className="lead">Live analytics across inspections, pass/fail trends, scope cost, inspector performance, AI acceptance, and service throughput — banked daily and sliced by region, program, and person. Exec-ready and always current.</p></div>
+            <div className="section-head center reveal"><Eyebrow icon="insights" className="eyebrow eyebrow--center">Insights</Eyebrow><h2 className="h2">A full-service insights command center</h2><p className="lead">Live analytics across inspections, pass/fail trends, scope cost, inspector performance, AI acceptance, and service throughput — banked daily and sliced by region, program, and person. Exec-ready and always current.</p></div>
             <div className="insights-wrap reveal"><div className="dash">
               <div className="dash__bar"><div className="dash__dots"><i /><i /><i /></div><span className="dash__url">app.resiwalk.com/insights</span></div>
               <div className="dash__body">
@@ -666,13 +689,13 @@ export default function SitePreview() {
         <section className="section band">
           <div className="wrap band__in">
             <div className="reveal">
-              <span className="eyebrow eyebrow--light">Built for scale</span>
+              <Eyebrow icon="scale" className="eyebrow eyebrow--light">Built for scale</Eyebrow>
               <h2 className="h2">One command center, any market</h2>
               <p className="lead">Whether it&apos;s 600 doors or 60,000, ResiWalk keeps pricing consistent, dispatch fast, and leadership looking at the same verified numbers your field teams generate — anywhere you operate.</p>
               <div className="markets"><span className="market">SFR</span><span className="market">BTR</span><span className="market">Scattered-site</span><span className="market">Communities</span><span className="market market--more">Any market — anywhere</span></div>
             </div>
             <div className="metrics reveal d1">
-              <div className="metric"><div className="metric__v">2.6d → 0.1d</div><div className="metric__l">Scope-to-ticket</div></div>
+              <div className="metric"><div className="metric__v metric__v--sm">2.6d&nbsp;→&nbsp;0.1d</div><div className="metric__l">Scope-to-ticket</div></div>
               <div className="metric"><div className="metric__v" data-count="98" data-suffix="%">98%</div><div className="metric__l">Services on-time</div></div>
               <div className="metric"><div className="metric__v" data-count="91" data-suffix="%">91%</div><div className="metric__l">AI acceptance</div></div>
               <div className="metric"><div className="metric__v">Anywhere</div><div className="metric__l">Any market, any state</div></div>
@@ -683,7 +706,7 @@ export default function SitePreview() {
         {/* INTEGRATIONS */}
         <section className="section" id="integrations">
           <div className="wrap">
-            <div className="section-head center reveal"><span className="eyebrow eyebrow--center">Integrations</span><h2 className="h2">Connected to the tools you already run</h2><p className="lead">ResiWalk is the connective tissue of your operation — data flows cleanly across your CRM, storage, calendar, and comms, automatically.</p></div>
+            <div className="section-head center reveal"><Eyebrow icon="integrations" className="eyebrow eyebrow--center">Integrations</Eyebrow><h2 className="h2">Connected to the tools you already run</h2><p className="lead">ResiWalk is the connective tissue of your operation — data flows cleanly across your CRM, storage, calendar, and comms, automatically.</p></div>
             <div className="int-grid reveal">
               <div className="int-card"><div className="int-card__ico"><HubSpotMark className="w-7 h-7" /></div><div className="int-card__cat">CRM</div><h3>HubSpot</h3><p>Properties, listings, tickets &amp; workflows — your system of record.</p></div>
               <div className="int-card"><div className="int-card__ico"><DriveMark className="w-7 h-7" /></div><div className="int-card__cat">Storage</div><h3>Google Drive</h3><p>Reports, evidence &amp; documents synced where your teams work.</p></div>
@@ -700,7 +723,7 @@ export default function SitePreview() {
         {/* PRICING */}
         <section className="section section--mist" id="pricing">
           <div className="wrap">
-            <div className="section-head center reveal"><span className="eyebrow eyebrow--center">Pricing</span><h2 className="h2">Pricing that scales with your portfolio</h2><p className="lead">Per-door, not per-seat — so your whole field team is in without a headcount penalty. Pick the tier that fits where you are today.</p></div>
+            <div className="section-head center reveal"><Eyebrow icon="tiers" className="eyebrow eyebrow--center">Pricing</Eyebrow><h2 className="h2">Pricing that scales with your portfolio</h2><p className="lead">Per-door, not per-seat — so your whole field team is in without a headcount penalty. Pick the tier that fits where you are today.</p></div>
             <div className="price-grid reveal">
               <div className="tier">
                 <h3 className="tier__name">Growth</h3><p className="tier__desc">Emerging portfolios getting field ops under control.</p>
@@ -729,7 +752,7 @@ export default function SitePreview() {
         {/* SECURITY */}
         <section className="section">
           <div className="wrap">
-            <div className="section-head center reveal"><span className="eyebrow eyebrow--center">Security &amp; governance</span><h2 className="h2">Built to enterprise standards</h2><p className="lead">The controls large operators require — access, attribution, data ownership, and integrity — baked in from day one.</p></div>
+            <div className="section-head center reveal"><Eyebrow icon="security" className="eyebrow eyebrow--center">Security &amp; governance</Eyebrow><h2 className="h2">Built to enterprise standards</h2><p className="lead">The controls large operators require — access, attribution, data ownership, and integrity — baked in from day one.</p></div>
             <div className="sec-grid reveal">
               <div className="sec-card"><div className="sec-card__ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.8" /><path d="M8 10V7a4 4 0 018 0v3" stroke="currentColor" strokeWidth="1.8" /></svg></div><h3>Role-based access &amp; audit trails</h3><p>Every action attributed and logged — who did what, and when.</p></div>
               <div className="sec-card"><div className="sec-card__ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 7v10c0 2 3.6 3 8 3s8-1 8-3V7" stroke="currentColor" strokeWidth="1.8" /><ellipse cx="12" cy="7" rx="8" ry="3" stroke="currentColor" strokeWidth="1.8" /></svg></div><h3>Your data, your system of record</h3><p>Syncs to your HubSpot and Drive — you own it, always.</p></div>
@@ -749,7 +772,7 @@ export default function SitePreview() {
         {/* ABOUT */}
         <section className="section about">
           <div className="wrap about__in reveal">
-            <span className="eyebrow eyebrow--light">Why teams switch</span>
+            <Eyebrow icon="teams" className="eyebrow eyebrow--light">Why teams switch</Eyebrow>
             <h2 className="h2">Designed, built, and managed by industry veterans — for the SFR &amp; BTR demands of today and tomorrow.</h2>
             <p>We&apos;ve run the portfolios, walked the homes, and chased the invoices. ResiWalk is the platform we always wished we had — now yours.</p>
           </div>
@@ -758,7 +781,7 @@ export default function SitePreview() {
         {/* FAQ */}
         <section className="section" id="faq">
           <div className="wrap">
-            <div className="section-head center reveal"><span className="eyebrow eyebrow--center">FAQ</span><h2 className="h2">Questions, answered</h2></div>
+            <div className="section-head center reveal"><Eyebrow icon="faq" className="eyebrow eyebrow--center">FAQ</Eyebrow><h2 className="h2">Questions, answered</h2></div>
             <div className="faq reveal">
               <details open><summary>How does offline capture actually work?</summary><div className="faq__a">Field teams walk and document homes with no connection required — photos, line items, and GPS stamps are stored on-device and sync automatically the moment signal returns. Nothing is lost in a dead zone.</div></details>
               <details><summary>Which inspection types are supported?</summary><div className="faq__a">Any you need. ResiWalk ships with Estimate and QC inspection types out of the box, and a fully customizable form builder lets you create unlimited templates of your own — so inspections meet, and grow with, your business needs.</div></details>
@@ -770,12 +793,20 @@ export default function SitePreview() {
           </div>
         </section>
 
+        {/* VIDEO — near the bottom, after the story has been told */}
+        <section className="section section--tight" id="showcase">
+          <div className="wrap">
+            <div className="section-head center reveal"><Eyebrow icon="play" className="eyebrow eyebrow--center">See it in action</Eyebrow><h2 className="h2">Watch ResiWalk work</h2></div>
+            <div className="video-wrap reveal"><video controls playsInline preload="metadata" poster="/sitepreview/intro-poster.jpg"><source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" /></video></div>
+          </div>
+        </section>
+
         {/* CONTACT */}
         <section className="section section--mist" id="contact">
           <div className="wrap">
             <div className="contact">
               <div className="reveal">
-                <span className="eyebrow">Contact us</span>
+                <Eyebrow icon="contact">Contact us</Eyebrow>
                 <h2 className="h2">Let&apos;s walk your portfolio forward</h2>
                 <p className="lead">Tell us about your operation and we&apos;ll show you exactly how ResiWalk fits — inspections, pricing, services, and the analytics tying it all together.</p>
                 <ul className="ticks"><li><Tick />A tailored walkthrough of the platform</li><li><Tick />Real pricing &amp; scoping on your regions</li><li><Tick />A migration path from your current tools</li></ul>
