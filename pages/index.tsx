@@ -30,7 +30,7 @@ const CSS = `
 .sp{margin:0;font-family:var(--f-body);font-size:var(--fs-body);line-height:1.6;color:var(--ink);background:var(--paper);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden}
 .sp img,.sp svg{display:block;max-width:100%}
 .sp a{text-decoration:none}
-.sp a:not(.btn){color:inherit}
+.sp a:not(.btn):not(.fab){color:inherit}
 .sp button{font-family:inherit;cursor:pointer}
 .sp [id]{scroll-margin-top:88px}
 .sp :focus-visible{outline:3px solid var(--pink);outline-offset:2px;border-radius:4px}
