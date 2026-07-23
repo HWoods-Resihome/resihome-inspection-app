@@ -37,7 +37,7 @@ const CSS = `
 .wrap{max-width:var(--wrap);margin-inline:auto;padding-inline:var(--gutter)}
 .wrap-lg{max-width:1320px;margin-inline:auto;padding-inline:var(--gutter)}
 .section{padding-block:var(--sect)}.section--mist{background:var(--mist)}.section--tight{padding-block:clamp(3rem,5vw,4.5rem)}
-@media(max-width:640px){:root{--sect:2rem}.section--tight{padding-block:1.75rem}.section-head{margin-bottom:1.25rem}.logos{padding-block:1.5rem}}
+@media(max-width:640px){:root{--sect:2rem}.section--tight{padding-block:1.75rem}.section-head{margin-bottom:1.25rem}.logos{padding-block:1.5rem}.hero h1{font-size:6.6vw;line-height:1.08}.hero h1 .lite{white-space:nowrap}}
 .eyebrow{font-family:var(--f-body);font-weight:700;font-size:var(--fs-eyebrow);letter-spacing:.16em;text-transform:uppercase;color:var(--pink);display:inline-flex;align-items:center;gap:.55em;margin:0 0 1.1rem}
 .eyebrow__ico{width:24px;height:24px;border-radius:7px;background:var(--pink-050);color:var(--pink);display:grid;place-items:center;flex:none}
 .eyebrow--center{justify-content:center}.eyebrow--light{color:var(--aqua)}.eyebrow--light .eyebrow__ico{background:rgba(115,227,223,.14);color:var(--aqua)}
@@ -485,7 +485,7 @@ export default function SitePreview() {
             <div className="hero__copy reveal">
               <span className="badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg> The #1 Property Management Tool</span>
               <h1 className="h1">Walk. Tap. Priced.<br /><span className="lite">A full scope in minutes.</span></h1>
-              <p className="lead">A fully priced scope, generated as fast as you can walk the home — and simple enough that your whole field team actually uses it. Every line prices live against regional rate cards; you leave with vendor-ready PDFs, scopes of work, and AI-reviewed findings. No spreadsheets, no second pass, no learning curve. Built by SFR &amp; BTR operators who&apos;ve walked the homes and chased the invoices themselves.</p>
+              <p className="lead">ResiWalk turns one property walk into finished work. Walk the home once and leave with photos, full estimate pricing, and separate vendor PDFs and scopes of work — every line AI-reviewed and analyzed on site. No back-office admin, no second walk, no extra apps. Fully customizable to how your team works, built by industry veterans for SFR &amp; BTR.</p>
               <div className="hero__cta">
                 <a href="#contact" className="btn btn--lg btn--pill">Book a demo</a>
               </div>
