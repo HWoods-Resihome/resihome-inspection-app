@@ -466,7 +466,7 @@ export default function SitePreview() {
           <div className="hero__bg"><div className="hero__grid-lines" /></div>
           <div className="wrap-lg hero__in">
             <div className="hero__copy reveal">
-              <span className="badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg> The property operations platform</span>
+              <span className="badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg> The #1 Property Management Platform</span>
               <h1 className="h1">Every property walk,<br /><span className="lite">priced, dispatched &amp; measured.</span></h1>
               <p className="lead">ResiWalk unifies inspections, real-world pricing &amp; scoping, AI reviews, scheduled services, vendor billing, a self-learning knowledge base, a rules engine, and live insights — one platform, built by industry veterans for SFR &amp; BTR.</p>
               <div className="hero__cta">
