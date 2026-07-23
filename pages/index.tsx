@@ -37,6 +37,7 @@ const CSS = `
 .wrap{max-width:var(--wrap);margin-inline:auto;padding-inline:var(--gutter)}
 .wrap-lg{max-width:1320px;margin-inline:auto;padding-inline:var(--gutter)}
 .section{padding-block:var(--sect)}.section--mist{background:var(--mist)}.section--tight{padding-block:clamp(3rem,5vw,4.5rem)}
+@media(max-width:640px){:root{--sect:2.75rem}.section--tight{padding-block:2.25rem}.section-head{margin-bottom:1.6rem}}
 .eyebrow{font-family:var(--f-body);font-weight:700;font-size:var(--fs-eyebrow);letter-spacing:.16em;text-transform:uppercase;color:var(--pink);display:inline-flex;align-items:center;gap:.55em;margin:0 0 1.1rem}
 .eyebrow__ico{width:24px;height:24px;border-radius:7px;background:var(--pink-050);color:var(--pink);display:grid;place-items:center;flex:none}
 .eyebrow--center{justify-content:center}.eyebrow--light{color:var(--aqua)}.eyebrow--light .eyebrow__ico{background:rgba(115,227,223,.14);color:var(--aqua)}
@@ -483,8 +484,8 @@ export default function SitePreview() {
           <div className="wrap-lg hero__in">
             <div className="hero__copy reveal">
               <span className="badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg> The #1 Property Management Tool</span>
-              <h1 className="h1">Every property walk,<br /><span className="lite">priced, dispatched &amp; measured.</span></h1>
-              <p className="lead">ResiWalk turns one property walk into finished work. Walk the home once and leave with photos, full estimate pricing, and separate vendor PDFs and scopes of work — every line AI-reviewed and analyzed on site. No back-office admin, no second walk, no extra apps. Fully customizable to how your team works, built by industry veterans for SFR &amp; BTR.</p>
+              <h1 className="h1">One walk in.<br /><span className="lite">A priced, dispatched work order out.</span></h1>
+              <p className="lead">ResiWalk turns a single walkthrough into finished, priced work — before you leave the driveway. One pass captures every photo, prices each line against live regional rate cards, and generates vendor-ready PDFs and scopes of work, every finding AI-reviewed on site. No back-office re-pricing, no second trip, no stack of apps — just faster turns, defensible numbers, and total control, tailored to exactly how your team works. Built by SFR &amp; BTR operators who&apos;ve walked the homes and chased the invoices themselves.</p>
               <div className="hero__cta">
                 <a href="#contact" className="btn btn--lg btn--pill">Book a demo</a>
               </div>
@@ -495,7 +496,7 @@ export default function SitePreview() {
         {/* VIDEO — right under the hero, the first thing after Book a demo */}
         <section className="section section--tight section--mist" id="showcase">
           <div className="wrap">
-            <div className="section-head center reveal"><Eyebrow icon="play" className="eyebrow eyebrow--center">See it in action</Eyebrow><h2 className="h2">Watch ResiWalk work</h2></div>
+            <div className="section-head center reveal"><Eyebrow icon="play" className="eyebrow eyebrow--center">See it in action</Eyebrow><h2 className="h2">Watch ResiWalk Work</h2></div>
             <div className="video-wrap reveal"><video controls playsInline preload="metadata" poster="/sitepreview/intro-poster.jpg"><source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" /></video></div>
           </div>
         </section>
@@ -519,7 +520,7 @@ export default function SitePreview() {
           <div className="wrap">
             <div className="section-head center reveal">
               <Eyebrow icon="platform" className="eyebrow eyebrow--center">One platform</Eyebrow>
-              <h2 className="h2">From the first walk to the final invoice</h2>
+              <h2 className="h2">From the First Walk to the Final Invoice</h2>
               <p className="lead">Replace a stack of disconnected tools. ResiWalk runs the entire property-operations lifecycle in one integrated system — no spreadsheets, no handoffs, no re-pricing in the back office.</p>
             </div>
             <div className="pipeline__grid">
@@ -538,7 +539,7 @@ export default function SitePreview() {
             <div className="feature reveal" id="inspections">
               <div className="feature__text">
                 <Eyebrow icon="inspections">Field inspections</Eyebrow>
-                <h3 className="feature__title">A full suite of inspections, offline-ready</h3>
+                <h3 className="feature__title">A Full Suite of Inspections, Offline-Ready</h3>
                 <p className="feature__lead">A fully customizable form builder meets — and grows with — your business needs, alongside out-of-the-box Estimate and QC inspection types. Unlimited templates, customization, and possibilities, in one app your field teams actually enjoy — capturing work offline and syncing the instant signal returns.</p>
                 <ul className="ticks"><li><Tick />Fully customizable form builder</li><li><Tick />Estimate &amp; QC inspection types out of the box</li><li><Tick />Unlimited templates, customization &amp; possibilities</li><li><Tick />GPS + timestamp evidence on every photo</li></ul>
               </div>
@@ -566,7 +567,7 @@ export default function SitePreview() {
             <div className="feature feature--rev reveal" id="pricing-feature">
               <div className="feature__text">
                 <Eyebrow icon="pricing">Pricing &amp; scoping</Eyebrow>
-                <h3 className="feature__title">Real-world pricing, computed on site</h3>
+                <h3 className="feature__title">Real-World Pricing, Computed on Site</h3>
                 <p className="feature__lead">Every line item is priced against live regional rate cards as the inspector scopes — labor, materials, regional adjustments, markup, and resident bill-back resolved instantly. No spreadsheets, no back-office re-pricing, and consistent, defensible numbers every time.</p>
                 <ul className="ticks"><li><Tick />Region-aware labor &amp; material rates</li><li><Tick />Instant vendor / client / resident splits</li><li><Tick />One source of truth for cost</li></ul>
               </div>
@@ -589,7 +590,7 @@ export default function SitePreview() {
             <div className="feature reveal" id="ai">
               <div className="feature__text">
                 <Eyebrow icon="ai">AI reviews</Eyebrow>
-                <h3 className="feature__title">AI reviews and a self-learning knowledge base</h3>
+                <h3 className="feature__title">AI Reviews and a Self-Learning Knowledge Base</h3>
                 <p className="feature__lead">On-device camera and voice AI suggest the right line items and catch issues in the moment, while a knowledge base absorbs every human override to get sharper over time — your standards, encoded and always improving.</p>
                 <ul className="ticks"><li><Tick />Photo &amp; voice AI line-item capture</li><li><Tick />Learns from every reviewer override</li><li><Tick />Your playbook, enforced automatically</li></ul>
               </div>
@@ -617,7 +618,7 @@ export default function SitePreview() {
             <div className="feature feature--rev reveal" id="services">
               <div className="feature__text">
                 <Eyebrow icon="services">Services &amp; vendors</Eyebrow>
-                <h3 className="feature__title">Scheduled services, vendors &amp; billing</h3>
+                <h3 className="feature__title">Scheduled Services, Vendors &amp; Billing</h3>
                 <p className="feature__lead">Bring recurring services in-house — grass, cleans, pools — with a scheduling engine, vendor dispatch and rotation, field-evidenced completion, and clean vendor and client billing end to end. Replace the middlemen without losing the controls.</p>
                 <ul className="ticks"><li><Tick />Recurring scheduling &amp; vendor rotation</li><li><Tick />Field-evidenced completion</li><li><Tick />Vendor + client invoicing built in</li></ul>
               </div>
@@ -637,7 +638,7 @@ export default function SitePreview() {
             <div className="feature reveal" id="rules">
               <div className="feature__text">
                 <Eyebrow icon="rules">Rules engine</Eyebrow>
-                <h3 className="feature__title">An integrated, no-code rules engine</h3>
+                <h3 className="feature__title">An Integrated, No-Code Rules Engine</h3>
                 <p className="feature__lead">Codify how your business actually runs: NTE-based approval routing by dollar and region, condition-driven automations, escalation ladders, and service triggers — all configurable and fully auditable.</p>
                 <ul className="ticks"><li><Tick />NTE-based approval routing</li><li><Tick />Condition-driven automations</li><li><Tick />Every decision auditable</li></ul>
               </div>
@@ -658,7 +659,7 @@ export default function SitePreview() {
         {/* IN THE FIELD (photos) */}
         <section className="section section--mist">
           <div className="wrap">
-            <div className="section-head center reveal"><Eyebrow icon="field" className="eyebrow eyebrow--center">In the field</Eyebrow><h2 className="h2">Built for the people who walk the homes</h2><p className="lead">From turn scopes to recurring services, ResiWalk goes where your teams go — every home, every market.</p></div>
+            <div className="section-head center reveal"><Eyebrow icon="field" className="eyebrow eyebrow--center">In the field</Eyebrow><h2 className="h2">Built for the People Who Walk the Homes</h2><p className="lead">From turn scopes to recurring services, ResiWalk goes where your teams go — every home, every market.</p></div>
             <div className="gallery">
               <PhotoTile src="/sitepreview/photos/field-1.jpg" caption="Scoping a turn, on-site" />
               <PhotoTile src="/sitepreview/photos/field-2.jpg" caption="Documenting a finding with photo evidence" />
@@ -670,7 +671,7 @@ export default function SitePreview() {
         {/* INSIGHTS */}
         <section className="section pipeline" id="insights">
           <div className="wrap">
-            <div className="section-head center reveal"><Eyebrow icon="insights" className="eyebrow eyebrow--center">Insights</Eyebrow><h2 className="h2">A full-service insights command center</h2><p className="lead">Live analytics across inspections, pass/fail trends, scope cost, inspector performance, AI acceptance, and service throughput — banked daily and sliced by region, program, and person. Exec-ready and always current.</p></div>
+            <div className="section-head center reveal"><Eyebrow icon="insights" className="eyebrow eyebrow--center">Insights</Eyebrow><h2 className="h2">A Full-Service Insights Command Center</h2><p className="lead">Live analytics across inspections, pass/fail trends, scope cost, inspector performance, AI acceptance, and service throughput — banked daily and sliced by region, program, and person. Exec-ready and always current.</p></div>
             <div className="insights-wrap reveal"><div className="dash">
               <div className="dash__bar"><div className="dash__dots"><i /><i /><i /></div><span className="dash__url">app.resiwalk.com/insights</span></div>
               <div className="dash__body">
@@ -690,7 +691,7 @@ export default function SitePreview() {
           <div className="wrap band__in">
             <div className="reveal">
               <Eyebrow icon="scale" className="eyebrow eyebrow--light">Built for scale</Eyebrow>
-              <h2 className="h2">One command center, any market</h2>
+              <h2 className="h2">One Command Center, Any Market</h2>
               <p className="lead">Whether it&apos;s 600 doors or 60,000, ResiWalk keeps pricing consistent, dispatch fast, and leadership looking at the same verified numbers your field teams generate — anywhere you operate.</p>
               <div className="markets"><span className="market">SFR</span><span className="market">BTR</span><span className="market">Scattered-site</span><span className="market">Communities</span><span className="market market--more">Any market — anywhere</span></div>
             </div>
@@ -706,7 +707,7 @@ export default function SitePreview() {
         {/* INTEGRATIONS */}
         <section className="section" id="integrations">
           <div className="wrap">
-            <div className="section-head center reveal"><Eyebrow icon="integrations" className="eyebrow eyebrow--center">Integrations</Eyebrow><h2 className="h2">Connected to the tools you already run</h2><p className="lead">ResiWalk is the connective tissue of your operation — data flows cleanly across your CRM, storage, calendar, and comms, automatically.</p></div>
+            <div className="section-head center reveal"><Eyebrow icon="integrations" className="eyebrow eyebrow--center">Integrations</Eyebrow><h2 className="h2">Connected to the Tools You Already Run</h2><p className="lead">ResiWalk is the connective tissue of your operation — data flows cleanly across your CRM, storage, calendar, and comms, automatically.</p></div>
             <div className="int-grid reveal">
               <div className="int-card"><div className="int-card__ico"><HubSpotMark className="w-7 h-7" /></div><div className="int-card__cat">CRM</div><h3>HubSpot</h3><p>Properties, listings, tickets &amp; workflows — your system of record.</p></div>
               <div className="int-card"><div className="int-card__ico"><DriveMark className="w-7 h-7" /></div><div className="int-card__cat">Storage</div><h3>Google Drive</h3><p>Reports, evidence &amp; documents synced where your teams work.</p></div>
@@ -723,7 +724,7 @@ export default function SitePreview() {
         {/* PRICING */}
         <section className="section section--mist" id="pricing">
           <div className="wrap">
-            <div className="section-head center reveal"><Eyebrow icon="tiers" className="eyebrow eyebrow--center">Pricing</Eyebrow><h2 className="h2">Pricing that scales with your portfolio</h2><p className="lead">Per-door, not per-seat — so your whole field team is in without a headcount penalty. Pick the tier that fits where you are today.</p></div>
+            <div className="section-head center reveal"><Eyebrow icon="tiers" className="eyebrow eyebrow--center">Pricing</Eyebrow><h2 className="h2">Pricing That Scales With Your Portfolio</h2><p className="lead">Per-door, not per-seat — so your whole field team is in without a headcount penalty. Pick the tier that fits where you are today.</p></div>
             <div className="price-grid reveal">
               <div className="tier">
                 <h3 className="tier__name">Growth</h3><p className="tier__desc">Emerging portfolios getting field ops under control.</p>
@@ -752,7 +753,7 @@ export default function SitePreview() {
         {/* SECURITY */}
         <section className="section">
           <div className="wrap">
-            <div className="section-head center reveal"><Eyebrow icon="security" className="eyebrow eyebrow--center">Security &amp; governance</Eyebrow><h2 className="h2">Built to enterprise standards</h2><p className="lead">The controls large operators require — access, attribution, data ownership, and integrity — baked in from day one.</p></div>
+            <div className="section-head center reveal"><Eyebrow icon="security" className="eyebrow eyebrow--center">Security &amp; governance</Eyebrow><h2 className="h2">Built to Enterprise Standards</h2><p className="lead">The controls large operators require — access, attribution, data ownership, and integrity — baked in from day one.</p></div>
             <div className="sec-grid reveal">
               <div className="sec-card"><div className="sec-card__ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.8" /><path d="M8 10V7a4 4 0 018 0v3" stroke="currentColor" strokeWidth="1.8" /></svg></div><h3>Role-based access &amp; audit trails</h3><p>Every action attributed and logged — who did what, and when.</p></div>
               <div className="sec-card"><div className="sec-card__ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 7v10c0 2 3.6 3 8 3s8-1 8-3V7" stroke="currentColor" strokeWidth="1.8" /><ellipse cx="12" cy="7" rx="8" ry="3" stroke="currentColor" strokeWidth="1.8" /></svg></div><h3>Your data, your system of record</h3><p>Syncs to your HubSpot and Drive — you own it, always.</p></div>
@@ -773,7 +774,7 @@ export default function SitePreview() {
         <section className="section about">
           <div className="wrap about__in reveal">
             <Eyebrow icon="teams" className="eyebrow eyebrow--light">Why teams switch</Eyebrow>
-            <h2 className="h2">Designed, built, and managed by industry veterans — for the SFR &amp; BTR demands of today and tomorrow.</h2>
+            <h2 className="h2">Designed, Built, and Managed by Industry Veterans — for the SFR &amp; BTR Demands of Today and Tomorrow.</h2>
             <p>We&apos;ve run the portfolios, walked the homes, and chased the invoices. ResiWalk is the platform we always wished we had — now yours.</p>
           </div>
         </section>
@@ -781,7 +782,7 @@ export default function SitePreview() {
         {/* FAQ */}
         <section className="section" id="faq">
           <div className="wrap">
-            <div className="section-head center reveal"><Eyebrow icon="faq" className="eyebrow eyebrow--center">FAQ</Eyebrow><h2 className="h2">Questions, answered</h2></div>
+            <div className="section-head center reveal"><Eyebrow icon="faq" className="eyebrow eyebrow--center">FAQ</Eyebrow><h2 className="h2">Questions, Answered</h2></div>
             <div className="faq reveal">
               <details open><summary>How does offline capture actually work?</summary><div className="faq__a">Field teams walk and document homes with no connection required — photos, line items, and GPS stamps are stored on-device and sync automatically the moment signal returns. Nothing is lost in a dead zone.</div></details>
               <details><summary>Which inspection types are supported?</summary><div className="faq__a">Any you need. ResiWalk ships with Estimate and QC inspection types out of the box, and a fully customizable form builder lets you create unlimited templates of your own — so inspections meet, and grow with, your business needs.</div></details>
@@ -799,7 +800,7 @@ export default function SitePreview() {
             <div className="contact">
               <div className="reveal">
                 <Eyebrow icon="contact">Contact us</Eyebrow>
-                <h2 className="h2">Let&apos;s walk your portfolio forward</h2>
+                <h2 className="h2">Let&apos;s Walk Your Portfolio Forward</h2>
                 <p className="lead">Tell us about your operation and we&apos;ll show you exactly how ResiWalk fits — inspections, pricing, services, and the analytics tying it all together.</p>
                 <ul className="ticks"><li><Tick />A tailored walkthrough of the platform</li><li><Tick />Real pricing &amp; scoping on your regions</li><li><Tick />A migration path from your current tools</li></ul>
               </div>
@@ -826,7 +827,7 @@ export default function SitePreview() {
         {/* FINAL CTA */}
         <section className="section final">
           <div className="wrap final__in reveal">
-            <h2 className="h2">Ready to see ResiWalk in action?</h2>
+            <h2 className="h2">Ready to See ResiWalk in Action?</h2>
             <p>Give your teams the platform that turns every property walk into priced, dispatched, and measured work — automatically.</p>
             <div className="final__cta"><a href="#contact" className="btn btn--light btn--lg">Book a demo</a><a href="/login" className="btn btn--ghost-light btn--lg">Log in</a></div>
           </div>
