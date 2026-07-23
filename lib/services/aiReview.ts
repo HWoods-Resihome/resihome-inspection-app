@@ -297,7 +297,83 @@ export interface ReviewResult {
   completed: number;
   routedToReview: number;
   errors: number;
-  items: { id: string; service: string; verdict: string; notes: string; issues: string[]; action: string; error?: string }[];
+  items: { id: string; service: string; verdict: string; notes: string; issues: string[]; action: string; timeOnSite?: string; error?: string }[];
+}
+
+/**
+ * Review ONE order and (when apply) write the verdict + move status. Shared by
+ * the backlog cron and the single-service re-run so both behave identically.
+ * Never throws for a bad model result — callers wrap for error accounting.
+ */
+async function reviewOrderAndApply(
+  order: { id: string; props: Record<string, any> },
+  allChecks: AiCheck[], apply: boolean, todayISO: string,
+): Promise<{ clean: boolean; verdict: ServiceVerdict; item: ReviewResult['items'][number] }> {
+  const service = String(order.props.address_snapshot || order.props.service_name || order.id);
+  const v = await reviewOne(order, allChecks);
+  // A community grass-cut MASTER must ALWAYS go to a human: the reviewer curates
+  // the covered-home list and the close-out splits it into per-property billing.
+  const isMasterCut = order.props.scope === 'community' && order.props.worktype === 'landscaping'
+    && order.props.subtype === 'cut' && !String(order.props.master_service_id || '').trim()
+    && !!String(order.props.covered_property_ids || '').trim();
+  const clean = v.verdict === 'clean' && !isMasterCut;
+
+  if (apply) {
+    const workPrefix = v.workEvidenced ? '' : '⚠ Work not evidenced: before/after photos don’t clearly show the work was done — verify before completing.\n\n';
+    const geoPrefix = v.geofenceOk ? '' : '⚠ Geofence: photo location/timing evidence is off-site or missing — verify before completing.\n\n';
+    const timePrefix = v.timeOnSite ? `⏱ Time on site: ${v.timeOnSite}\n\n` : '';
+    const notes = [v.notes, ...(v.issues.length ? ['Issues:', ...v.issues.map((i) => `• ${i}`)] : [])].join('\n');
+    const props: Record<string, any> = {
+      ai_verdict: v.verdict === 'clean' ? 'clean' : 'needs_review',
+      ai_notes: timePrefix.concat(workPrefix).concat(geoPrefix).concat(isMasterCut && v.verdict === 'clean' ? 'Community grass-cut master — routed to review to confirm covered homes and split into per-property billing.\n\n' : '').concat(notes).slice(0, 2000),
+      status: clean ? 'completed' : 'review',
+    };
+    if (v.proofSummary) props.proof_summary = v.proofSummary;
+    if (v.hasProof) {
+      try {
+        const ans = JSON.parse(order.props.answers_json || '{}');
+        const photos = await extractProofPhotos(String(ans[PROOF_URL_KEY] || ''), order.id);
+        if (photos.length) props.proof_photo_urls = photos.join('\n');
+      } catch (e) { console.warn('[ai-review] proof photo extraction skipped:', e); }
+    }
+    if (clean) {
+      props.completed_at = new Date().toISOString();
+      const due = String(order.props.due_date || '').slice(0, 10);
+      if (due) props.ontime = todayISO <= due ? 'true' : 'false';
+    }
+    await patchServiceWorkOrder(order.id, props);
+    void recordServiceAudit({
+      serviceId: order.id, action: 'ai_review', actorName: 'AI Review',
+      detail: clean ? 'AI review clean → Completed' : `AI review flagged → Review${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).length ? ` (${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).join(', ')})` : ''}`,
+      meta: { verdict: v.verdict, workEvidenced: v.workEvidenced, geofenceOk: v.geofenceOk },
+    });
+  }
+  const item = { id: order.id, service, verdict: v.verdict, notes: v.notes, issues: v.issues, timeOnSite: v.timeOnSite, action: apply ? (clean ? 'completed' : 'review') : (clean ? 'would-complete' : 'would-review') };
+  return { clean, verdict: v, item };
+}
+
+/**
+ * Re-run the AI review for ONE service regardless of its current status
+ * (completed / review / submitted). Dry-run returns what the verdict WOULD be;
+ * apply writes it and moves status (clean → completed, else → review). Powers the
+ * admin "Re-run AI review" action in the service record view.
+ */
+export async function rerunServiceAiReview(id: string, apply: boolean, todayISO: string): Promise<ReviewResult | null> {
+  const one = await fetchServiceWorkOrder(id);
+  if (one === null) return null; // not configured / not found
+  const savedChecks = await readServiceAiChecks().catch(() => null);
+  const allChecks: AiCheck[] = savedChecks && savedChecks.length ? (savedChecks as AiCheck[]) : SAMPLE_AI_CHECKS;
+  const result: ReviewResult = { mode: apply ? 'apply' : 'dry-run', configured: true, reviewed: 0, completed: 0, routedToReview: 0, errors: 0, items: [] };
+  try {
+    const { clean, item } = await reviewOrderAndApply({ id: one.id, props: one.props }, allChecks, apply, todayISO);
+    result.reviewed++;
+    if (clean) result.completed++; else result.routedToReview++;
+    result.items.push(item);
+  } catch (e: any) {
+    result.errors++;
+    result.items.push({ id, service: String(one.props.address_snapshot || one.props.service_name || id), verdict: 'error', notes: '', issues: [], action: 'error', error: String(e?.message || e).slice(0, 300) });
+  }
+  return result;
 }
 
 /**
@@ -332,54 +408,10 @@ export async function runServiceAiReview(apply: boolean, todayISO: string, onlyI
   const processOne = async (order: { id: string; props: Record<string, any> }) => {
     const service = String(order.props.address_snapshot || order.props.service_name || order.id);
     try {
-      const v = await reviewOne(order, allChecks);
+      const { clean, item } = await reviewOrderAndApply(order, allChecks, apply, todayISO);
       result.reviewed++;
-      // A community grass-cut MASTER must ALWAYS go to a human: the reviewer
-      // curates the covered-home list (add/drop) and the close-out is what splits
-      // the master into per-property billing lines. So it never auto-completes,
-      // even on a clean verdict — otherwise it would complete without splitting.
-      const isMasterCut = order.props.scope === 'community' && order.props.worktype === 'landscaping'
-        && order.props.subtype === 'cut' && !String(order.props.master_service_id || '').trim()
-        && !!String(order.props.covered_property_ids || '').trim();
-      const clean = v.verdict === 'clean' && !isMasterCut;
       if (clean) result.completed++; else result.routedToReview++;
-
-      if (apply) {
-        const workPrefix = v.workEvidenced ? '' : '⚠ Work not evidenced: before/after photos don’t clearly show the work was done — verify before completing.\n\n';
-        const geoPrefix = v.geofenceOk ? '' : '⚠ Geofence: photo location/timing evidence is off-site or missing — verify before completing.\n\n';
-        // Always surface time on site (first→last photo) at the top so a coordinator
-        // sees it at a glance, on clean AND flagged verdicts.
-        const timePrefix = v.timeOnSite ? `⏱ Time on site: ${v.timeOnSite}\n\n` : '';
-        const notes = [v.notes, ...(v.issues.length ? ['Issues:', ...v.issues.map((i) => `• ${i}`)] : [])].join('\n');
-        const props: Record<string, any> = {
-          ai_verdict: v.verdict === 'clean' ? 'clean' : 'needs_review',
-          ai_notes: timePrefix.concat(workPrefix).concat(geoPrefix).concat(isMasterCut && v.verdict === 'clean' ? 'Community grass-cut master — routed to review to confirm covered homes and split into per-property billing.\n\n' : '').concat(notes).slice(0, 2000),
-          status: clean ? 'completed' : 'review',
-        };
-        // Proof-of-service enrichment (both feed the vendor/client service PDFs):
-        // the model's neutral document summary, and the job photos extracted from
-        // inside the vendor's PDF. Best-effort — never blocks/alters the verdict.
-        if (v.proofSummary) props.proof_summary = v.proofSummary;
-        if (v.hasProof) {
-          try {
-            const ans = JSON.parse(order.props.answers_json || '{}');
-            const photos = await extractProofPhotos(String(ans[PROOF_URL_KEY] || ''), order.id);
-            if (photos.length) props.proof_photo_urls = photos.join('\n');
-          } catch (e) { console.warn('[ai-review] proof photo extraction skipped:', e); }
-        }
-        if (clean) {
-          props.completed_at = new Date().toISOString();
-          const due = String(order.props.due_date || '').slice(0, 10);
-          if (due) props.ontime = todayISO <= due ? 'true' : 'false';
-        }
-        await patchServiceWorkOrder(order.id, props);
-        void recordServiceAudit({
-          serviceId: order.id, action: 'ai_review', actorName: 'AI Review',
-          detail: clean ? 'AI review clean → Completed' : `AI review flagged → Review${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).length ? ` (${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).join(', ')})` : ''}`,
-          meta: { verdict: v.verdict, workEvidenced: v.workEvidenced, geofenceOk: v.geofenceOk },
-        });
-      }
-      result.items.push({ id: order.id, service, verdict: v.verdict, notes: v.notes, issues: v.issues, action: apply ? (clean ? 'completed' : 'review') : (clean ? 'would-complete' : 'would-review') });
+      result.items.push(item);
     } catch (e: any) {
       result.errors++;
       result.items.push({ id: order.id, service, verdict: 'error', notes: '', issues: [], action: 'error', error: String(e?.message || e).slice(0, 300) });

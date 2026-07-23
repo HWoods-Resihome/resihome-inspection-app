@@ -1157,6 +1157,29 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const [dueReason, setDueReason] = useState('');
   const [savingDue, setSavingDue] = useState(false);
 
+  // Admin: re-run the AI review for this service (dry-run preview, then optional
+  // apply that moves the status like the automated reviewer).
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiMsg, setAiMsg] = useState('');
+  const [aiResult, setAiResult] = useState<{ verdict: string; action: string; notes: string; issues: string[]; timeOnSite?: string; error?: string } | null>(null);
+  const runAiReview = async (apply: boolean) => {
+    setAiBusy(true); setAiMsg('');
+    try {
+      const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/rerun-ai-review`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apply }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setAiMsg(d.error || 'Review failed.'); return; }
+      setAiResult(d.item || null);
+      if (apply) {
+        setAiMsg(d.item?.action === 'completed' ? 'Applied — moved to Completed.' : 'Applied — routed to Review.');
+        router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});   // reflect the new status
+      }
+    } catch { setAiMsg('Couldn’t reach the server. Try again.'); }
+    finally { setAiBusy(false); }
+  };
+
   const openAudit = async () => {
     setSettingsOpen(false); setAuditOpen(true); setAuditEvents(null);
     try {
@@ -1281,6 +1304,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   <button type="button" onClick={openAudit} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50">Audit Log</button>
                   {canReassign && <button type="button" onClick={() => { setSettingsOpen(false); setReassignVendor(svc.vendor || ''); setReassignQuery(''); setSettingsMsg(''); setReassignOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Reassign Vendor</button>}
                   {canEditDue && <button type="button" onClick={() => { setSettingsOpen(false); setNewDue(svc.dueDate || ''); setSettingsMsg(''); setDueOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Change Due Date</button>}
+                  <button type="button" onClick={() => { setSettingsOpen(false); setAiResult(null); setAiMsg(''); setAiOpen(true); runAiReview(false); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Re-run AI Review</button>
                 </div></>)}
             </div>
           )}
@@ -1749,6 +1773,47 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   ))}
                 </ol>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Re-run AI Review modal (admin). Dry-run preview → optional apply. */}
+      {aiOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setAiOpen(false)}>
+          <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl p-4 flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between shrink-0">
+              <div className="font-heading font-bold text-[15px] text-ink">Re-run AI Review</div>
+              <button type="button" onClick={() => setAiOpen(false)} aria-label="Close" className="text-gray-400 hover:text-ink text-lg leading-none">✕</button>
+            </div>
+            <p className="text-[13px] text-gray-500 mt-1 shrink-0">Re-evaluates this service’s evidence with the current AI rules. Preview is read-only; applying moves the status just like the automated reviewer.</p>
+            <div className="mt-3 overflow-y-auto">
+              {aiBusy && !aiResult ? (
+                <div className="text-[13px] text-gray-400 py-6 text-center">Reviewing…</div>
+              ) : aiResult ? (
+                <div className="rounded-xl border border-gray-200 p-3 text-[13px] space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${aiResult.action.includes('complete') || aiResult.action === 'completed' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
+                      {aiResult.action === 'would-complete' ? 'Would auto-complete' : aiResult.action === 'completed' ? 'Completed' : aiResult.action === 'review' ? 'Routed to Review' : 'Would route to Review'}
+                    </span>
+                    <span className="text-gray-400 text-[12px]">verdict: {aiResult.verdict}</span>
+                  </div>
+                  {aiResult.timeOnSite && <div className="text-gray-600">⏱ Time on site: <b className="text-ink">{aiResult.timeOnSite}</b></div>}
+                  {aiResult.notes && <div className="text-gray-600 whitespace-pre-line">{aiResult.notes}</div>}
+                  {aiResult.issues?.length > 0 && (
+                    <ul className="space-y-1">
+                      {aiResult.issues.map((it, i) => <li key={i} className="flex gap-2 text-gray-600"><span className="text-brand shrink-0">•</span><span>{it}</span></li>)}
+                    </ul>
+                  )}
+                </div>
+              ) : (
+                <div className="text-[13px] text-gray-400 py-6 text-center">No result.</div>
+              )}
+              {aiMsg && <div className="mt-2 text-[12px] text-gray-500">{aiMsg}</div>}
+            </div>
+            <div className="mt-3 flex gap-2 shrink-0">
+              <button type="button" onClick={() => runAiReview(false)} disabled={aiBusy} className="flex-1 h-10 rounded-xl border border-gray-300 text-sm font-semibold text-ink disabled:opacity-50">{aiBusy ? 'Working…' : 'Re-preview'}</button>
+              <button type="button" onClick={() => runAiReview(true)} disabled={aiBusy || !aiResult} className="flex-1 h-10 rounded-xl bg-brand text-white text-sm font-bold disabled:opacity-50">Apply &amp; move status</button>
             </div>
           </div>
         </div>
