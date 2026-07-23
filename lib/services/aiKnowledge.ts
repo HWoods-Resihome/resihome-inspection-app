@@ -41,8 +41,8 @@ export const SAMPLE_AI_CHECKS: AiCheck[] = [
   { id: 'k4', check: 'Photos are GPS-stamped at/near the property (within the geofence).', worktype: '', subtype: '', active: true },
   { id: 'k5', check: 'Photos are not reused/duplicated from a prior visit and match the correct property.', worktype: '', subtype: '', active: true },
   { id: 'k6', check: 'Pre-cut grass height in the photos matches the height tier the vendor selected.', worktype: 'landscaping', subtype: 'cut', active: true },
-  { id: 'k7', check: 'Back yard is clearly shown (not just the front).', worktype: 'landscaping', subtype: '', active: true },
-  { id: 'k8', check: 'All 4 sides of the house are captured.', worktype: 'landscaping', subtype: '', active: true },
+  { id: 'k7', check: 'A rear / back-yard area appears somewhere in the photos (any wide lawn, fenced, or enclosed rear-yard view counts — most backyard shots are just grass and fence). Only a concern if NO backyard/rear area is shown at all.', worktype: 'landscaping', subtype: '', active: true },
+  { id: 'k8', check: 'Nice to have: more than one side/area of the yard captured. Coverage preference only — do NOT route to review for missing sides.', worktype: 'landscaping', subtype: '', active: true },
   { id: 'k9', check: 'Photos show actual cleaning evidence (supplies present, surfaces cleared/wiped).', worktype: 'cleaning', subtype: '', active: true },
   { id: 'k10', check: 'Water is clear and equipment/baskets are shown; chemical test evidence where required.', worktype: 'pools', subtype: '', active: true },
 ];
