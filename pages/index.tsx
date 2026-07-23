@@ -439,9 +439,27 @@ export default function SitePreview() {
   return (
     <>
       <Head>
-        <title>ResiWalk — Property inspections, pricing &amp; operations for SFR &amp; BTR</title>
-        <meta name="description" content="ResiWalk is the property operations platform for SFR & BTR — inspections, real-world pricing, AI reviews, scheduled services, vendor billing, a rules engine, and live insights, in one system." />
+        <title>ResiWalk — Property Management &amp; Inspection Software for SFR &amp; BTR</title>
+        <meta name="description" content="ResiWalk is all-in-one property management and inspection software for single-family rental (SFR) and build-to-rent (BTR) operators — offline field inspections, instant rate-card pricing, AI photo review, vendor management, recurring service scheduling, and live portfolio insights." />
         <link rel="canonical" href="https://resiwalk.com/" />
+        {/* Structured data (Organization + WebSite + SoftwareApplication) so Google
+            understands what ResiWalk is and can show rich results. JSON-LD is
+            inert data — never executed — so the strict script-src CSP is unaffected. */}
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify({
+          '@context': 'https://schema.org',
+          '@graph': [
+            { '@type': 'Organization', '@id': 'https://resiwalk.com/#org', name: 'ResiWalk', url: 'https://resiwalk.com/', logo: 'https://resiwalk.com/icon-512.png', parentOrganization: { '@type': 'Organization', name: 'ResiHome' } },
+            { '@type': 'WebSite', '@id': 'https://resiwalk.com/#site', url: 'https://resiwalk.com/', name: 'ResiWalk', publisher: { '@id': 'https://resiwalk.com/#org' } },
+            {
+              '@type': 'SoftwareApplication', name: 'ResiWalk', url: 'https://resiwalk.com/',
+              applicationCategory: 'BusinessApplication', applicationSubCategory: 'Property Management Software',
+              operatingSystem: 'Web, Android, iOS', image: 'https://resiwalk.com/sitepreview/intro-poster.jpg',
+              description: 'Property management and inspection software for SFR & BTR: offline field inspections, rate-card pricing and scoping, AI photo review, vendor management and billing, recurring services, a rules engine, and live insights.',
+              featureList: 'Offline field inspections; Custom form builder with unlimited templates; Rate-card pricing & scoping; AI photo review; Vendor management & billing; Recurring service scheduling; Rules engine; Portfolio insights dashboard',
+              provider: { '@id': 'https://resiwalk.com/#org' },
+            },
+          ],
+        }) }} />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://resiwalk.com/" />
         <meta property="og:site_name" content="ResiWalk" />

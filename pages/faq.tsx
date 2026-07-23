@@ -26,9 +26,16 @@ export default function FaqPage() {
   return (
     <>
       <Head>
-        <title>ResiWalk — Frequently Asked Questions</title>
-        <meta name="description" content="Answers to common questions about ResiWalk: inspections, real-world pricing & scoping, AI reviews, recurring services, vendor billing, the rules engine, insights, integrations, and security." />
+        <title>Property Inspection &amp; Management Software FAQ | ResiWalk</title>
+        <meta name="description" content="Answers to common questions about ResiWalk property management software: field inspections, real-world pricing & scoping, AI reviews, recurring services, vendor billing, the rules engine, insights, integrations, and security." />
         <link rel="canonical" href="https://resiwalk.com/faq" />
+        {/* FAQPage rich-result schema, generated from the FAQS array above so the
+            markup and the schema can never drift apart. Inert data — CSP-safe. */}
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify({
+          '@context': 'https://schema.org',
+          '@type': 'FAQPage',
+          mainEntity: FAQS.map((f) => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })),
+        }) }} />
       </Head>
       <div className="min-h-screen bg-white text-ink font-body antialiased">
         <SiteNav />
