@@ -219,9 +219,6 @@ export function AICameraCard() {
       <div className="h-56 relative">
         <RoomScene className="absolute inset-0 w-full h-full" />
         <div className="absolute inset-0 bg-black/10" />
-        {/* detection box on the ceiling stain (RoomScene places it top-right) */}
-        <div className="absolute right-[8%] top-[2%] w-[34%] h-[16%] border-2 border-[#73e3df] rounded-md" />
-        <span className="absolute right-[8%] top-[19%] text-[9px] font-bold text-white bg-[#0f172a]/80 rounded px-1.5 py-0.5">water stain · 0.94</span>
         <div className="absolute left-4 right-4 bottom-4 rounded-lg bg-white/95 p-3">
           <div className="flex items-center gap-2 text-[11px] font-heading font-bold text-ink"><span className="w-2 h-2 rounded-full bg-[#ff0060]" /> Detected: ceiling water stain</div>
           <div className="mt-1 text-[11px] text-ink/60">Suggested: drywall repair + prime & paint · confidence 0.94</div>

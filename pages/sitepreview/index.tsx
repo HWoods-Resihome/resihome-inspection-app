@@ -466,9 +466,9 @@ export default function SitePreview() {
           <div className="hero__bg"><div className="hero__grid-lines" /></div>
           <div className="wrap-lg hero__in">
             <div className="hero__copy reveal">
-              <span className="badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg> The #1 Property Management Platform</span>
+              <span className="badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg> The #1 Property Management Tool</span>
               <h1 className="h1">Every property walk,<br /><span className="lite">priced, dispatched &amp; measured.</span></h1>
-              <p className="lead">ResiWalk unifies inspections, real-world pricing &amp; scoping, AI reviews, scheduled services, vendor billing, a self-learning knowledge base, a rules engine, and live insights — one platform, built by industry veterans for SFR &amp; BTR.</p>
+              <p className="lead">ResiWalk turns one property walk into finished work. Walk the home once and leave with photos, full estimate pricing, and separate vendor PDFs and scopes of work — every line AI-reviewed and analyzed on site. No back-office admin, no second walk, no extra apps. Fully customizable to how your team works, built by industry veterans for SFR &amp; BTR.</p>
               <div className="hero__cta">
                 <a href="#contact" className="btn btn--lg btn--pill">Book a demo</a>
               </div>
