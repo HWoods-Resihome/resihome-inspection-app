@@ -1569,7 +1569,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                   <button onClick={generateNow} disabled={genBusy || !canSave}
                     title={canSave ? 'Saves the rule, then generates' : 'Resolve the issues above first'}
                     className="shrink-0 rounded-xl px-3.5 py-2 text-[12px] font-heading font-bold border border-brand text-brand bg-white disabled:opacity-50">
-                    {genBusy ? '…' : 'Generate now'}
+                    {genBusy ? '…' : 'Initiate Now'}
                   </button>
                 </div>
                 <p className="mt-1 text-[11px] text-gray-400">Generate saves your changes first, then makes only the missing ones and auto-cancels any open orders that now meet the stop condition — safe anytime; the nightly job does the same on its own schedule.</p>
