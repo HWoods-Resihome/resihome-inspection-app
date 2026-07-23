@@ -2328,7 +2328,13 @@ export function QuestionForm({
                 </div>
                 <div className="flex items-center gap-2 shrink-0 ml-3">
                   {prog.total > 0 && (
-                    <span className="text-sm bg-brand text-white font-heading font-semibold px-2.5 py-0.5 rounded-full">
+                    // A full question count with the required photo still missing is
+                    // NOT done — show the badge amber so "3/3" can't read as complete
+                    // while the section will still block submit.
+                    <span
+                      className={`text-sm text-white font-heading font-semibold px-2.5 py-0.5 rounded-full ${photosMissing && prog.completed >= prog.total ? 'bg-amber-500' : 'bg-brand'}`}
+                      title={photosMissing && prog.completed >= prog.total ? 'Questions answered — section photo still required' : undefined}
+                    >
                       {prog.completed}/{prog.total}
                     </span>
                   )}
