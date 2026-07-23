@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /app
+Disallow: /login
+Disallow: /services
+Disallow: /inspection/
+Disallow: /inspections/
+Disallow: /admin/
+Disallow: /insights
+
+Sitemap: https://resiwalk.com/sitemap.xml

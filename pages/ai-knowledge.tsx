@@ -191,7 +191,7 @@ export default function AiKnowledgePage({ servicesChecks, servicesTaxonomy }: { 
       <div className="min-h-screen flex items-center justify-center p-6 text-center">
         <div>
           <p className="text-gray-700 font-heading font-semibold mb-2">Admin only</p>
-          <Link href="/" className="text-brand underline text-sm">Back to inspections</Link>
+          <Link href="/app" className="text-brand underline text-sm">Back to inspections</Link>
         </div>
       </div>
     );
@@ -199,7 +199,7 @@ export default function AiKnowledgePage({ servicesChecks, servicesTaxonomy }: { 
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <PageHeader title="AI Knowledge Base" onBack={() => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push('/'))} backHref="/" maxW="max-w-3xl" />
+      <PageHeader title="AI Knowledge Base" onBack={() => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push('/app'))} backHref="/app" maxW="max-w-3xl" />
 
       <main className="max-w-3xl mx-auto px-4 py-5">
         {/* Unified: Inspections knowledge base + Services AI review checks. */}

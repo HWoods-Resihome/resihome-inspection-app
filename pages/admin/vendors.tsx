@@ -544,7 +544,7 @@ export default function VendorManagement() {
       {/* Swipe-down refresh, same as the inspections home. */}
       <PullToRefresh onRefresh={() => load(true)} />
       <main className="min-h-screen bg-gray-50 pb-16">
-        <PageHeader title="Vendor Management" backHref="/" onBack={() => { window.location.href = '/'; }} />
+        <PageHeader title="Vendor Management" backHref="/app" onBack={() => { window.location.href = '/app'; }} />
         <div className="max-w-3xl mx-auto px-4 pt-4">
           {inspPropError && (
             <div className="mb-3 rounded-xl bg-amber-50 border border-amber-300 px-3 py-2.5 text-[13px] text-amber-900">

@@ -97,7 +97,7 @@ export default function AdminsPage() {
       <div className="min-h-screen flex items-center justify-center p-6 text-center">
         <div>
           <p className="text-gray-700 font-heading font-semibold mb-2">Admin only</p>
-          <Link href="/" className="text-brand underline text-sm">Back to inspections</Link>
+          <Link href="/app" className="text-brand underline text-sm">Back to inspections</Link>
         </div>
       </div>
     );

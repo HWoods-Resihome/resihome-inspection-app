@@ -3,6 +3,9 @@ import { jwtVerify } from 'jose';
 
 const PUBLIC_PATHS = new Set<string>([
   '/login',
+  // SEO plumbing for the public marketing homepage — crawlers carry no cookies.
+  '/robots.txt',
+  '/sitemap.xml',
   // PWA install + on-device diagnostics page — reachable without a session.
   '/install',
   // PWA manifest MUST be public. Android Chrome mints the installed app (a
@@ -155,6 +158,34 @@ function vendorPathAllowed(pathname: string): boolean {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // ROOT = the public marketing homepage — with one exception: a signed-in user
+  // who arrives by TYPING resiwalk.com (address bar / bookmark / home-screen /
+  // native-app launch) goes straight into the app at /app. Arrivals via a LINK
+  // (Google result, email, Slack) always get the marketing page, signed in or
+  // not — they can still enter the app via the nav's Log in / Open app button.
+  // `Sec-Fetch-Site: none` marks user-initiated navigations; older browsers
+  // that omit the header fall back to "no Referer ≈ typed".
+  if (pathname === '/') {
+    const token = req.cookies.get('resihome_session')?.value;
+    const secret = process.env.SESSION_SECRET;
+    if (token && secret && (await verifySession(token, new TextEncoder().encode(secret)))) {
+      const sfs = req.headers.get('sec-fetch-site');
+      const typed = sfs ? sfs === 'none' : !req.headers.get('referer');
+      if (typed) {
+        const url = req.nextUrl.clone();
+        url.pathname = '/app';
+        url.search = '';
+        return NextResponse.redirect(url);
+      }
+    }
+    return NextResponse.next();
+  }
+
+  // Public marketing FAQ page.
+  if (pathname === '/faq') {
+    return NextResponse.next();
+  }
+
   // Already signed in AND hitting the login page → skip it, go straight to the
   // app. If the session is missing/expired, fall through to the normal login.
   if (pathname === '/login') {
@@ -162,7 +193,7 @@ export async function middleware(req: NextRequest) {
     const secret = process.env.SESSION_SECRET;
     if (token && secret && (await verifySession(token, new TextEncoder().encode(secret)))) {
       const url = req.nextUrl.clone();
-      url.pathname = '/';
+      url.pathname = '/app';
       url.search = '';
       return NextResponse.redirect(url);
     }
@@ -179,9 +210,9 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // ResiWalk marketing PREVIEW site (and its assets, e.g. the intro .mp4) — public
-  // by design so prospects can view it without a login. Covers /sitepreview and
-  // /sitepreview/faq plus /sitepreview/*.mp4 served from public/.
+  // Marketing assets still live under public/sitepreview/ (video, poster,
+  // photos), and the old /sitepreview page paths 301 to / via next.config
+  // redirects — all of it stays public.
   if (pathname === '/sitepreview' || pathname.startsWith('/sitepreview/')) {
     return NextResponse.next();
   }

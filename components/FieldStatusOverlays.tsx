@@ -17,9 +17,10 @@ export function FieldStatusOverlays() {
   // the user (it covers the sign-in form, and "Sign in again" just reloads
   // /login where the guard re-fires). Suppress it there.
   const onLoginPage = router.pathname === '/login';
-  // The public marketing site (/sitepreview) has no session and no in-progress
-  // field work — app-update and session overlays belong inside the app only.
-  const onMarketingPage = router.pathname.startsWith('/sitepreview');
+  // The public marketing site (/ homepage + /faq) has no session and no
+  // in-progress field work — app-update and session overlays belong inside the
+  // app only. (/sitepreview kept for any stale bookmarks mid-redirect.)
+  const onMarketingPage = router.pathname === '/' || router.pathname === '/faq' || router.pathname.startsWith('/sitepreview');
 
   useEffect(() => {
     const onExpired = () => setSessionExpired(true);
@@ -34,7 +35,7 @@ export function FieldStatusOverlays() {
   // offline mid-inspection and returned home never auto-reloads into a blank
   // page. Other routes show the manual banner. reload() also self-guards offline.
   useEffect(() => {
-    if (!(updateReady && router.pathname === '/' && !sessionExpired)) return;
+    if (!(updateReady && router.pathname === '/app' && !sessionExpired)) return;
     const tryApply = () => { if (typeof navigator === 'undefined' || navigator.onLine !== false) reload(); };
     const t = setTimeout(tryApply, 1200);
     window.addEventListener('online', tryApply);

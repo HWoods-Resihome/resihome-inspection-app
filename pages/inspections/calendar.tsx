@@ -403,7 +403,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <PageHeader title="Calendar" backHref="/" maxW="max-w-3xl" />
+      <PageHeader title="Calendar" backHref="/app" maxW="max-w-3xl" />
 
       <main className="max-w-3xl mx-auto w-full px-4 py-3 space-y-3">
         <div className="flex items-center gap-2">

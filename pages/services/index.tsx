@@ -462,7 +462,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
                   </button>
                   {menuOpen && (<><div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
                     <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
-                      <Link href="/" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Inspections</Link>
+                      <Link href="/app" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Inspections</Link>
                       <div className="px-4 py-2.5 text-sm font-semibold text-brand bg-brand/5">Services ✓</div>
                     </div></>)}
                 </div>

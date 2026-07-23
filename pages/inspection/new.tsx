@@ -639,7 +639,7 @@ export default function NewInspection() {
           normal browser, so web/PWA is unchanged). */}
       <div className="min-h-screen bg-gray-50 flex flex-col" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {/* Shared centered pink header (logo → Inspections home). */}
-        <PageHeader title="New Inspection" backHref="/" maxW="max-w-xl" />
+        <PageHeader title="New Inspection" backHref="/app" maxW="max-w-xl" />
         <main className="max-w-xl mx-auto w-full px-4 py-4 flex-1">
           <div className="space-y-4">
             <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-5">

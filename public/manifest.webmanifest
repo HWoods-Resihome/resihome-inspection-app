@@ -3,7 +3,7 @@
   "name": "ResiWalk Inspection",
   "short_name": "ResiWalk",
   "description": "ResiHome field inspection app — capture line items, photos and video on site, with full offline support.",
-  "start_url": "/",
+  "start_url": "/app",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone"],

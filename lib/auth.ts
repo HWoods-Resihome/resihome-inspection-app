@@ -157,14 +157,14 @@ export function isSafeReturnPath(p: string | undefined | null): p is string {
   return true;
 }
 
-/** Read the validated return-to path from the request cookie, or '/' as a safe default. */
+/** Read the validated return-to path from the request cookie, or '/app' as a safe default. */
 export function readReturnTo(req: NextApiRequest): string {
   try {
     const raw = parse(req.headers.cookie || '')[RETURN_TO_COOKIE];
     const decoded = raw ? decodeURIComponent(raw) : '';
-    return isSafeReturnPath(decoded) ? decoded : '/';
+    return isSafeReturnPath(decoded) ? decoded : '/app';
   } catch {
-    return '/';
+    return '/app';
   }
 }
 

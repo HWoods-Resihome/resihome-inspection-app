@@ -153,7 +153,7 @@ export function decideBackAction(opts: {
   canGoBack: boolean;
 }): BackAction {
   if (opts.overlayOpen) return 'overlay';      // close the open overlay first
-  if (opts.pathname === '/') return 'minimize'; // home screen → leave the app
+  if (opts.pathname === '/app') return 'minimize'; // home screen → leave the app
   return opts.canGoBack ? 'back' : 'minimize';  // else history back (→ home)
 }
 

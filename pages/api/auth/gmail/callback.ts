@@ -209,25 +209,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.query.error) {
-    res.redirect(302, `/?gmail_error=${encodeURIComponent(String(req.query.error))}`);
+    res.redirect(302, `/app?gmail_error=${encodeURIComponent(String(req.query.error))}`);
     return;
   }
   if (!code || !state) {
-    res.redirect(302, '/?gmail_error=missing_code');
+    res.redirect(302, '/app?gmail_error=missing_code');
     return;
   }
 
   const expectedCsrf = cookies[CONNECT_STATE_COOKIE];
   const [csrf, finalizeAfter] = state.split('.');
   if (!expectedCsrf || expectedCsrf !== csrf) {
-    res.redirect(302, '/?gmail_error=state_mismatch');
+    res.redirect(302, '/app?gmail_error=state_mismatch');
     return;
   }
 
   try {
     const { refreshToken } = await exchangeCodeForRefreshToken(cfg, code);
     if (!refreshToken) {
-      res.redirect(302, '/?gmail_error=no_refresh_token');
+      res.redirect(302, '/app?gmail_error=no_refresh_token');
       return;
     }
     res.setHeader('Set-Cookie', [
@@ -237,10 +237,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (finalizeAfter) {
       res.redirect(302, `/inspection/${finalizeAfter}?finalizeNow=1`);
     } else {
-      res.redirect(302, '/?gmail_connected=1');
+      res.redirect(302, '/app?gmail_connected=1');
     }
   } catch (e: any) {
     console.error('[gmail callback] token exchange failed:', e);
-    res.redirect(302, `/?gmail_error=${encodeURIComponent('exchange_failed')}`);
+    res.redirect(302, `/app?gmail_error=${encodeURIComponent('exchange_failed')}`);
   }
 }

@@ -1,5 +1,5 @@
 /**
- * /sitepreview/faq — public FAQ (Resources) for the ResiWalk preview site.
+ * /faq — public FAQ (Resources) for the ResiWalk marketing site.
  * Accordion of common questions across inspections, pricing, AI, services,
  * integrations, and security. Shares the site nav + footer.
  */
@@ -28,7 +28,7 @@ export default function FaqPage() {
       <Head>
         <title>ResiWalk — Frequently Asked Questions</title>
         <meta name="description" content="Answers to common questions about ResiWalk: inspections, real-world pricing & scoping, AI reviews, recurring services, vendor billing, the rules engine, insights, integrations, and security." />
-        <meta name="robots" content="noindex" />
+        <link rel="canonical" href="https://resiwalk.com/faq" />
       </Head>
       <div className="min-h-screen bg-white text-ink font-body antialiased">
         <SiteNav />
@@ -38,7 +38,7 @@ export default function FaqPage() {
             <Reveal>
               <span className="text-brand font-heading font-bold text-sm uppercase tracking-wide">Resources</span>
               <h1 className="mt-3 font-heading font-extrabold text-4xl lg:text-5xl text-ink">Frequently asked questions</h1>
-              <p className="mt-4 text-lg text-ink/70">Everything you need to know about the platform. Still curious? <Link href="/sitepreview#contact" className="text-brand font-semibold underline">Talk to us</Link>.</p>
+              <p className="mt-4 text-lg text-ink/70">Everything you need to know about the platform. Still curious? <Link href="/#contact" className="text-brand font-semibold underline">Talk to us</Link>.</p>
             </Reveal>
           </div>
         </section>
@@ -71,7 +71,7 @@ export default function FaqPage() {
             <h2 className="font-heading font-extrabold text-2xl lg:text-3xl">Didn&apos;t find your answer?</h2>
             <p className="mt-3 text-white/85">Our team is happy to dig into the specifics of your operation.</p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
-              <Link href="/sitepreview#contact" className="inline-flex items-center h-11 px-7 rounded-full bg-white text-brand font-heading font-bold hover:bg-white/90 transition-colors">Contact us</Link>
+              <Link href="/#contact" className="inline-flex items-center h-11 px-7 rounded-full bg-white text-brand font-heading font-bold hover:bg-white/90 transition-colors">Contact us</Link>
               <Link href="/login" className="inline-flex items-center h-11 px-7 rounded-full border border-white/40 text-white font-heading font-bold hover:bg-white/10 transition-colors">Log in</Link>
             </div>
           </div>

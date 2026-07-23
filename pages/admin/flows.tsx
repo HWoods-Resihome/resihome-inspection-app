@@ -84,7 +84,7 @@ export default function AdminFlowsPage() {
   if (!isAdmin) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 text-center">
-        <div><p className="text-gray-700 font-heading font-semibold mb-2">Admin only</p><Link href="/" className="text-brand underline text-sm">Back</Link></div>
+        <div><p className="text-gray-700 font-heading font-semibold mb-2">Admin only</p><Link href="/app" className="text-brand underline text-sm">Back</Link></div>
       </div>
     );
   }
@@ -92,7 +92,7 @@ export default function AdminFlowsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Head><title>Admin</title></Head>
-      <PageHeader title="Admin" onBack={() => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push('/'))} backHref="/" maxW="max-w-2xl" />
+      <PageHeader title="Admin" onBack={() => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push('/app'))} backHref="/app" maxW="max-w-2xl" />
 
       <main className="max-w-2xl mx-auto px-4 py-6">
         {/* ---- User Management (internal users + per-section access) ---- */}

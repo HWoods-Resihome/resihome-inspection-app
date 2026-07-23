@@ -71,6 +71,16 @@ const nextConfig = {
     if (!BLOB_PUBLIC_HOST) return [];
     return [{ source: '/m/:path*', destination: `https://${BLOB_PUBLIC_HOST}/:path*` }];
   },
+  // The marketing site was promoted from /sitepreview to the site root — keep any
+  // shared /sitepreview links working. Exact page paths only: the marketing assets
+  // (video, poster, photos) still live under /sitepreview/* in public/ and must
+  // NOT be redirected.
+  async redirects() {
+    return [
+      { source: '/sitepreview', destination: '/', permanent: true },
+      { source: '/sitepreview/faq', destination: '/faq', permanent: true },
+    ];
+  },
   async headers() {
     // Content-Security-Policy — the primary XSS defense. script-src is locked to
     // 'self' + the ONE known inline script (the PWA install-prompt capture in

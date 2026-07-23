@@ -37,11 +37,11 @@ export function Reveal({ children, delay = 0, className = '' }: { children: Reac
 }
 
 const NAV = [
-  { label: 'Platform', href: '/sitepreview#platform' },
-  { label: 'Integrations', href: '/sitepreview#integrations' },
-  { label: 'Pricing', href: '/sitepreview#pricing' },
-  { label: 'Insights', href: '/sitepreview#insights' },
-  { label: 'FAQ', href: '/sitepreview/faq' },
+  { label: 'Platform', href: '/#platform' },
+  { label: 'Integrations', href: '/#integrations' },
+  { label: 'Pricing', href: '/#pricing' },
+  { label: 'Insights', href: '/#insights' },
+  { label: 'FAQ', href: '/faq' },
 ];
 
 export function SiteNav() {
@@ -56,7 +56,7 @@ export function SiteNav() {
   return (
     <header className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${scrolled ? 'bg-white/90 backdrop-blur-md shadow-[0_1px_0_rgba(0,0,0,0.06)]' : 'bg-transparent'}`}>
       <nav className="max-w-7xl mx-auto px-5 lg:px-8 h-16 flex items-center justify-between">
-        <Link href="/sitepreview" className="flex items-center gap-2 shrink-0" aria-label="ResiWalk home">
+        <Link href="/" className="flex items-center gap-2 shrink-0" aria-label="ResiWalk home">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/resiwalk-logo.svg" alt="ResiWalk" className="h-9 w-auto" />
         </Link>
@@ -67,7 +67,7 @@ export function SiteNav() {
         </div>
         <div className="hidden md:flex items-center gap-3">
           <Link href="/login" className="text-[15px] font-heading font-semibold text-ink/80 hover:text-brand transition-colors">Log in</Link>
-          <Link href="/sitepreview#contact" className="inline-flex items-center h-10 px-5 rounded-full bg-brand text-white font-heading font-bold text-sm hover:bg-brand-dark transition-colors shadow-sm">Book a demo</Link>
+          <Link href="/#contact" className="inline-flex items-center h-10 px-5 rounded-full bg-brand text-white font-heading font-bold text-sm hover:bg-brand-dark transition-colors shadow-sm">Book a demo</Link>
         </div>
         <button type="button" onClick={() => setOpen((o) => !o)} className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg text-ink" aria-label="Menu" aria-expanded={open}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d={open ? 'M6 6l12 12M6 18L18 6' : 'M4 7h16M4 12h16M4 17h16'} /></svg>
@@ -80,7 +80,7 @@ export function SiteNav() {
           ))}
           <div className="pt-3 flex items-center gap-3">
             <Link href="/login" className="flex-1 text-center h-11 leading-[44px] rounded-full border border-gray-300 font-heading font-bold text-sm text-ink">Log in</Link>
-            <Link href="/sitepreview#contact" onClick={() => setOpen(false)} className="flex-1 text-center h-11 leading-[44px] rounded-full bg-brand text-white font-heading font-bold text-sm">Book a demo</Link>
+            <Link href="/#contact" onClick={() => setOpen(false)} className="flex-1 text-center h-11 leading-[44px] rounded-full bg-brand text-white font-heading font-bold text-sm">Book a demo</Link>
           </div>
         </div>
       )}
@@ -97,9 +97,9 @@ export function SiteFooter() {
           <img src="/resiwalk-logo.svg" alt="ResiWalk" className="h-8 w-auto brightness-0 invert" />
           <p className="mt-4 text-sm leading-relaxed max-w-xs">The full-suite property inspection, vendor management, and services platform — built by industry veterans for the SFR &amp; BTR demands of today and tomorrow.</p>
         </div>
-        <FooterCol title="Platform" links={[['Inspections', '/sitepreview#platform'], ['Pricing & Scoping', '/sitepreview#pricing'], ['AI Reviews', '/sitepreview#ai'], ['Services & Vendors', '/sitepreview#services'], ['Insights', '/sitepreview#insights']]} />
-        <FooterCol title="Resources" links={[['FAQ', '/sitepreview/faq'], ['Integrations', '/sitepreview#integrations'], ['Contact us', '/sitepreview#contact']]} />
-        <FooterCol title="Company" links={[['Log in', '/login'], ['Book a demo', '/sitepreview#contact'], ['Built for SFR & BTR', '/sitepreview#platform']]} />
+        <FooterCol title="Platform" links={[['Inspections', '/#platform'], ['Pricing & Scoping', '/#pricing'], ['AI Reviews', '/#ai'], ['Services & Vendors', '/#services'], ['Insights', '/#insights']]} />
+        <FooterCol title="Resources" links={[['FAQ', '/faq'], ['Integrations', '/#integrations'], ['Contact us', '/#contact']]} />
+        <FooterCol title="Company" links={[['Log in', '/login'], ['Book a demo', '/#contact'], ['Built for SFR & BTR', '/#platform']]} />
       </div>
       <div className="border-t border-white/10">
         <div className="max-w-7xl mx-auto px-5 lg:px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">

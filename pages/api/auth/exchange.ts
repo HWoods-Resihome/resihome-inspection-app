@@ -51,5 +51,5 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   res.setHeader('Set-Cookie', cookies);
-  res.redirect(302, '/');
+  res.redirect(302, '/app');
 }

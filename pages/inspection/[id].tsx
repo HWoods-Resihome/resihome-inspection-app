@@ -507,7 +507,7 @@ export default function ExistingInspection() {
             <button onClick={() => window.location.reload()} className="px-3 py-1.5 rounded-lg bg-brand text-white font-heading font-semibold text-xs hover:bg-brand-dark">
               Try again
             </button>
-            <button onClick={() => router.replace('/')} className="text-brand underline text-xs">
+            <button onClick={() => router.replace('/app')} className="text-brand underline text-xs">
               Back to Inspections List
             </button>
           </div>
@@ -735,7 +735,7 @@ export default function ExistingInspection() {
           inspectionStatus={inspection.status}
           pdfUrl={isCompleted ? (shareLinks?.report || inspection.pdfUrl || undefined) : undefined}
           readOnly={readOnly}
-          onSubmit={() => router.replace('/')}
+          onSubmit={() => router.replace('/app')}
           onCancel={() => { window.location.assign('/'); }}
           onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           onCancelInspection={readOnly ? undefined : handleCancelInspection}
@@ -779,7 +779,7 @@ export default function ExistingInspection() {
           inspectionStatus={inspection.status}
           inspectionRegion={inspection.regionSnapshot || ''}
           sectionListJson={inspection.sectionListJson}
-          onSubmit={() => router.replace('/')}
+          onSubmit={() => router.replace('/app')}
           onCancel={() => { window.location.assign('/'); }}
           onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           inspectionRecordId={inspectionId}
