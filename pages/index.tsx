@@ -453,7 +453,7 @@ export default function SitePreview() {
             {
               '@type': 'SoftwareApplication', name: 'ResiWalk', url: 'https://resiwalk.com/',
               applicationCategory: 'BusinessApplication', applicationSubCategory: 'Property Management Software',
-              operatingSystem: 'Web, Android, iOS', image: 'https://resiwalk.com/sitepreview/intro-poster.jpg',
+              operatingSystem: 'Web, Android, iOS', image: 'https://resiwalk.com/og-image.png',
               description: 'Property management and inspection software for SFR & BTR: offline field inspections, rate-card pricing and scoping, AI photo review, vendor management and billing, recurring services, a rules engine, and live insights.',
               featureList: 'Offline field inspections; Custom form builder with unlimited templates; Rate-card pricing & scoping; AI photo review; Vendor management & billing; Recurring service scheduling; Rules engine; Portfolio insights dashboard',
               provider: { '@id': 'https://resiwalk.com/#org' },
@@ -465,7 +465,9 @@ export default function SitePreview() {
         <meta property="og:site_name" content="ResiWalk" />
         <meta property="og:title" content="ResiWalk — The #1 Property Management Tool" />
         <meta property="og:description" content="Every property walk — priced, dispatched & measured. Inspections, real-world pricing, AI reviews, scheduled services, vendor billing, and live insights in one platform." />
-        <meta property="og:image" content="https://resiwalk.com/sitepreview/intro-poster.jpg" />
+        <meta property="og:image" content="https://resiwalk.com/og-image.png" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="theme-color" content="#FF0066" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
