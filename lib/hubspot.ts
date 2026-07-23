@@ -4617,6 +4617,66 @@ export async function stampComplianceTicketsCreated(inspectionRecordId: string):
   }
 }
 
+// ── Tenant Chargeback SFTP-import idempotency stamp ─────────────────────────
+// Set the instant the Tenant Chargeback Import xlsx is dropped to the SFTP, so a
+// reopen→resubmit→finalize (or a crash/retry) NEVER re-drops the file — the
+// downstream importer APPENDS, so a re-drop multiplies the tenant's rows (the
+// "21 lines became 125 rows" incident). This mirrors the compliance-stamp
+// pattern and, crucially, SELF-PROVISIONS the property on first use: the old
+// code wrote to a property that may never have existed, so the write threw, the
+// stamp never persisted, and the guard failed OPEN — re-dropping on every
+// reopen. Self-provisioning makes the guard always live.
+const CHARGEBACK_IMPORT_STAMP_PROP = 'chargeback_import_sent_at';
+
+async function ensureChargebackImportStampProperty(): Promise<void> {
+  const { inspection } = typeIds();
+  try { await hubspotFetch(`/crm/v3/properties/${inspection}/${CHARGEBACK_IMPORT_STAMP_PROP}`); return; } catch { /* missing → create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${inspection}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: CHARGEBACK_IMPORT_STAMP_PROP, label: 'Tenant Chargeback Import Sent At', type: 'datetime', fieldType: 'date',
+        groupName: 'inspection_results',
+        description: 'Set once the Tenant Chargeback Import xlsx has been dropped to the SFTP for this inspection — gates re-dropping on reopen/re-finalize so the tenant is never double-billed.',
+      }),
+    });
+  } catch (e: any) {
+    const blob = `${String(e?.message || e)} ${String(e?.detail || '')}`;
+    if (!(e?.status === 409 || /already exists|PROPERTY_ALREADY_EXISTS/i.test(blob))) {
+      console.warn('[finalize] could not provision chargeback_import_sent_at:', blob.slice(0, 200));
+    }
+  }
+}
+
+/**
+ * Stamp the inspection as tenant-charge-imported (epoch ms). Auto-provisions the
+ * property on first use and retries, because losing this stamp lets a later
+ * finalize re-drop the import and multiply the tenant's charges. Returns true
+ * only when the write is confirmed persisted so the caller can log loudly.
+ */
+export async function stampChargebackImported(inspectionRecordId: string): Promise<boolean> {
+  const { inspection } = typeIds();
+  const write = () => hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: { [CHARGEBACK_IMPORT_STAMP_PROP]: Date.now() } }),
+  });
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try { await write(); return true; }
+    catch (e) {
+      if (isMissingPropertyError(e, CHARGEBACK_IMPORT_STAMP_PROP)) {
+        await ensureChargebackImportStampProperty();
+        try { await write(); return true; }
+        catch (e2) { if (attempt === 3) console.error('[finalize] FAILED to persist chargeback_import_sent_at after provisioning — a reopen/re-finalize could RE-IMPORT the tenant charge (double-bill):', e2); }
+      } else if (attempt === 3) {
+        console.error('[finalize] FAILED to persist chargeback_import_sent_at — a reopen/re-finalize could RE-IMPORT the tenant charge (double-bill):', e);
+      } else {
+        await new Promise((r) => setTimeout(r, 300 * attempt));
+      }
+    }
+  }
+  return false;
+}
+
 // ── 1099 listing-price Slack alert gate ─────────────────────────────────────
 // Stamped once a listing-price (Reduce/Increase) Slack alert has been posted for
 // an inspection, so re-submitting the same inspection doesn't re-post.
@@ -5623,6 +5683,11 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
   // section photos easily exceeds that — don't silently drop records, which
   // would corrupt finalize totals, PDFs, reopen, and QC copy.
   const answerIds: string[] = [];
+  // Dedup as we collect: a duplicate association (or a paging cursor that
+  // re-emits a page) would list the same Answer twice, which would DOUBLE that
+  // line everywhere downstream — totals, PDFs, and the tenant-charge import rows.
+  const seenAnswerIds = new Set<string>();
+  let dupAssocCount = 0;
   let after: string | undefined;
   // Runaway guard: 500/page × 200 pages = 100k answers — orders of magnitude
   // beyond any real inspection. This bounds a pathological record AND a
@@ -5639,7 +5704,11 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
     );
     for (const r of assocResp.results || []) {
       const id = r.toObjectId ?? r.id;
-      if (id != null) answerIds.push(String(id));
+      if (id == null) continue;
+      const s = String(id);
+      if (seenAnswerIds.has(s)) { dupAssocCount++; continue; }
+      seenAnswerIds.add(s);
+      answerIds.push(s);
     }
     after = assocResp.paging?.next?.after;
     if (++pageCount >= MAX_ASSOC_PAGES && after) {
@@ -5647,6 +5716,9 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
       break;
     }
   } while (after);
+  if (dupAssocCount > 0) {
+    console.warn(`[fetchAnswersForInspection] ${inspectionRecordId}: collapsed ${dupAssocCount} duplicate answer association(s) — investigate the write path that created them.`);
+  }
   if (answerIds.length === 0) return [];
 
   // Step 2: batch-read answer properties. HubSpot batch read limit is 100.

@@ -30,6 +30,7 @@ import {
   stampPropertyStatusAtCompletion,
   upsertAnswers,
   populateBillingFields,
+  stampChargebackImported,
 } from '@/lib/hubspot';
 import { buildQaAnswerProps } from '@/lib/answerProps';
 import { isFinalizeAdmin } from '@/lib/finalizeAccess';
@@ -848,8 +849,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // Stamp "imported" the INSTANT the drop succeeds (before the status flip
         // and the rest of the pipeline), so a reopen→resubmit→finalize — or a
         // crash-resume — reads chargebackAlreadyImported and does NOT re-drop the
-        // xlsx and double-bill the tenant.
-        await storeFinalizeStamp('chargeback_import_sent_at', new Date().toISOString(), 'a reopen/re-finalize could RE-IMPORT the tenant charge (double-bill)');
+        // xlsx and double-bill the tenant. Uses a SELF-PROVISIONING stamp so the
+        // guard can't silently fail open when the property was never created (the
+        // failure that let one import re-run and multiply the tenant's rows).
+        await stampChargebackImported(id);
       } else if (sftpResult.configured) {
         console.warn(`[finalize] tenant charge import SFTP upload failed: ${sftpResult.error}`);
       } else {

@@ -118,14 +118,26 @@ export async function renderChargebackXlsx(
   ctx: PdfBuildContext,
   input: TenantChargebackXlsxInput
 ): Promise<Buffer | null> {
-  // Flatten and filter to chargeback-eligible lines (tenant % > 0 AND $ > 0)
+  // Flatten and filter to chargeback-eligible lines (tenant % > 0 AND $ > 0).
+  // Dedup by the answer's external id (fallback: a stable content key) so a
+  // single import file can NEVER contain the same charge twice — a last-line
+  // defense against any upstream duplication multiplying a tenant's rows.
   const lines: PdfLineRow[] = [];
+  const seen = new Set<string>();
+  let dupRows = 0;
   for (const section of ctx.sections) {
     for (const line of section.lines) {
       if (line.tenantBillBackPercent > 0 && line.tenantCost > 0) {
+        const key = line.externalId
+          || `${line.section}|${line.lineItemCode}|${line.tenantBillBackPercent}|${Math.round(line.tenantCost * 100)}|${line.laborShortDescription}`;
+        if (seen.has(key)) { dupRows++; continue; }
+        seen.add(key);
         lines.push(line);
       }
     }
+  }
+  if (dupRows > 0) {
+    console.warn(`[xlsxChargeback] ${ctx.inspectionRecordId}: skipped ${dupRows} duplicate chargeback row(s) — import file kept unique.`);
   }
   if (lines.length === 0) return null;
 
