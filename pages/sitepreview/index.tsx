@@ -321,7 +321,7 @@ const CSS = `
 .final p{color:rgba(255,255,255,.9);font-size:var(--fs-lead);margin-bottom:2rem}.final__cta{display:flex;gap:.8rem;justify-content:center;flex-wrap:wrap}
 .foot{background:var(--panel);color:rgba(255,255,255,.7);padding-block:clamp(3rem,6vw,4.5rem) 2rem}
 .foot__top{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:2rem;padding-bottom:2.5rem;border-bottom:1px solid rgba(255,255,255,.1)}
-.foot__brand img{height:26px;margin-bottom:1rem}.foot__brand p{font-size:.9rem;color:rgba(255,255,255,.6);max-width:34ch;line-height:1.6}
+.foot__brand img{height:26px;margin-bottom:1rem}.foot__brand p{font-size:.9rem;color:rgba(255,255,255,.6);line-height:1.6}
 .foot h4{font-family:var(--f-display);font-weight:500;font-size:.82rem;letter-spacing:.1em;text-transform:uppercase;color:#fff;margin:0 0 1rem}
 .foot ul{list-style:none;margin:0;padding:0;display:grid;gap:.6rem}.foot ul a{font-size:.9rem;color:rgba(255,255,255,.68);transition:color .15s}.foot ul a:hover{color:var(--aqua)}
 .foot__bottom{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding-top:1.8rem;flex-wrap:wrap;font-size:.82rem;color:rgba(255,255,255,.5)}.foot__tag{color:var(--aqua);font-weight:600}
