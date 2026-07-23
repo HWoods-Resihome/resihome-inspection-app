@@ -2247,10 +2247,21 @@ const SERVICE_DETAIL_PROPS = [
   'hs_createdate',
 ];
 
+// Short per-id cache for the hot service-detail read (detail page + its photo
+// gallery + the pager both fetch the same record; opening → photos → back used to
+// re-GET each time). Busted by patchServiceWorkOrder on any write, so a mutation
+// followed by router.replace re-reads fresh; only cross-instance staleness remains
+// (same accepted tradeoff as _svcListCache, hence the short TTL).
+const _svcRecordCache = new Map<string, { at: number; data: { id: string; props: Record<string, any> } | null }>();
+const SVC_RECORD_TTL_MS = 8_000;
+export function bustServiceRecordCache(id?: string): void { if (id) _svcRecordCache.delete(id); else _svcRecordCache.clear(); }
+
 /** One Service Work Order's raw props by record id, or null (not configured / not found). */
 export async function fetchServiceWorkOrder(id: string): Promise<{ id: string; props: Record<string, any> } | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId || !id) return null;
+  const cached = _svcRecordCache.get(id);
+  if (cached && Date.now() - cached.at < SVC_RECORD_TTL_MS) return cached.data;
   try {
     const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/${id}?properties=${SERVICE_DETAIL_PROPS.join(',')}`);
     if (resp?.id) {
@@ -2264,8 +2275,11 @@ export async function fetchServiceWorkOrder(id: string): Promise<{ id: string; p
         if (!loc && p.community_name) loc = (await communityLocalityByName().catch(() => new Map<string, string>())).get(String(p.community_name)) || '';
         if (loc) p.locality_snapshot = loc;
       }
-      return { id: String(resp.id), props: p };
+      const rec = { id: String(resp.id), props: p };
+      _svcRecordCache.set(id, { at: Date.now(), data: rec });
+      return rec;
     }
+    _svcRecordCache.set(id, { at: Date.now(), data: null });
     return null;
   } catch (e) { console.warn('[services] work order fetch failed:', e); return null; }
 }
@@ -2306,7 +2320,7 @@ export async function patchServiceWorkOrder(id: string, props: Record<string, an
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId || !id) return false;
   await writeObjectResilient(typeId, id, props);
-  bustServiceListCache(); bustServiceKeysCache();   // status/vendor/etc changed → invalidate the list + key scan
+  bustServiceListCache(); bustServiceKeysCache(); bustServiceRecordCache(id);   // status/vendor/etc changed → invalidate list + key scan + this record
   return true;
 }
 

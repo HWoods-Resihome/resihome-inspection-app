@@ -21,12 +21,16 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   if (isViewingAsVendor(ctx.req)) return { redirect: { destination: '/services', permanent: false } };
-  const recs = await searchServiceRuleRecords().catch(() => null);
-  const canGenerate = await isAppAdmin(session?.email).catch(() => false);
-  const taxonomy = await readServiceTaxonomy().catch(() => null);
-  // Current OPEN service volume per vendor — the basis for the equal-volume rotation
-  // count shown next to each company in the vendor picker (real Service Work Orders).
-  const keys = await readServiceWorkOrderKeys().catch(() => null);
+  // These four reads are independent — run them in parallel (was 4 serial HubSpot
+  // round-trips). `vendorOpen` is derived from `keys` purely in-memory afterward.
+  const [recs, canGenerate, taxonomy, keys] = await Promise.all([
+    searchServiceRuleRecords().catch(() => null),
+    isAppAdmin(session?.email).catch(() => false),
+    readServiceTaxonomy().catch(() => null),
+    // Current OPEN service volume per vendor — the basis for the equal-volume rotation
+    // count shown next to each company in the vendor picker (real Service Work Orders).
+    readServiceWorkOrderKeys().catch(() => null),
+  ]);
   const vendorOpen: Record<string, number> = {};
   for (const k of keys || []) {
     if (k.vendor && OPEN_SERVICE_STATUSES.includes(k.status)) vendorOpen[k.vendor] = (vendorOpen[k.vendor] || 0) + 1;

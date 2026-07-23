@@ -16,7 +16,10 @@
  * or hitting HubSpot's rate limit.
  */
 
-import imageCompression from 'browser-image-compression';
+// browser-image-compression is ~heavy and only needed at capture time — lazy-load
+// it (like @vercel/blob/client below) so it's off the first-load bundle of every
+// page that can reach photo upload.
+import type imageCompressionType from 'browser-image-compression';
 
 const MAX_UPLOAD_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 800;
@@ -47,6 +50,7 @@ export async function compressToJpeg(file: File): Promise<Blob> {
 
   let compressed: Blob | null = null;
   try {
+    const imageCompression: typeof imageCompressionType = (await import('browser-image-compression')).default;
     const result = await imageCompression(file, {
       maxSizeMB: TARGET_MAX_SIZE_MB,
       maxWidthOrHeight: TARGET_MAX_DIMENSION,

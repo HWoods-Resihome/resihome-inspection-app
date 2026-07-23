@@ -224,6 +224,40 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
     }).catch(() => {});
     return () => { alive = false; };
   }, []);
+  // Keep the list fresh WITHOUT a manual pull-to-refresh: re-run SSR when the tab
+  // regains focus / the device reconnects / the page becomes visible again (a
+  // teammate may have changed a service, or a just-created one is now indexed).
+  // Same call the mutation handlers use; the vendorOverrides/cancelledIds overlays
+  // protect against a momentarily-stale SSR paint.
+  useEffect(() => {
+    let last = 0;
+    const revalidate = () => {
+      const now = Date.now();
+      if (now - last < 3000) return;   // debounce rapid focus/visibility churn
+      last = now;
+      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});
+    };
+    const onVis = () => { if (document.visibilityState === 'visible') revalidate(); };
+    window.addEventListener('focus', revalidate);
+    window.addEventListener('online', revalidate);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', revalidate);
+      window.removeEventListener('online', revalidate);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // A just-created/edited service can lag HubSpot's search index by a beat — when
+  // arriving with ?just=1 (set by the create flow), re-fetch shortly after paint so
+  // the new row appears without a manual refresh.
+  useEffect(() => {
+    if (!router.query.just) return;
+    const t = setTimeout(() => { router.replace('/services', undefined, { scroll: false }).catch(() => {}); }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.query.just]);
+
   const [reassignVendor, setReassignVendor] = useState('');
   const [reassignQuery, setReassignQuery] = useState('');
   // Optimistic vendor overlay: after a bulk reassign, HubSpot's search index (and

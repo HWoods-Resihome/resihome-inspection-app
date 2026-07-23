@@ -476,8 +476,8 @@ export default function ExistingInspection() {
         const data = await r.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${r.status}`);
       }
-      // Refresh
-      window.location.reload();
+      // Re-run SSR in place (no white-flash full reload, keeps scroll/SPA state).
+      await router.replace(router.asPath, undefined, { scroll: false }).catch(() => window.location.reload());
     } catch (e: any) {
       void dialog.alert(`Reopen failed: ${e.message || e}`);
     }

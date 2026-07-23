@@ -58,30 +58,37 @@ export default function AdminsPage() {
   async function addAdmin() {
     const email = newEmail.trim();
     if (!email) return;
-    setBusy(true);
+    // Optimistic: show the row immediately, revert on failure.
+    const prev = admins;
+    const cur = admins || [];
+    if (!cur.some((a) => a.email.toLowerCase() === email.toLowerCase())) {
+      setAdmins([...cur, { email, seed: false }].sort((a, b) => a.email.localeCompare(b.email)));
+    }
+    setNewEmail(''); setError(null); setBusy(true);
     try {
       const r = await fetch('/api/admin/admins', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
       const d = await r.json();
-      if (!r.ok) { setError(d.error || 'Add failed'); return; }
-      setNewEmail('');
-      setAdmins(d.admins || []);
-      setError(null);
-    } finally { setBusy(false); }
+      if (!r.ok) { setAdmins(prev); setError(d.error || 'Add failed'); return; }
+      setAdmins(d.admins || []);   // reconcile with the authoritative list
+    } catch { setAdmins(prev); setError('Add failed — try again.'); }
+    finally { setBusy(false); }
   }
 
   async function removeAdmin(email: string) {
     if (!confirm(`Remove ${email} as an admin?`)) return;
-    setBusy(true);
+    // Optimistic: drop the row immediately, revert on failure.
+    const prev = admins;
+    setAdmins((admins || []).filter((a) => a.email !== email)); setError(null); setBusy(true);
     try {
       const r = await fetch(`/api/admin/admins/${encodeURIComponent(email)}`, { method: 'DELETE' });
       const d = await r.json();
-      if (!r.ok) { setError(d.error || 'Remove failed'); return; }
+      if (!r.ok) { setAdmins(prev); setError(d.error || 'Remove failed'); return; }
       setAdmins(d.admins || []);
-      setError(null);
-    } finally { setBusy(false); }
+    } catch { setAdmins(prev); setError('Remove failed — try again.'); }
+    finally { setBusy(false); }
   }
 
   if (!authChecked) return null;

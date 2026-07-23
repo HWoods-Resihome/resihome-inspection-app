@@ -25,8 +25,9 @@ import ServicesAiKnowledge from '@/pages/services/ai-knowledge';
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const admin = await isAppAdmin(session?.email).catch(() => false);
-  const servicesChecks = admin ? await readServiceAiChecks().catch(() => null) : null;
-  const servicesTaxonomy = admin ? await readServiceTaxonomy().catch(() => null) : null;
+  const [servicesChecks, servicesTaxonomy] = admin
+    ? await Promise.all([readServiceAiChecks().catch(() => null), readServiceTaxonomy().catch(() => null)])
+    : [null, null];
   return { props: { servicesChecks: (servicesChecks as AiCheck[] | null) || null, servicesTaxonomy: (servicesTaxonomy as CustomWorktypeDef[] | null) || null } };
 };
 

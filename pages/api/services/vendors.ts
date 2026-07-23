@@ -21,6 +21,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const vendors = list
       .map((v) => ({ name: v.name, email: v.email }))
       .sort((a, b) => a.name.localeCompare(b.name));
+    // Same list is fetched by every services screen (rules, new, reassign, calendar,
+    // detail). Let the browser reuse it for 60s so re-navigations don't re-request.
+    res.setHeader('Cache-Control', 'private, max-age=60');
     return res.status(200).json({ vendors });
   } catch (e: any) {
     return res.status(500).json({ error: 'Could not load vendors' });

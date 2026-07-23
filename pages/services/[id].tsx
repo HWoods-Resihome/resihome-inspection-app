@@ -15,10 +15,13 @@ import { fetchServiceWorkOrder, fetchPropertyLockInfo, fetchPropertyMoveInDate, 
 import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
 import { reviewerDisplayName } from '@/lib/reviewerName';
 import type { AuditEvent } from '@/lib/auditLog';
-import { CameraCapture } from '@/components/CameraCapture';
+import dynamic from 'next/dynamic';
 import { PhotoThumb } from '@/components/PhotoThumb';
 import { brandedFileUrl } from '@/lib/photoDisplay';
-import { PhotoLightbox } from '@/components/PhotoLightbox';
+// Camera + lightbox are heavy (camera stack ~220KB) and only needed once the user
+// taps to capture/view — lazy-load them so they're off /services/[id] first load.
+const CameraCapture = dynamic(() => import('@/components/CameraCapture').then((m) => m.CameraCapture), { ssr: false });
+const PhotoLightbox = dynamic(() => import('@/components/PhotoLightbox').then((m) => m.PhotoLightbox), { ssr: false });
 import { UnlockButton, lockRingFromProperty, type LockRing } from '@/components/UnlockButton';
 import { FitText } from '@/components/FitText';
 import ServicePager from '@/components/ServicePager';

@@ -27,8 +27,9 @@ import ServicesFormBuilder from '@/pages/services/forms';
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const admin = await isAppAdmin(session?.email).catch(() => false);
-  const servicesForms = admin ? await readServiceForms().catch(() => null) : null;
-  const servicesTaxonomy = admin ? await readServiceTaxonomy().catch(() => null) : null;
+  const [servicesForms, servicesTaxonomy] = admin
+    ? await Promise.all([readServiceForms().catch(() => null), readServiceTaxonomy().catch(() => null)])
+    : [null, null];
   return { props: { servicesForms: servicesForms || null, servicesTaxonomy: (servicesTaxonomy as CustomWorktypeDef[] | null) || null } };
 };
 

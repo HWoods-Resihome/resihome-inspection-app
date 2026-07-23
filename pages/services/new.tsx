@@ -185,8 +185,10 @@ export default function NewService({ servicesTaxonomy }: { servicesTaxonomy: Cus
                 <a href={`/services/${encodeURIComponent(createdId)}`} className="bg-brand text-white rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight grid place-items-center">Open Service</a>
               )}
               <button onClick={() => { setCreated(false); setCreatedId(null); setWorktype(''); setSubtype(''); setTarget(''); setSelectedProp(null); setDueDate(''); setVendor(vendorNames[0] || ''); }} className="border border-gray-300 bg-white rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight">Create Another</button>
-              {/* Hard navigation so the Services list re-runs its server fetch. */}
-              <a href="/services" className={`rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight grid place-items-center ${createdId ? 'border border-gray-300 bg-white text-ink' : 'bg-brand text-white'}`}>Back to Services</a>
+              {/* Hard navigation so the Services list re-runs its server fetch;
+                  ?just=1 makes the home do a delayed re-fetch to beat search-index
+                  lag so the just-created service shows without a manual refresh. */}
+              <a href="/services?just=1" className={`rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight grid place-items-center ${createdId ? 'border border-gray-300 bg-white text-ink' : 'bg-brand text-white'}`}>Back to Services</a>
             </div>
           </div>
         ) : (
