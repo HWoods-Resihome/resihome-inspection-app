@@ -264,10 +264,10 @@ export default function LoginPage() {
             on the next crawl. (No robots:noindex — this is the public landing for
             resiwalk.com, so it should be indexable with the description below.) */}
         <title>ResiWalk — Field Inspections & Recurring Services</title>
-        <meta name="description" content="ResiWalk is the leading edge field inspection and recurring services platform for Property Managers. Powered with AI automation, customizable workflows, and an intuitive interface that maximizes efficiency and solves day to day challenges." />
+        <meta name="description" content="ResiWalk is the leading field inspection and recurring services platform for Property Managers. Powered with AI automation, customizable workflows, and an intuitive interface that maximizes efficiency and solves day to day challenges." />
         <meta property="og:site_name" content="ResiWalk" />
         <meta property="og:title" content="ResiWalk — Field Inspections & Recurring Services" />
-        <meta property="og:description" content="ResiWalk is the leading edge field inspection and recurring services platform for Property Managers. Powered with AI automation, customizable workflows, and an intuitive interface that maximizes efficiency and solves day to day challenges." />
+        <meta property="og:description" content="ResiWalk is the leading field inspection and recurring services platform for Property Managers. Powered with AI automation, customizable workflows, and an intuitive interface that maximizes efficiency and solves day to day challenges." />
         {/* WebSite structured data — the authoritative signal Google uses for the
             "site name" line in results, so it reads "ResiWalk" instead of the bare
             resiwalk.com domain. */}
