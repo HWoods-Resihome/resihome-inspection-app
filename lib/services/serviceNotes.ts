@@ -25,6 +25,9 @@ export interface ServiceNote {
   role: 'vendor' | 'internal' | 'other';
   source: 'app' | 'email';       // posted in-app vs ingested from an email reply
   text: string;
+  /** Gmail message id an email-sourced note came from — the idempotency key so
+   *  re-scanning the same reply (read or not) never double-posts / re-notifies. */
+  srcMsgId?: string;
 }
 
 // "landscaping · cut" → "Landscaping · Grass Cut": catalog labels when known,
@@ -42,6 +45,22 @@ export function clipNoteText(s: unknown): string {
   return String(s ?? '').trim().slice(0, MAX_NOTE_CHARS);
 }
 
+/** Sanitize a Gmail message id for use in a blob key (ids are already safe, but
+ *  be defensive). */
+const safeMsgId = (id: string) => String(id || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
+
+/** Has an email reply with this Gmail message id already been ingested for this
+ *  service? Lets the sweep re-scan a mailbox (read OR unread) without ever
+ *  double-posting or re-sending the note notification. Fails soft → false. */
+export async function emailNoteExists(serviceId: string, msgId: string): Promise<boolean> {
+  const sid = String(serviceId || ''); const mid = safeMsgId(msgId);
+  if (!process.env.BLOB_READ_WRITE_TOKEN || !sid || !mid) return false;
+  try {
+    const { blobs } = await list({ prefix: `svc-notes/${sid}/email-${mid}` });
+    return blobs.length > 0;
+  } catch { return false; }
+}
+
 /** Append one note. Throws on storage failure so the poster sees it. */
 export async function addServiceNote(n: {
   serviceId: string;
@@ -50,9 +69,14 @@ export async function addServiceNote(n: {
   role: 'vendor' | 'internal' | 'other';
   source: 'app' | 'email';
   text: string;
+  srcMsgId?: string;
 }): Promise<ServiceNote> {
   if (!process.env.BLOB_READ_WRITE_TOKEN) throw new Error('Note storage is not configured (BLOB_READ_WRITE_TOKEN).');
-  const name = `${Date.now().toString().padStart(15, '0')}-${Math.random().toString(36).slice(2, 7)}`;
+  // Email replies key DETERMINISTICALLY off the Gmail message id so re-ingesting
+  // the same reply overwrites the one blob instead of duplicating; app notes keep
+  // the sortable timestamp key. (Thread order is by the `at` field, not the key.)
+  const mid = n.source === 'email' && n.srcMsgId ? safeMsgId(n.srcMsgId) : '';
+  const name = mid ? `email-${mid}` : `${Date.now().toString().padStart(15, '0')}-${Math.random().toString(36).slice(2, 7)}`;
   const note: ServiceNote = {
     id: name,
     serviceId: String(n.serviceId),
@@ -62,6 +86,7 @@ export async function addServiceNote(n: {
     role: n.role,
     source: n.source,
     text: clipNoteText(n.text),
+    ...(mid ? { srcMsgId: mid } : {}),
   };
   if (!note.text) throw new Error('Note text is required.');
   await put(`svc-notes/${note.serviceId}/${name}.json`, JSON.stringify(note),

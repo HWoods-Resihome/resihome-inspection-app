@@ -33,10 +33,15 @@ export interface InboundMessage {
 
 /** Unread inbox messages matching a Gmail search query. Returns [] without read
  *  scope/config (logged once per run by the caller via the thrown error). */
-export async function listUnreadInbox(query: string, max = 20): Promise<{ token: string; ids: string[] } | null> {
+// Search the system mailbox with the caller's query verbatim — NOT restricted to
+// `in:inbox` or `is:unread`. Reply-by-email ingestion relies on this: a reply
+// that a filter routed out of the inbox, or that got marked read in a shared
+// mailbox, must still be found (idempotency downstream stops re-posting). Callers
+// scope recency themselves (e.g. `newer_than:30d`).
+export async function listRecentInbox(query: string, max = 30): Promise<{ token: string; ids: string[] } | null> {
   const token = await systemAccessToken();
   if (!token) return null;
-  const q = encodeURIComponent(`in:inbox is:unread ${query}`);
+  const q = encodeURIComponent(query);
   const data = await gmailGet(token, `messages?q=${q}&maxResults=${max}`);
   return { token, ids: (data.messages || []).map((m: any) => String(m.id)) };
 }
