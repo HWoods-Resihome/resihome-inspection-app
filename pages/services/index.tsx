@@ -6,7 +6,6 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isInternalEmail } from '@/lib/userAccess';
-import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { ListPicker } from '@/components/ListPicker';
 import { SettingsMenu } from '@/components/SettingsMenu';
@@ -19,25 +18,19 @@ import {
   type ServiceStatus, type ServiceRecord,
 } from '@/lib/services/model';
 import { setViewAsVendor } from '@/lib/services/viewAs';
-import { scopeServices } from '@/lib/services/scope';
 import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   // App admins OR an approved vendor company (scoped to their own work orders).
   const ok = await servicesViewerAllowed(session?.vendor ? session?.email : (session?.realEmail || session?.email)).catch(() => false);
-  if (!ok) return { redirect: { destination: '/', permanent: false } };
-  // Resolve the viewer FIRST so a vendor's fetch is scoped server-side to their
-  // own orders — they always get their complete set (never truncated by a global
-  // window) and never receive another vendor's data. Admins fetch the all view.
+  if (!ok) return { redirect: { destination: '/app', permanent: false } };
+  // Resolve the viewer only to decide the vendor-preview flag — the LIST itself
+  // is deliberately NOT fetched here. Loading it in gSSP made every tap of
+  // "Services" stall on HubSpot pagination before the screen could switch; the
+  // page now paints instantly and pulls rows from /api/services/list (which
+  // applies the same server-side vendor scoping).
   const viewer = await resolveServiceViewerAsync(session, ctx.req);
-  const real = await searchServiceWorkOrders(viewer.canSeeAll ? {} : { vendorEmail: viewer.vendorEmail, vendorName: viewer.vendorName }).catch(() => null);
-  // Per-property billing lines split from a community grass-cut master roll UP
-  // into the master — hide the children from the operational list (the master
-  // drill-down and the billing view surface them). See RECURRING_SERVICES_PLAN.md.
-  const operational = (real ?? []).filter((s) => !s.masterServiceId);
-  // scopeServices stays as a safety net (covers legacy rows matched by name).
-  const services = scopeServices(operational, viewer);
   const asVendor = !viewer.canSeeAll || ctx.query.as === 'vendor';
   return {
     props: {
@@ -48,8 +41,6 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       isVendor: !!session?.vendor,
       // Vendors granted Inspections access get the app switcher too.
       canSwitchApps: !session?.vendor || !!session?.vendorInspections,
-      services,
-      live: !!real,
       asVendor,
     },
   };
@@ -157,8 +148,29 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
   );
 }
 
-export default function ServicesHome({ userName, canCreate, services, live, asVendor, isVendor, canSwitchApps }: { userName: string; canCreate: boolean; services: ServiceRecord[]; live: boolean; asVendor: boolean; isVendor: boolean; canSwitchApps?: boolean }) {
+export default function ServicesHome({ userName, canCreate, asVendor, isVendor, canSwitchApps }: { userName: string; canCreate: boolean; asVendor: boolean; isVendor: boolean; canSwitchApps?: boolean }) {
   const router = useRouter();
+  // Deferred list load: gSSP ships NO rows (so tapping "Services" switches
+  // screens instantly) — the list arrives from /api/services/list right after
+  // paint, and the same call powers pull-to-refresh / focus revalidation /
+  // post-bulk-action refreshes. `live` stays true unless a fetch says otherwise
+  // so admin affordances don't flicker off during the initial load.
+  const [data, setData] = useState<{ services: ServiceRecord[]; live: boolean }>({ services: [], live: true });
+  const [listLoading, setListLoading] = useState(true);
+  const refreshList = async () => {
+    try {
+      const r = await fetch('/api/services/list', { credentials: 'same-origin' });
+      if (r.ok) {
+        const d = await r.json();
+        setData({ services: Array.isArray(d.services) ? d.services : [], live: d.live !== false });
+      }
+    } catch { /* offline / transient — keep whatever is showing */ }
+    finally { setListLoading(false); }
+  };
+  useEffect(() => { refreshList(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const services = data.services;
+  const live = data.live;
   // "View as Vendor" preview (cookie-persisted, whole-app): shows the external
   // vendor experience — no admin create/settings, and the vendor-visibility rule
   // applies. Entering/exiting sets the cookie then reloads so SSR re-runs.
@@ -235,7 +247,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
       const now = Date.now();
       if (now - last < 3000) return;   // debounce rapid focus/visibility churn
       last = now;
-      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});
+      refreshList();
     };
     const onVis = () => { if (document.visibilityState === 'visible') revalidate(); };
     window.addEventListener('focus', revalidate);
@@ -253,7 +265,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   // the new row appears without a manual refresh.
   useEffect(() => {
     if (!router.query.just) return;
-    const t = setTimeout(() => { router.replace('/services', undefined, { scroll: false }).catch(() => {}); }, 1500);
+    const t = setTimeout(() => { refreshList(); router.replace('/services', undefined, { scroll: false, shallow: true }).catch(() => {}); }, 1500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.query.just]);
@@ -297,7 +309,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
       const parts = [`${d.canceled} canceled`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
       setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Cancel — ${parts.join(' · ')}` });
       exitSelect();
-      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});
+      refreshList();
     } catch { setActionMsg({ status: 'error', msg: 'Cancel — couldn’t reach the server. Try again.' }); }
     finally { setActionBusy(false); }
   };
@@ -319,7 +331,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
       const changedIds: string[] = Array.isArray(d.results) ? d.results.filter((x: any) => x?.outcome === 'reassigned').map((x: any) => String(x.id)) : [];
       if (changedIds.length) setVendorOverrides((prev) => { const next = { ...prev }; for (const id of changedIds) next[id] = String(d.vendorName); return next; });
       exitSelect();
-      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});
+      refreshList();
     } catch { setActionMsg({ status: 'error', msg: 'Reassign — couldn’t reach the server. Try again.' }); }
     finally { setActionBusy(false); }
   };
@@ -434,7 +446,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <PullToRefresh onRefresh={async () => { await router.replace(router.asPath, undefined, { scroll: false }).catch(() => {}); }} />
+      <PullToRefresh onRefresh={async () => { await refreshList(); }} />
       {/* Pink header — mirrors the inspections home. */}
       <header className="bg-brand text-white sticky top-0 z-30 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
         <div className="max-w-3xl mx-auto px-4 pt-2 pb-2.5">
@@ -502,13 +514,13 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
         {/* Summary bubbles — dynamic; Past Due is a clickable filter. */}
         <div className="grid grid-cols-3 gap-2 mb-3">
           <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-center">
-            <div className="text-2xl font-heading font-extrabold text-ink tabular-nums leading-none">{summary.open}</div>
+            <div className="text-2xl font-heading font-extrabold text-ink tabular-nums leading-none">{listLoading ? '—' : summary.open}</div>
             <div className="text-[10.5px] text-gray-500 mt-1 font-semibold uppercase tracking-wide">Total Open</div>
           </div>
           <button type="button" onClick={() => setPastDueOnly((v) => !v)}
             title="Show only open work orders that are past due"
             className={`bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-center transition ${pastDueOnly ? bubbleActiveRing : 'hover:border-brand/40'}`}>
-            <div className={`text-2xl font-heading font-extrabold tabular-nums leading-none ${summary.pastDue > 0 ? 'text-red-600' : 'text-ink'}`}>{summary.pastDue}</div>
+            <div className={`text-2xl font-heading font-extrabold tabular-nums leading-none ${summary.pastDue > 0 ? 'text-red-600' : 'text-ink'}`}>{listLoading ? '—' : summary.pastDue}</div>
             <div className="text-[10.5px] text-gray-500 mt-1 font-semibold uppercase tracking-wide">Past Due</div>
           </button>
           <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-center">
@@ -627,7 +639,16 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
               isAdmin={isAdmin}
               selectMode={selectMode} selectable={isSelectable(s)} selected={selectedIds.has(s.id)} onToggleSelect={toggleSelect} onLongPress={enterSelectWith} />
           ))}
-          {visibleRows.length === 0 && (
+          {listLoading && visibleRows.length === 0 && (
+            [0, 1, 2, 3].map((i) => (
+              <div key={i} className="bg-white border border-gray-200 rounded-xl p-4 animate-pulse">
+                <div className="h-3 w-24 bg-gray-100 rounded mb-2.5" />
+                <div className="h-4 w-48 bg-gray-200 rounded mb-2" />
+                <div className="h-3 w-36 bg-gray-100 rounded" />
+              </div>
+            ))
+          )}
+          {!listLoading && visibleRows.length === 0 && (
             <div className="text-center text-gray-500 text-sm py-12 border border-dashed border-gray-300 rounded-xl">No services match these filters.</div>
           )}
         </div>

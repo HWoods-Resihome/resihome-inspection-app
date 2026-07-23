@@ -843,10 +843,22 @@ export function CameraCaptureLegacy({
       bodyOverflow: body.style.overflow,
       bodyTouch: body.style.touchAction,
       bodyPos: body.style.position,
+      bodyTop: body.style.top,
+      bodyLeft: body.style.left,
+      bodyRight: body.style.right,
       bodyW: body.style.width,
       htmlOverflow: html.style.overflow,
       overscroll: (html.style as any).overscrollBehavior,
     };
+    // Pin the body in place (position:fixed at -scrollY) — matches the Modern
+    // camera. Plain overflow:hidden let iOS DROP the scroll position when the
+    // form re-mounts its photo grids on camera close, snapping the user to the
+    // TOP of the page instead of the photo section they were in.
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
     body.style.overflow = 'hidden';
     body.style.touchAction = 'none';
     html.style.overflow = 'hidden';
@@ -855,11 +867,22 @@ export function CameraCaptureLegacy({
       body.style.overflow = prev.bodyOverflow;
       body.style.touchAction = prev.bodyTouch;
       body.style.position = prev.bodyPos;
+      body.style.top = prev.bodyTop;
+      body.style.left = prev.bodyLeft;
+      body.style.right = prev.bodyRight;
       body.style.width = prev.bodyW;
       html.style.overflow = prev.htmlOverflow;
       (html.style as any).overscrollBehavior = prev.overscroll;
-      // Restore the saved scroll position after layout settles.
-      requestAnimationFrame(() => { try { window.scrollTo(0, scrollY); } catch { /* noop */ } });
+      // Re-assert the saved position across several frames: closing the camera
+      // re-mounts the photo grids, which changes the document height and can
+      // clobber a single restore (the old one-rAF restore still snapped to top).
+      const restore = () => { try { window.scrollTo(0, scrollY); } catch { /* noop */ } };
+      restore();
+      requestAnimationFrame(restore);
+      requestAnimationFrame(() => requestAnimationFrame(restore));
+      setTimeout(restore, 80);
+      setTimeout(restore, 220);
+      setTimeout(restore, 420);
     };
   }, [isOpen]);
 

@@ -447,7 +447,7 @@ function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boo
       const d = await r.json();
       if (!r.ok) { setErr(d.error || 'Save failed.'); return; }
       setDirty(false);
-      router.replace(router.asPath).catch(() => {});   // reflect the new count + pricing (ignore same-URL invariant)
+      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});   // reflect the new count + pricing (ignore same-URL invariant)
     } catch { setErr('Save failed.'); }
     finally { setSaving(false); }
   };
