@@ -5322,32 +5322,66 @@ export async function fetchPropertyLeasingDealStages(propertyIds: string[]): Pro
   const did = dealsTypeId();
   const lid = listingTypeId();
   const { property } = typeIds();
-  const CAP = 800;
-  const ids = propertyIds.slice(0, CAP);
-  for (const propId of ids) {
-    try {
-      const la = await hubspotFetch(`/crm/v4/objects/${property}/${propId}/associations/${lid}?limit=100`);
-      const listingIds: string[] = (la.results || []).map((r: any) => String(r.toObjectId ?? r.id)).filter(Boolean);
-      if (!listingIds.length) continue;
-      const dealIds = new Set<string>();
-      for (const listingId of listingIds) {
-        const da = await hubspotFetch(`/crm/v4/objects/${lid}/${listingId}/associations/${did}?limit=100`);
-        for (const r of da.results || []) { const id = r.toObjectId ?? r.id; if (id != null) dealIds.add(String(id)); }
-      }
-      if (!dealIds.size) continue;
-      const dealStage = new Map<string, string>();
-      const arr = [...dealIds];
-      for (let i = 0; i < arr.length; i += 100) {
-        const resp = await hubspotFetch(`/crm/v3/objects/${did}/batch/read`, {
-          method: 'POST', body: JSON.stringify({ properties: ['pipeline', 'dealstage'], inputs: arr.slice(i, i + 100).map((id) => ({ id })) }),
+  const CAP = 2000;
+  const ids = [...new Set(propertyIds.map(String))].slice(0, CAP);
+  if (!ids.length) return out;
+
+  // BATCH association reads — collapse what used to be a per-property sequential
+  // walk (Property→Listing, then per-listing Listing→Deal, hundreds of serial
+  // round-trips that timed the dry-run out the first time a rule used a deal
+  // criterion) into a handful of batched calls. Returns Map<fromId, toIds[]>.
+  const batchAssoc = async (fromType: string, toType: string, fromIds: string[]): Promise<Map<string, string[]>> => {
+    const m = new Map<string, string[]>();
+    for (let i = 0; i < fromIds.length; i += 100) {
+      const chunk = fromIds.slice(i, i + 100);
+      try {
+        const resp = await hubspotFetch(`/crm/v4/associations/${fromType}/${toType}/batch/read`, {
+          method: 'POST', body: JSON.stringify({ inputs: chunk.map((id) => ({ id })) }),
         });
-        for (const rec of resp.results || []) {
-          const p = rec.properties || {};
-          if (String(p.pipeline ?? '') === LEASING_PIPELINE_ID && p.dealstage) dealStage.set(String(rec.id), String(p.dealstage));
+        for (const r of resp.results || []) {
+          const from = String(r.from?.id ?? '');
+          if (!from) continue;
+          const tos = (r.to || []).map((t: any) => String(t.toObjectId ?? t.id)).filter(Boolean);
+          if (tos.length) m.set(from, (m.get(from) || []).concat(tos));
         }
+      } catch (e) { console.warn(`[deal-stages] batch assoc ${fromType}->${toType} chunk failed:`, e); }
+    }
+    return m;
+  };
+
+  // Property → Listing → Deal (two batched association passes).
+  const propToListings = await batchAssoc(property, lid, ids);
+  const allListingIds = [...new Set([...propToListings.values()].flat())];
+  if (!allListingIds.length) return out;
+  const listingToDeals = await batchAssoc(lid, did, allListingIds);
+  const allDealIds = [...new Set([...listingToDeals.values()].flat())];
+  if (!allDealIds.length) return out;
+
+  // Batch-read each deal's pipeline + stage; keep only leasing-pipeline deals.
+  const dealStageById = new Map<string, string>();
+  for (let i = 0; i < allDealIds.length; i += 100) {
+    try {
+      const resp = await hubspotFetch(`/crm/v3/objects/${did}/batch/read`, {
+        method: 'POST', body: JSON.stringify({ properties: ['pipeline', 'dealstage'], inputs: allDealIds.slice(i, i + 100).map((id) => ({ id })) }),
+      });
+      for (const rec of resp.results || []) {
+        const p = rec.properties || {};
+        if (String(p.pipeline ?? '') === LEASING_PIPELINE_ID && p.dealstage) dealStageById.set(String(rec.id), String(p.dealstage));
       }
-      if (dealStage.size) out.set(propId, dealStage);
-    } catch { /* skip this property */ }
+    } catch (e) { console.warn('[deal-stages] deal batch-read chunk failed:', e); }
+  }
+  if (!dealStageById.size) return out;
+
+  // Assemble property → { dealId → stage } via the two association maps.
+  for (const propId of ids) {
+    const stageMap = new Map<string, string>();
+    for (const lId of propToListings.get(propId) || []) {
+      for (const dId of listingToDeals.get(lId) || []) {
+        const st = dealStageById.get(dId);
+        if (st) stageMap.set(dId, st);
+      }
+    }
+    if (stageMap.size) out.set(propId, stageMap);
   }
   if (propertyIds.length > CAP) console.warn(`[deal-stages] capped at ${CAP} of ${propertyIds.length} properties`);
   return out;

@@ -15,6 +15,11 @@ import { isAppAdmin } from '@/lib/adminAccess';
 import { runServiceGeneration } from '@/lib/services/generate';
 import { easternTodayISO } from '@/lib/services/time';
 
+// Headroom: a rule with a deal-stage criterion resolves Property→Listing→Deal
+// stages across the portfolio (batched, but still several HubSpot round-trips),
+// which can exceed the default function ceiling on a large portfolio.
+export const config = { maxDuration: 120 };
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req).catch(() => null);
   const email = session?.email;
