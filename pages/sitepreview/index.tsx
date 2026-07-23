@@ -30,7 +30,8 @@ const CSS = `
 .sp *,.sp *::before,.sp *::after{box-sizing:border-box}
 .sp{margin:0;font-family:var(--f-body);font-size:var(--fs-body);line-height:1.6;color:var(--ink);background:var(--paper);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden}
 .sp img,.sp svg{display:block;max-width:100%}
-.sp a{color:inherit;text-decoration:none}
+.sp a{text-decoration:none}
+.sp a:not(.btn){color:inherit}
 .sp button{font-family:inherit;cursor:pointer}
 .sp [id]{scroll-margin-top:88px}
 .sp :focus-visible{outline:3px solid var(--pink);outline-offset:2px;border-radius:4px}
@@ -286,8 +287,8 @@ const CSS = `
 .sec-card p{font-size:.86rem;color:var(--muted);margin:0;line-height:1.5}
 @media(max-width:900px){.sec-grid{grid-template-columns:1fr 1fr}}@media(max-width:480px){.sec-grid{grid-template-columns:1fr}}
 .quote{max-width:900px;margin-inline:auto;text-align:center}
-.quote__mark{font-family:var(--f-display);font-size:4rem;line-height:.6;color:var(--aqua);margin-bottom:.5rem}
 .quote__t{font-family:var(--f-display);font-weight:500;font-size:clamp(1.5rem,3.2vw,2.2rem);line-height:1.28;letter-spacing:-.01em;margin:0 0 1.4rem}
+.quote__t .qm{color:var(--aqua)}
 .quote__by{font-size:.92rem;color:var(--muted);font-weight:600}.quote__by span{color:var(--pink)}
 .about{background:var(--ink);color:#fff;position:relative;overflow:hidden}
 .about::after{content:"";position:absolute;width:520px;height:520px;right:-160px;bottom:-260px;background:radial-gradient(closest-side,rgba(115,227,223,.16),transparent 70%)}
@@ -765,7 +766,7 @@ export default function SitePreview() {
         {/* TESTIMONIAL */}
         <section className="section section--mist">
           <div className="wrap">
-            <blockquote className="quote reveal"><div className="quote__mark">&ldquo;</div><p className="quote__t">We went from re-pricing scopes for days to dispatched, invoiced work the same afternoon — with the whole portfolio visible in one dashboard.</p><div className="quote__by">Operations leadership · <span>SFR &amp; BTR portfolio</span></div></blockquote>
+            <blockquote className="quote reveal"><p className="quote__t"><span className="qm">&ldquo;</span>We went from re-pricing scopes for days to dispatched, invoiced work the same afternoon — with the whole portfolio visible in one dashboard.<span className="qm">&rdquo;</span></p><div className="quote__by">Mentor Sokoli · <span>President, ResiHome</span></div></blockquote>
           </div>
         </section>
 
