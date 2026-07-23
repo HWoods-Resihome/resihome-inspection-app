@@ -186,18 +186,40 @@ export default function App({ Component, pageProps }: AppProps) {
   );
 }
 
-// A thin brand-pink bar at the very top that animates during client-side route
-// changes — immediate feedback so tab switches (Inspections ↔ Services) feel
-// responsive even while the destination's data loads, instead of "frozen".
+// Route-change feedback so a tap NEVER feels dead while the destination's
+// server data loads (Inspections ↔ Services, opening a record):
+//   1. a brand-pink bar sweeps across the top immediately, and
+//   2. if the transition is still running after ~400ms, a centered
+//      "Loading…" pill fades in (quick hops never flash it).
+// Shallow query-only replaces are skipped — nothing is actually loading.
 function RouteProgress() {
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
+  const [sweep, setSweep] = useState(false);
+  const [overlay, setOverlay] = useState(false);
   useEffect(() => {
-    const start = () => setState('loading');
-    const done = () => { setState('done'); window.setTimeout(() => setState('idle'), 300); };
+    let overlayTimer: number | undefined;
+    const start = (_url: string, opts?: { shallow?: boolean }) => {
+      if (opts?.shallow) return;
+      setState('loading');
+      // Mount the bar at ~0 width, THEN widen — a fresh element gets no
+      // transition on its initial style, so setting 90% up front just
+      // painted a static bar with no sweep.
+      setSweep(false);
+      requestAnimationFrame(() => requestAnimationFrame(() => setSweep(true)));
+      window.clearTimeout(overlayTimer);
+      overlayTimer = window.setTimeout(() => setOverlay(true), 400);
+    };
+    const done = () => {
+      window.clearTimeout(overlayTimer);
+      setOverlay(false);
+      setState('done');
+      window.setTimeout(() => setState('idle'), 300);
+    };
     Router.events.on('routeChangeStart', start);
     Router.events.on('routeChangeComplete', done);
     Router.events.on('routeChangeError', done);
     return () => {
+      window.clearTimeout(overlayTimer);
       Router.events.off('routeChangeStart', start);
       Router.events.off('routeChangeComplete', done);
       Router.events.off('routeChangeError', done);
@@ -205,15 +227,26 @@ function RouteProgress() {
   }, []);
   if (state === 'idle') return null;
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 3, zIndex: 9999, pointerEvents: 'none' }}>
-      <div style={{
-        height: '100%', background: '#ff0060', borderRadius: '0 2px 2px 0',
-        width: state === 'loading' ? '90%' : '100%',
-        opacity: state === 'done' ? 0 : 1,
-        transition: state === 'loading'
-          ? 'width 8s cubic-bezier(0.1,0.7,0.2,1)'
-          : 'width 0.2s ease, opacity 0.35s ease 0.1s',
-      }} />
-    </div>
+    <>
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 3, zIndex: 9999, pointerEvents: 'none' }}>
+        <div style={{
+          height: '100%', background: '#ff0060', borderRadius: '0 2px 2px 0',
+          boxShadow: '0 0 8px rgba(255,0,96,.55)',
+          width: state === 'done' ? '100%' : sweep ? '90%' : '4%',
+          opacity: state === 'done' ? 0 : 1,
+          transition: state === 'loading'
+            ? 'width 6s cubic-bezier(0.1,0.7,0.2,1)'
+            : 'width 0.2s ease, opacity 0.35s ease 0.1s',
+        }} />
+      </div>
+      {overlay && state === 'loading' && (
+        <div className="fixed inset-0 z-[9998] pointer-events-none flex items-start justify-center">
+          <div className="mt-[38vh] flex items-center gap-2.5 bg-white rounded-full shadow-xl ring-1 ring-black/10 px-4 py-2.5">
+            <span className="w-4 h-4 rounded-full border-2 border-brand border-t-transparent animate-spin" />
+            <span className="text-sm font-heading font-semibold text-gray-800">Loading…</span>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
