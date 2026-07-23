@@ -96,7 +96,8 @@ const CSS = `
 .compo{position:relative;z-index:1;display:flex;align-items:flex-end;justify-content:center;gap:14px;width:min(480px,100%)}
 .browser{position:relative;z-index:2;flex:1 1 auto;min-width:0;background:#fff;border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--sh-4);overflow:hidden}
 .browser__bar{display:flex;align-items:center;gap:.5rem;padding:.7rem .9rem;border-bottom:1px solid var(--line);background:linear-gradient(#fff,#fbfcfd)}
-.browser__dots{display:flex;gap:.4rem}.browser__dots i{width:11px;height:11px;border-radius:50%;background:#E2E5EB;display:block}
+.browser__dots{display:flex;gap:.4rem}.browser__dots i{width:11px;height:11px;border-radius:50%;display:block}
+.browser__dots i:nth-child(1){background:#FF5F57}.browser__dots i:nth-child(2){background:#FEBC2E}.browser__dots i:nth-child(3){background:#28C840}
 .browser__url{margin-left:.4rem;flex:1;font-family:var(--f-mono);font-size:.72rem;color:var(--muted-2);background:var(--mist);border:1px solid var(--line);border-radius:var(--r-pill);padding:.28rem .8rem;display:flex;align-items:center;gap:.4rem}
 .browser__body{padding:1.1rem 1.15rem 1.25rem}
 .scope__head{display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem}
@@ -109,12 +110,12 @@ const CSS = `
 .line__name{font-weight:600;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .line__meta{font-size:.74rem;color:var(--muted)}
 .line__price{font-weight:700;font-variant-numeric:tabular-nums;font-size:.92rem}
-.totals{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin-top:.9rem}
-.tot{background:var(--mist);border:1px solid var(--line);border-radius:var(--r-sm);padding:.6rem .5rem;text-align:center}
+.totals{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-top:.9rem}
+.tot{background:var(--mist);border:1px solid var(--line);border-radius:var(--r-sm);padding:.75rem .4rem;text-align:center;min-width:0}
 .tot--pink{background:var(--pink-050);border-color:#FFD4E2}
-.tot__v{font-family:var(--f-display);font-weight:600;font-size:1.15rem;font-variant-numeric:tabular-nums;line-height:1}.tot--pink .tot__v{color:var(--pink)}
+.tot__v{font-family:var(--f-display);font-weight:600;font-size:clamp(.95rem,3.4vw,1.15rem);font-variant-numeric:tabular-nums;line-height:1;white-space:nowrap}.tot--pink .tot__v{color:var(--pink)}
 .tot__l{font-size:.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:.25rem}
-.ai-chip{position:absolute;z-index:4;left:-22px;top:60px;width:208px;background:#fff;border:1px solid var(--line);border-radius:var(--r-sm);box-shadow:var(--sh-3);padding:.75rem .85rem}
+.ai-chip{position:absolute;z-index:4;left:14px;top:14px;width:208px;background:#fff;border:1px solid var(--line);border-radius:var(--r-sm);box-shadow:var(--sh-3);padding:.75rem .85rem}
 .ai-chip__top{display:flex;align-items:center;gap:.45rem;margin-bottom:.35rem}
 .ai-dot{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,var(--pink),#ff5b93);display:grid;place-items:center;flex:none}
 .ai-chip__label{font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
@@ -142,7 +143,7 @@ const CSS = `
 .ph-sync{margin-top:auto;background:#fff;border-top:1px solid var(--line);padding:7px 10px;font-size:.56rem;font-weight:700;color:#0C8A83;display:flex;align-items:center;gap:5px;flex:none}
 .ph-sync .dot{width:6px;height:6px;border-radius:50%;background:#0FB5AD}
 @media(max-width:980px){.hero__in{grid-template-columns:1fr;gap:2.5rem}.hero__stage{min-height:auto;margin-top:.5rem}}
-@media(max-width:560px){.compo{width:min(430px,94vw);gap:10px}.phone{flex:0 0 118px;width:118px}.ai-chip{left:-8px;top:48px;width:180px;padding:.6rem .7rem}.ai-chip__txt{font-size:.76rem}}
+@media(max-width:560px){.compo{width:min(430px,94vw);gap:10px}.phone{flex:0 0 118px;width:118px}.ai-chip{width:180px;padding:.6rem .7rem}.ai-chip__txt{font-size:.76rem}}
 .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
 .reveal.in{opacity:1;transform:none}
 .reveal.d1{transition-delay:.08s}.reveal.d2{transition-delay:.16s}.reveal.d3{transition-delay:.24s}
@@ -184,7 +185,8 @@ const CSS = `
 .visual--pink::before{background:radial-gradient(closest-side,rgba(255,0,102,.12),transparent 70%)}
 .card{position:relative;background:#fff;border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--sh-3);overflow:hidden}
 .card__bar{display:flex;align-items:center;gap:.5rem;padding:.6rem .85rem;border-bottom:1px solid var(--line);background:linear-gradient(#fff,#fbfcfd)}
-.card__dots{display:flex;gap:.35rem}.card__dots i{width:9px;height:9px;border-radius:50%;background:#E2E5EB}
+.card__dots{display:flex;gap:.35rem}.card__dots i{width:9px;height:9px;border-radius:50%}
+.card__dots i:nth-child(1){background:#FF5F57}.card__dots i:nth-child(2){background:#FEBC2E}.card__dots i:nth-child(3){background:#28C840}
 .card__url{margin-left:.3rem;font-family:var(--f-mono);font-size:.68rem;color:var(--muted-2);background:var(--mist);border:1px solid var(--line);border-radius:var(--r-pill);padding:.24rem .7rem}
 .card__body{padding:1.1rem 1.15rem}
 .rc__head{display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem}
@@ -220,7 +222,8 @@ const CSS = `
 .rung-link{display:flex;justify-content:center;padding:.25rem 0;color:var(--muted-2)}
 .dash{background:var(--panel);border:1px solid rgba(255,255,255,.08);border-radius:var(--r-md);box-shadow:var(--sh-4);overflow:hidden;color:#fff}
 .dash__bar{display:flex;align-items:center;gap:.5rem;padding:.7rem .9rem;border-bottom:1px solid rgba(255,255,255,.08)}
-.dash__dots{display:flex;gap:.35rem}.dash__dots i{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.18)}
+.dash__dots{display:flex;gap:.35rem}.dash__dots i{width:9px;height:9px;border-radius:50%}
+.dash__dots i:nth-child(1){background:#FF5F57}.dash__dots i:nth-child(2){background:#FEBC2E}.dash__dots i:nth-child(3){background:#28C840}
 .dash__url{margin-left:.3rem;font-family:var(--f-mono);font-size:.68rem;color:rgba(255,255,255,.5);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:var(--r-pill);padding:.24rem .7rem}
 .dash__body{padding:1.15rem}
 .dash__top{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem}.dash__title{font-family:var(--f-display);font-weight:600;font-size:1.1rem}
@@ -484,27 +487,16 @@ export default function SitePreview() {
                     <div className="totals"><div className="tot"><div className="tot__v">$2,671</div><div className="tot__l">Vendor</div></div><div className="tot"><div className="tot__v">$3,205</div><div className="tot__l">Client</div></div><div className="tot tot--pink"><div className="tot__v">$1,120</div><div className="tot__l">Resident</div></div></div>
                   </div>
                 </div>
-                <div className="phone">
-                  <div className="phone__notch" />
-                  <div className="phone__screen">
-                    <div className="ph-top"><div className="ph-top__t">1408 Oak Hill Trl</div><div className="ph-top__s">Living Room · Scope</div></div>
-                    <div className="ph-body">
-                      <div className="ph-shot"><span className="ph-gps">📍 GPS · 10:42</span></div>
-                      <div className="ph-thumbs"><i /><i /><i /></div>
-                      <div className="ph-line"><div className="ph-line__n">Carpet — replace &amp; pad</div><div className="ph-line__r"><span>480 SF</span><b>$842.00</b></div></div>
-                      <div className="ph-ai">✦ AI: water stain → paint</div>
-                    </div>
-                    <div className="ph-sync"><span className="dot" /> Synced · offline-ready</div>
-                  </div>
-                </div>
-                <div className="ai-chip">
-                  <div className="ai-chip__top"><span className="ai-dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M12 2l1.9 5.9L20 9.8l-5 3.6L16.2 20 12 16.3 7.8 20 9 13.4 4 9.8l6.1-1.9z" /></svg></span><span className="ai-chip__label">AI review</span></div>
-                  <div className="ai-chip__txt">Ceiling water stain → drywall repair + prime &amp; paint</div>
-                  <div className="ai-chip__conf"><i /></div>
-                  <div className="ai-chip__meta"><span>Confidence 0.94</span><span>Confirm ✓</span></div>
-                </div>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* VIDEO — right under the hero, the first thing after Book a demo */}
+        <section className="section section--tight section--mist" id="showcase">
+          <div className="wrap">
+            <div className="section-head center reveal"><Eyebrow icon="play" className="eyebrow eyebrow--center">See it in action</Eyebrow><h2 className="h2">Watch ResiWalk work</h2></div>
+            <div className="video-wrap reveal"><video controls playsInline preload="metadata" poster="/sitepreview/intro-poster.jpg"><source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" /></video></div>
           </div>
         </section>
 
@@ -602,7 +594,14 @@ export default function SitePreview() {
                 <ul className="ticks"><li><Tick />Photo &amp; voice AI line-item capture</li><li><Tick />Learns from every reviewer override</li><li><Tick />Your playbook, enforced automatically</li></ul>
               </div>
               <div className="feature__media">
-                <div className="visual"><div className="card"><div className="card__body">
+                <div className="visual">
+                <div className="ai-chip">
+                  <div className="ai-chip__top"><span className="ai-dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M12 2l1.9 5.9L20 9.8l-5 3.6L16.2 20 12 16.3 7.8 20 9 13.4 4 9.8l6.1-1.9z" /></svg></span><span className="ai-chip__label">AI review</span></div>
+                  <div className="ai-chip__txt">Ceiling water stain → drywall repair + prime &amp; paint</div>
+                  <div className="ai-chip__conf"><i /></div>
+                  <div className="ai-chip__meta"><span>Confidence 0.94</span><span>Confirm ✓</span></div>
+                </div>
+                <div className="card"><div className="card__body">
                   <div className="ai-photo"><img src="/sitepreview/photos/ai-inspection.jpg" alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /><div className="ai-box"><span className="ai-box__tag">water stain · 0.94</span></div></div>
                   <div className="ai-sugg">
                     <div className="ai-sugg__t"><svg width="13" height="13" viewBox="0 0 24 24" fill="#FF0066"><path d="M12 2l1.9 5.9L20 9.8l-5 3.6L16.2 20 12 16.3 7.8 20 9 13.4 4 9.8l6.1-1.9z" /></svg>Detected · ceiling water stain</div>
@@ -791,14 +790,6 @@ export default function SitePreview() {
               <details><summary>How is pricing structured?</summary><div className="faq__a">Per-door, not per-seat — so your entire field team is included without a headcount penalty. Volume and multi-brand pricing is available; book a demo and we&apos;ll scope it to your portfolio.</div></details>
               <details><summary>How fast can we get live?</summary><div className="faq__a">Onboarding is scoped to your regions and templates. Standard integrations and core inspection types can be running quickly; Enterprise onboarding includes custom templates, SSO, and a dedicated success manager.</div></details>
             </div>
-          </div>
-        </section>
-
-        {/* VIDEO — near the bottom, after the story has been told */}
-        <section className="section section--tight" id="showcase">
-          <div className="wrap">
-            <div className="section-head center reveal"><Eyebrow icon="play" className="eyebrow eyebrow--center">See it in action</Eyebrow><h2 className="h2">Watch ResiWalk work</h2></div>
-            <div className="video-wrap reveal"><video controls playsInline preload="metadata" poster="/sitepreview/intro-poster.jpg"><source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" /></video></div>
           </div>
         </section>
 
