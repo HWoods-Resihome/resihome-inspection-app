@@ -428,6 +428,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   // not the coverage catalog (which can be incomplete for some portfolios). null =
   // loading. Bumping wcReload re-runs it (after a generate).
   const [wouldCreate, setWouldCreate] = useState<number | null>(null);   // NEW services the rule would create (dry-run)
+  const [wouldCancel, setWouldCancel] = useState<number | null>(null);   // ASSIGNED services the rule's stop condition would auto-cancel (dry-run)
   const [masterCoverage, setMasterCoverage] = useState<number | null>(null); // community grass-cut: properties the master covers
   const [coveredLive, setCoveredLive] = useState<number | null>(null);   // accurate applicable-property count (live query)
   const [wcReload, setWcReload] = useState(0);
@@ -881,9 +882,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   // rule uses a 'preview' id (nothing exists yet → all targets are new).
   const rulePreviewKey = useMemo(() => (rule ? JSON.stringify(ruleToProps(rule)) : ''), [rule]);
   useEffect(() => {
-    if (!canGenerate || !rule) { setWouldCreate(null); return; }
+    if (!canGenerate || !rule) { setWouldCreate(null); setWouldCancel(null); return; }
     let alive = true;
-    setWouldCreate(null);
+    setWouldCreate(null); setWouldCancel(null);
     const ctrl = new AbortController();
     const t = window.setTimeout(() => {
       fetch('/api/services/admin/generate', {
@@ -891,8 +892,8 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
         body: JSON.stringify({ ruleId: rule.recordId || 'preview', ruleProps: ruleToProps(rule) }),
       })
         .then((r) => r.json())
-        .then((d) => { if (alive) { setWouldCreate(typeof d.wouldCreate === 'number' ? d.wouldCreate : 0); setMasterCoverage(typeof d.masterCoverage === 'number' ? d.masterCoverage : null); } })
-        .catch((e) => { if (alive && e?.name !== 'AbortError') { setWouldCreate(null); setMasterCoverage(null); } });
+        .then((d) => { if (alive) { setWouldCreate(typeof d.wouldCreate === 'number' ? d.wouldCreate : 0); setWouldCancel(typeof d.wouldCancel === 'number' ? d.wouldCancel : 0); setMasterCoverage(typeof d.masterCoverage === 'number' ? d.masterCoverage : null); } })
+        .catch((e) => { if (alive && e?.name !== 'AbortError') { setWouldCreate(null); setWouldCancel(null); setMasterCoverage(null); } });
     }, 600);
     return () => { alive = false; ctrl.abort(); window.clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1558,6 +1559,11 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                         ? <>Would create <span className="font-heading font-extrabold">1</span> Master Service{masterCoverage != null ? <> (for <span className="font-heading font-extrabold">{masterCoverage.toLocaleString()}</span> propert{masterCoverage === 1 ? 'y' : 'ies'})</> : ''}</>
                         : <>Would create <span className="font-heading font-extrabold">{wouldCreate == null ? '…' : wouldCreate.toLocaleString()}</span> work order{wouldCreate === 1 ? '' : 's'}</>
                       : <span className="text-gray-500">Save the rule to see how many it would create.</span>}
+                    {rule.recordId && rule.stopEnabled && rule.stopMode === 'condition' && (
+                      <span className="block text-[12px] text-gray-500 mt-0.5">
+                        Would <span className="font-heading font-bold text-ink">auto-cancel {wouldCancel == null ? '…' : wouldCancel.toLocaleString()}</span> open order{wouldCancel === 1 ? '' : 's'} that now meet the stop condition
+                      </span>
+                    )}
                     {genMsg && <span className="block text-[12px] font-heading font-semibold text-gray-600">{genMsg}</span>}
                   </div>
                   <button onClick={generateNow} disabled={genBusy || !canSave}
@@ -1566,7 +1572,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                     {genBusy ? '…' : 'Generate now'}
                   </button>
                 </div>
-                <p className="mt-1 text-[11px] text-gray-400">Generate saves your changes first, then makes only the missing ones — safe anytime; the nightly job fills the rest.</p>
+                <p className="mt-1 text-[11px] text-gray-400">Generate saves your changes first, then makes only the missing ones and auto-cancels any open orders that now meet the stop condition — safe anytime; the nightly job does the same on its own schedule.</p>
               </>
             )}
           </div>

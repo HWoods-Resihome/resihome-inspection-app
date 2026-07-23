@@ -303,12 +303,15 @@ async function targetsForRule(p: Record<string, any>): Promise<{ targets: Target
   // Partition the enrolled set by the stop condition: stop-met properties are
   // excluded from generation AND reported back so the run can auto-cancel their
   // still-untouched assigned orders (see the caller).
-  const preStop = candidates
-    .map(enrich)
-    .filter((prop) => enrollOk(prop))
-    .filter((prop) => !poolHeldOut(prop));   // Tenant-Service pool → excluded
-  const stopped = preStop.filter((prop) => stopHit(prop)).map((prop) => ({ id: prop.id, address: prop.address }));
-  const enrolled = preStop.filter((prop) => !stopHit(prop));
+  const enriched = candidates.map(enrich).filter((prop) => !poolHeldOut(prop));   // Tenant-Service pool → excluded
+  // Stop is evaluated INDEPENDENTLY of enrollment: a property that meets the
+  // rule's stop condition must have its stale assigned orders cancelled even if it
+  // has ALSO fallen out of enrollment. (Previously stop was only checked among
+  // still-enrolled properties, so a home whose deal moved to a leased stage — which
+  // both trips the stop AND breaks the "vacant" enroll match — kept its open order
+  // forever. That's the vacant-clean-that-wouldn't-cancel bug.)
+  const stopped = enriched.filter((prop) => stopHit(prop)).map((prop) => ({ id: prop.id, address: prop.address }));
+  const enrolled = enriched.filter((prop) => enrollOk(prop) && !stopHit(prop));
 
   const out: Target[] = [];
   for (const prop of enrolled) {
