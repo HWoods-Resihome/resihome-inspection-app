@@ -364,54 +364,61 @@ function fileToBase64(file: Blob): Promise<string> {
  * browser-image-compression silently produces a too-large file (or throws
  * on big phone photos). This works on every modern browser without a worker.
  *
+ * ORIENTATION: we DECODE with createImageBitmap(file, { imageOrientation:
+ * 'from-image' }) so the EXIF rotation is applied deterministically before we
+ * draw. The old path decoded via an <img> and relied on the browser
+ * auto-orienting drawImage — which several mobile browsers (older iOS Safari /
+ * some Android WebViews) do NOT do, so a sideways phone photo got baked in
+ * sideways with its EXIF tag stripped — permanently un-fixable server-side
+ * (no tag left to read). That was the vendor "didn't auto-rotate" bug for
+ * photos too big for the raw fast path. createImageBitmap bakes it correctly;
+ * we fall back to the <img> path only where the API is unavailable.
+ *
  * Outputs JPEG since we don't need transparency for inspection photos.
  */
-function canvasDownscale(file: File, maxDimension: number, quality: number): Promise<Blob> {
+function drawToJpeg(
+  source: CanvasImageSource, srcW: number, srcH: number, maxDimension: number, quality: number,
+): Promise<Blob> {
   return new Promise((resolve, reject) => {
+    let width = srcW, height = srcH;
+    if (width > maxDimension || height > maxDimension) {
+      const ratio = width / height;
+      if (width >= height) { width = maxDimension; height = Math.round(maxDimension / ratio); }
+      else { height = maxDimension; width = Math.round(maxDimension * ratio); }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { reject(new Error('Canvas context not available')); return; }
+    ctx.drawImage(source, 0, 0, width, height);
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('Canvas toBlob returned null'))),
+      'image/jpeg', quality,
+    );
+  });
+}
+
+async function canvasDownscale(file: File, maxDimension: number, quality: number): Promise<Blob> {
+  // PREFERRED: createImageBitmap with explicit orientation — deterministic across
+  // browsers (no reliance on drawImage auto-orientation).
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' } as any);
+      try { return await drawToJpeg(bitmap, bitmap.width, bitmap.height, maxDimension, quality); }
+      finally { bitmap.close?.(); }
+    } catch { /* fall through to the <img> path below */ }
+  }
+  // FALLBACK: decode via <img>. On modern browsers this also auto-orients; on old
+  // ones it may not, but createImageBitmap above covers those.
+  return new Promise<Blob>((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      try {
-        // Calculate target dimensions preserving aspect ratio
-        let { width, height } = img;
-        if (width > maxDimension || height > maxDimension) {
-          const ratio = width / height;
-          if (width >= height) {
-            width = maxDimension;
-            height = Math.round(maxDimension / ratio);
-          } else {
-            height = maxDimension;
-            width = Math.round(maxDimension * ratio);
-          }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          URL.revokeObjectURL(url);
-          reject(new Error('Canvas context not available'));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        canvas.toBlob(
-          (blob) => {
-            URL.revokeObjectURL(url);
-            if (blob) resolve(blob);
-            else reject(new Error('Canvas toBlob returned null'));
-          },
-          'image/jpeg',
-          quality
-        );
-      } catch (e) {
-        URL.revokeObjectURL(url);
-        reject(e);
-      }
+      drawToJpeg(img, img.width, img.height, maxDimension, quality)
+        .then((b) => { URL.revokeObjectURL(url); resolve(b); })
+        .catch((e) => { URL.revokeObjectURL(url); reject(e); });
     };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('Could not load image for resizing'));
-    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not load image for resizing')); };
     img.src = url;
   });
 }
