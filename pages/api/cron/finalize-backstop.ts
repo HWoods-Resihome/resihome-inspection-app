@@ -28,7 +28,7 @@ import {
 import { createMaintenanceTicket, buildTicketDescription } from '@/lib/maintenanceAi';
 import { vendorTicketKind } from '@/lib/vendors';
 import { buildShortLink } from '@/lib/shortLinks';
-import { enqueueTicketEnforcement } from '@/lib/ticketEnforceQueue';
+import { enqueueTicketEnforcement, clearTicketEnforceQueue } from '@/lib/ticketEnforceQueue';
 import { appBaseUrl } from '@/lib/notifications/send';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
@@ -60,6 +60,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const all = req.query.all === '1';
   const ticketCap = all ? 50 : TICKET_FIXES_PER_RUN;
   const base = appBaseUrl();
+
+  // Definitive validation report: ?report=1&days=2 — every SCOPE inspection
+  // finalized in the window (pdf_generated_at ⇒ the scope finalize pipeline ran),
+  // newest first, with address + completed time + the CURRENT hbmm_ticket_id
+  // stamp (blank = no ticket ever recorded). The ground truth to validate
+  // one-by-one which records need a (re-)created ticket.
+  if (req.query.report === '1') {
+    const days = Math.min(Math.max(Number(req.query.days) || 2, 1), 14);
+    const rows = await searchInspectionsMissingProp({
+      statusValues: COMPLETED_STATUSES,
+      requireProp: 'pdf_generated_at', sinceProp: 'completed_at', sinceMs: Date.now() - days * 24 * 3600_000,
+      props: ['inspection_name', 'property_address_snapshot', 'completed_at', 'hbmm_ticket_id', 'template_type'], limit: 100,
+    }).catch(() => []);
+    const report = rows
+      .sort((x, y) => String(y.props.completed_at || '').localeCompare(String(x.props.completed_at || '')))
+      .map((r) => ({
+        inspectionId: r.id,
+        address: r.props.property_address_snapshot || r.props.inspection_name || '(unknown)',
+        completedAt: r.props.completed_at || null,
+        ticketId: String(r.props.hbmm_ticket_id || '').trim() || null,
+      }));
+    return res.status(200).json({ ok: true, days, count: report.length, report });
+  }
+
+  // Incident cleanup: ?clearQueue=1 wipes ALL pending type/docs jobs (e.g. jobs
+  // pointing at tickets that were deleted in HBMM).
+  if (req.query.clearQueue === '1') {
+    const removed = await clearTicketEnforceQueue();
+    return res.status(200).json({ ok: true, removedJobs: removed });
+  }
 
   // Audit mode: ?stamped=1 lists recent completions WITH their hbmm_ticket_id so
   // wrong-environment stamps (created while the base URL pointed at dev) can be

@@ -49,6 +49,16 @@ export async function enqueueTicketEnforcement(ticketId: number, target: string,
   } catch { /* best-effort — the live UI run still enforces it */ }
 }
 
+/** Wipe the whole queue — incident cleanup (e.g. jobs pointing at tickets that
+ *  were deleted in HBMM, which would otherwise burn browser runs retrying). */
+export async function clearTicketEnforceQueue(): Promise<number> {
+  let n = 0;
+  try {
+    await mutateTicketEnforceQueue<TicketEnforceJob[]>((cur) => { n = Array.isArray(cur) ? cur.length : 0; return []; });
+  } catch { /* best-effort */ }
+  return n;
+}
+
 /** Remove a ticket from the queue (called once its type is confirmed). */
 export async function removeTicketEnforcement(ticketId: number): Promise<void> {
   try {
