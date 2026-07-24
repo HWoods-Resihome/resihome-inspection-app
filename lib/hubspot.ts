@@ -945,6 +945,30 @@ export async function fetchRegionEnumOptions(): Promise<string[] | null> {
   return regions;
 }
 
+// FAST portfolio catalog: like fetchRegionEnumOptions, but for `portfolio`. When
+// portfolio is an enumeration its option list IS the full portfolio set — one API
+// call instead of paging the whole Property list. Returns null when portfolio is a
+// plain text property (caller falls back to fetchPropertyCoverage). Cached per process.
+let _portfolioEnumCache: { at: number; portfolios: string[] | null } | null = null;
+export async function fetchPortfolioEnumOptions(): Promise<string[] | null> {
+  if (_portfolioEnumCache && Date.now() - _portfolioEnumCache.at < 60 * 60 * 1000) return _portfolioEnumCache.portfolios;
+  const { property: typeId } = typeIds();
+  let portfolios: string[] | null = null;
+  try {
+    const def = await hubspotFetch(`/crm/v3/properties/${typeId}/portfolio`);
+    if (def?.type === 'enumeration' && Array.isArray(def.options) && def.options.length) {
+      portfolios = def.options
+        .filter((o: any) => !o.hidden)
+        .map((o: any) => String(o.value || '').trim())
+        .filter((v: string) => v && !isExcludedPortfolio(v))
+        .sort();
+      if (!portfolios || !portfolios.length) portfolios = null;
+    }
+  } catch { portfolios = null; }
+  _portfolioEnumCache = { at: Date.now(), portfolios };
+  return portfolios;
+}
+
 // Property `status` enum options (label + stored value) for the rules-engine
 // enrollment/stop value picker. Cached for the process lifetime (enum is stable).
 let _statusOptsCache: { label: string; value: string }[] | null = null;
@@ -2410,17 +2434,35 @@ export async function findServiceBidChildren(parentId: string): Promise<{ id: st
   } catch (e) { console.warn('[services] bid children search failed:', e); return []; }
 }
 
-/** Service Work Orders in a given status (raw props + id), or null when not configured. */
-export async function searchServiceWorkOrdersByStatus(status: string, limit = 200): Promise<{ id: string; props: Record<string, any> }[] | null> {
+/** Service Work Orders in a given status (raw props + id), or null when not
+ *  configured. Optional completed-date bounds (YYYY-MM-DD) narrow the scan to
+ *  orders completed in a window — padded ±2 days on the query so the caller's
+ *  exact date filter stays authoritative while the search still skips the bulk of
+ *  out-of-range history (the big win for a short billing window). */
+export async function searchServiceWorkOrdersByStatus(
+  status: string, limit = 200, opts: { completedFrom?: string; completedTo?: string } = {},
+): Promise<{ id: string; props: Record<string, any> }[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
+  const DAY = 86400000;
+  const bound = (d: string, endOfDay: boolean, pad: number): string | null => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || '').trim());
+    if (!m) return null;
+    const ms = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0);
+    return String(ms + pad);
+  };
+  const filters: any[] = [{ propertyName: 'status', operator: 'EQ', value: status }];
+  const lo = bound(opts.completedFrom || '', false, -2 * DAY);
+  const hi = bound(opts.completedTo || '', true, 2 * DAY);
+  if (lo) filters.push({ propertyName: 'completed_at', operator: 'GTE', value: lo });
+  if (hi) filters.push({ propertyName: 'completed_at', operator: 'LTE', value: hi });
   try {
     const out: { id: string; props: Record<string, any> }[] = [];
     let after: string | undefined;
     do {
       const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
         method: 'POST',
-        body: JSON.stringify({ limit: 100, after, properties: SERVICE_DETAIL_PROPS, filterGroups: [{ filters: [{ propertyName: 'status', operator: 'EQ', value: status }] }] }),
+        body: JSON.stringify({ limit: 100, after, properties: SERVICE_DETAIL_PROPS, filterGroups: [{ filters }] }),
       });
       for (const r of resp.results || []) out.push({ id: String(r.id), props: r.properties || {} });
       after = resp.paging?.next?.after;

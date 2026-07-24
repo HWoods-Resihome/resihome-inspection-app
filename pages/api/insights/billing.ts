@@ -11,7 +11,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { canViewInsights } from '@/lib/insightsAccess';
 import { fetchBillingRows, billingColumns, billingFacetsFast, rowToCells, type BillingFilters } from '@/lib/insightsBilling';
 import { buildBillingXlsx, billingFilename } from '@/lib/insightsBillingXlsx';
-import { fetchPropertyCoverage } from '@/lib/hubspot';
+import { fetchPropertyCoverage, fetchRegionEnumOptions, fetchPortfolioEnumOptions } from '@/lib/hubspot';
 
 export const config = { maxDuration: 60 };
 
@@ -37,26 +37,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     from: day(req.query.from), to: day(req.query.to),
   };
   try {
-    const rows = await fetchBillingRows(object, filters);
     if (String(req.query.format || '') === 'xlsx') {
+      const rows = await fetchBillingRows(object, filters);
       const buf = await buildBillingXlsx(object, rows);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="${billingFilename(object)}"`);
       return res.status(200).send(buf);
     }
-    // Facets from the UNFILTERED set so the dropdowns don't collapse as you
-    // filter — derived cheaply (no second heavy enrichment pass). Region +
-    // Portfolio additionally include the FULL property catalog (excludes sold/
-    // not-managed) so an admin can filter on a region/portfolio that has no
-    // completed record yet.
-    const facets = await billingFacetsFast(object);
-    const coverage = await fetchPropertyCoverage().catch(() => null);
-    if (coverage) {
-      const covRegions = (coverage.regions || []).map((r: any) => (typeof r === 'string' ? r : r.key)).filter(Boolean);
-      const covPortfolios = (coverage.portfolios || []).map((p: any) => (typeof p === 'string' ? p : p.key)).filter(Boolean);
-      facets.regions = Array.from(new Set([...facets.regions, ...covRegions])).sort((a, b) => a.localeCompare(b));
-      facets.portfolios = Array.from(new Set([...facets.portfolios, ...covPortfolios])).sort((a, b) => a.localeCompare(b));
+    // Rows, facets, and the region/portfolio option catalog are independent — run
+    // them CONCURRENTLY so the table's wall time is the slowest one, not their sum.
+    //  • Facets come from the UNFILTERED set so the dropdowns don't collapse as you
+    //    filter (no heavy per-row enrichment).
+    //  • Region + Portfolio dropdowns are widened with the FULL property catalog so
+    //    an admin can filter on one that has no completed record yet — sourced from
+    //    the property ENUM option lists (one call each) instead of paging up to
+    //    6,000 property records; only falls back to that scan if either isn't an enum.
+    const [rows, facets, regionEnum, portfolioEnum] = await Promise.all([
+      fetchBillingRows(object, filters),
+      billingFacetsFast(object),
+      fetchRegionEnumOptions().catch(() => null),
+      fetchPortfolioEnumOptions().catch(() => null),
+    ]);
+    let catRegions = regionEnum;
+    let catPortfolios = portfolioEnum;
+    if (!catRegions || !catPortfolios) {
+      const coverage = await fetchPropertyCoverage().catch(() => null);
+      if (coverage) {
+        if (!catRegions) catRegions = (coverage.regions || []).map((r: any) => (typeof r === 'string' ? r : r.key)).filter(Boolean);
+        if (!catPortfolios) catPortfolios = (coverage.portfolios || []).map((p: any) => (typeof p === 'string' ? p : p.key)).filter(Boolean);
+      }
     }
+    facets.regions = Array.from(new Set([...facets.regions, ...(catRegions || [])])).sort((a, b) => a.localeCompare(b));
+    facets.portfolios = Array.from(new Set([...facets.portfolios, ...(catPortfolios || [])])).sort((a, b) => a.localeCompare(b));
     // Send pre-formatted CELL ARRAYS (M-D-YY dates, services Due Date, community
     // master_id / property entity_id) so the on-screen table matches the xlsx
     // exactly — both go through rowToCells.

@@ -109,14 +109,6 @@ export function rowToCells(r: BillingRow, object: 'inspections' | 'services' = '
     : [...common, r.vendorAmount, r.clientAmount];
 }
 
-/** Distinct filter option values across a row set (for the UI dropdowns). */
-export function billingFacets(rows: BillingRow[]): { regions: string[]; portfolios: string[]; people: string[]; types: string[] } {
-  const regions = new Set<string>(); const portfolios = new Set<string>(); const people = new Set<string>(); const types = new Set<string>();
-  for (const r of rows) { if (r.region) regions.add(r.region); if (r.portfolio) portfolios.add(r.portfolio); if (r.personName) people.add(r.personName); if (r.typeLabel) types.add(r.typeLabel); }
-  const sort = (s: Set<string>) => Array.from(s).sort((a, b) => a.localeCompare(b));
-  return { regions: sort(regions), portfolios: sort(portfolios), people: sort(people), types: sort(types) };
-}
-
 /** Inspections billing rows (completed only), filtered. */
 export async function fetchInspectionBillingRows(filters: BillingFilters = {}): Promise<BillingRow[]> {
   const snap = await readInsightsSnapshot().catch(() => null);
@@ -177,7 +169,9 @@ export async function fetchInspectionBillingRows(filters: BillingFilters = {}): 
  *  order's own vendor/client cost fields + linked Property for entity/portfolio.
  *  Broker Code defaults to Internal Employee (services aren't agent-billed). */
 export async function fetchServiceBillingRows(filters: BillingFilters = {}): Promise<BillingRow[]> {
-  const records = (await searchServiceWorkOrdersByStatus('completed', 5000).catch(() => null)) || [];
+  // Narrow the scan to the completed window (when set) so a short report doesn't
+  // page the entire completed-service history just to filter it down in the loop.
+  const records = (await searchServiceWorkOrdersByStatus('completed', 5000, { completedFrom: filters.from, completedTo: filters.to }).catch(() => null)) || [];
   // Bill at the COMMUNITY MASTER level: keep community masters (total vendor/client
   // cost across the covered homes) + all standalone/property services, and DROP the
   // per-property split children (master_service_id set) — the old per-property
@@ -239,7 +233,26 @@ export async function fetchBillingRows(object: 'inspections' | 'services', filte
  *  property catalog the API merges in). Services still derive from their one status
  *  scan. This replaces a second full, unfiltered fetchBillingRows pass. */
 export async function billingFacetsFast(object: 'inspections' | 'services'): Promise<{ regions: string[]; portfolios: string[]; people: string[]; types: string[] }> {
-  if (object === 'services') return billingFacets(await fetchServiceBillingRows({}));
+  if (object === 'services') {
+    // Vendor + type + region/portfolio options straight off the raw completed
+    // records — NO per-row Property/vendor/community enrichment (that heavy pass
+    // was the same cost as the rows fetch, run a second time just for dropdowns).
+    // Region/portfolio dropdowns are additionally widened by the API from the
+    // Property catalog, so property rows' live portfolio still appears.
+    const records = (await searchServiceWorkOrdersByStatus('completed', 5000).catch(() => null)) || [];
+    const regions = new Set<string>(); const portfolios = new Set<string>(); const people = new Set<string>(); const types = new Set<string>();
+    for (const { props: p } of records) {
+      if (String(p.master_service_id || '').trim()) continue;   // drop split children (mirror rows)
+      const region = String(p.region_snapshot || '').trim(); if (region) regions.add(region);
+      const portfolio = String(p.portfolio_snapshot || '').trim(); if (portfolio) portfolios.add(portfolio);
+      people.add(String(p.vendor_name || '').trim() || INTERNAL_VENDOR);
+      const wt = String(p.worktype || '').trim(); const st = String(p.subtype || '').trim();
+      const typeLabel = [wt ? worktypeLabel(wt) : '', st ? subtypeLabel(wt, st) : ''].filter(Boolean).join(' · ');
+      if (typeLabel) types.add(typeLabel);
+    }
+    const sort = (s: Set<string>) => Array.from(s).sort((a, b) => a.localeCompare(b));
+    return { regions: sort(regions), portfolios: sort(portfolios), people: sort(people), types: sort(types) };
+  }
   const snap = await readInsightsSnapshot().catch(() => null);
   const regions = new Set<string>(); const people = new Set<string>(); const types = new Set<string>();
   for (const r of (snap?.rows || [])) {
