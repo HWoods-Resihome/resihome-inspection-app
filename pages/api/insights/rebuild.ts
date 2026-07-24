@@ -14,6 +14,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { runAsBackground } from '@/lib/hubspot';
 import { buildInsightsSnapshot, writeInsightsSnapshot, buildDailyRollup, writeDailyRollup, type InsightsSnapshot } from '@/lib/insightsSnapshot';
+import { buildBillingSnapshot, writeBillingSnapshot } from '@/lib/insightsBillingSnapshot';
 
 // Single-flight per instance: concurrent triggers (a cron + an admin click, or a
 // double-click) ride ONE build instead of racing two that clobber the blob with
@@ -63,6 +64,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // a failed history write must not fail the snapshot).
       try { await writeDailyRollup(buildDailyRollup(snap)); }
       catch (e) { console.warn('[insights/rebuild] history write failed:', e); }
+      // Bank the precomputed billing dataset (both objects + facets) so the
+      // billing report renders from the blob with no live HubSpot. Best-effort and
+      // reuses the in-memory Insights snapshot we just built (no blob re-read).
+      try {
+        const t = Date.now();
+        await writeBillingSnapshot(await buildBillingSnapshot(snap));
+        console.log('[insights/rebuild] billing snapshot: %dms', Date.now() - t);
+      } catch (e) { console.warn('[insights/rebuild] billing snapshot failed:', e); }
     }
     const summary = {
       ok: true, asOf: snap.asOf, total: snap.total, scanned: snap.scanned,

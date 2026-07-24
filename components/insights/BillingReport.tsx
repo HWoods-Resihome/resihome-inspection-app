@@ -88,6 +88,7 @@ export function BillingReport({ object }: { object: Obj }) {
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [facets, setFacets] = useState<Facets>({ regions: [], portfolios: [], people: [], types: [] });
+  const [asOf, setAsOf] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -134,6 +135,7 @@ export function BillingReport({ object }: { object: Obj }) {
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setColumns(d.columns || []); setRows(d.rows?.length ? d.rows.map((row: any) => Array.isArray(row) ? row : rowFromObj(row)) : cellsFrom(d.rows));
       if (d.facets) setFacets(d.facets);
+      setAsOf(d.asOf || null);
     } catch (e: any) { setError(String(e?.message || e)); }
     finally { setLoading(false); }
   }, [qs]);
@@ -205,7 +207,7 @@ export function BillingReport({ object }: { object: Obj }) {
       </div>
 
       {error && <div className="mb-2 px-3 py-2 rounded-lg bg-[#ff0060]/10 border border-[#ff0060]/40 text-[13px] text-[#ff0060]">{error}</div>}
-      <div className="text-[12px] text-[#71717a] mb-1.5">{loading ? 'Loading…' : `${rows.length} row${rows.length === 1 ? '' : 's'}`}{applied.from || applied.to ? ` · completed ${applied.from || '…'} → ${applied.to || '…'}` : ' · all time'}{dirty ? ' · filters changed — hit Apply' : ''}</div>
+      <div className="text-[12px] text-[#71717a] mb-1.5">{loading ? 'Loading…' : `${rows.length} row${rows.length === 1 ? '' : 's'}`}{applied.from || applied.to ? ` · completed ${applied.from || '…'} → ${applied.to || '…'}` : ' · all time'}{dirty ? ' · filters changed — hit Apply' : ''}{!loading && asOf ? ` · updated ${fmtAsOf(asOf)}` : ''}</div>
 
       <div className="overflow-x-auto rounded-lg border border-white/10 max-h-[460px] overflow-y-auto">
         <table className="w-full text-[12px] whitespace-nowrap">
@@ -230,6 +232,17 @@ export function BillingReport({ object }: { object: Obj }) {
       )}
     </section>
   );
+}
+
+// Relative "updated" label for the banked-snapshot timestamp (e.g. "3m ago").
+function fmtAsOf(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return '';
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.round(s / 60); if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60); if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
 }
 
 // The API returns rows already as arrays of cells; these guards keep older/edge

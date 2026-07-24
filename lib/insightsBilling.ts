@@ -15,7 +15,7 @@
  * scan — rebuilt every 30 min by the cron); billing-specific columns are
  * enriched on demand (batched Property + Agent reads, both cached).
  */
-import { readInsightsSnapshot } from '@/lib/insightsSnapshot';
+import { readInsightsSnapshot, type InsightsSnapshot } from '@/lib/insightsSnapshot';
 import { templateLabel } from '@/lib/templateLabels';
 import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { fetchAgentBillingByEmails, fetchPropertyBillingByIds, fetchVendorCompanyCodesByEmails, searchServiceWorkOrdersByStatus, fetchCommunityMasterIdsByIds } from '@/lib/hubspot';
@@ -109,9 +109,11 @@ export function rowToCells(r: BillingRow, object: 'inspections' | 'services' = '
     : [...common, r.vendorAmount, r.clientAmount];
 }
 
-/** Inspections billing rows (completed only), filtered. */
-export async function fetchInspectionBillingRows(filters: BillingFilters = {}): Promise<BillingRow[]> {
-  const snap = await readInsightsSnapshot().catch(() => null);
+/** Inspections billing rows (completed only), filtered. `preSnap` lets the
+ *  billing-snapshot builder pass the just-built Insights snapshot in-memory
+ *  instead of re-reading the blob it just wrote. */
+export async function fetchInspectionBillingRows(filters: BillingFilters = {}, preSnap?: InsightsSnapshot | null): Promise<BillingRow[]> {
+  const snap = preSnap ?? await readInsightsSnapshot().catch(() => null);
   // Pre-filter on the CHEAP snapshot fields (completed-date range, inspector, type,
   // and region when the snapshot already carries one) BEFORE the per-row Property/
   // Agent enrichment — so a 7-day report only enriches those ~few rows instead of
