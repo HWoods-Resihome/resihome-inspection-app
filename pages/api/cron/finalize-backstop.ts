@@ -61,6 +61,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const ticketCap = all ? 50 : TICKET_FIXES_PER_RUN;
   const base = appBaseUrl();
 
+  // Audit mode: ?stamped=1 lists recent completions WITH their hbmm_ticket_id so
+  // wrong-environment stamps (created while the base URL pointed at dev) can be
+  // identified in full — the cron kept stamping between the key restore and the
+  // base-URL fix, beyond the known ?all=1 batch.
+  if (req.query.stamped === '1') {
+    const rows = await searchInspectionsMissingProp({
+      // Reuse the helper by inverting: we want HAS hbmm_ticket_id. missingProp is
+      // required by the helper, so probe a property that never exists.
+      statusValues: COMPLETED_STATUSES, missingProp: 'zz_never_set_probe',
+      requireProp: 'hbmm_ticket_id', sinceProp: 'completed_at', sinceMs: Date.now() - TICKET_WINDOW_MS,
+      props: ['hbmm_ticket_id', 'completed_at'], limit: 100,
+    }).catch(() => []);
+    return res.status(200).json({
+      ok: true,
+      stamped: rows.map((r) => ({ id: r.id, ticketId: r.props.hbmm_ticket_id || '', completedAt: r.props.completed_at || null })),
+    });
+  }
+
   // One-off repair (wrong-environment creates): ?unstamp=<inspectionId>:<ticketId>,...
   // clears hbmm_ticket_id ONLY where it exactly matches the supplied (known-wrong)
   // ticket id, so the sweep re-creates those tickets in the corrected environment.
