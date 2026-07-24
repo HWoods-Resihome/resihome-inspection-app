@@ -3266,6 +3266,56 @@ export async function countCompletedInspections(): Promise<number> {
   return resp.total;
 }
 
+/** The Nth COMPLETED inspection in completion order (1-based) — i.e. the one whose
+ *  completion pushed the portal's completed count to N. Ordered by completed_at
+ *  ASC among completed-status records that carry a completion timestamp. Returns
+ *  null when fewer than N such records exist. Powers the milestone identify/resend. */
+export async function findNthCompletedInspection(n: number): Promise<
+  { rank: number; id: string; inspectorEmail: string; inspectorName: string; address: string; completedAt: string; external: string } | null
+> {
+  if (!Number.isInteger(n) || n < 1) return null;
+  const { inspection: typeId } = typeIds();
+  const props = ['inspector_email', 'inspector_name', 'property_address_snapshot', 'completed_at', 'inspection_id_external'];
+  let after: string | undefined;
+  let seen = 0;
+  // Page ASC by completed_at until the Nth record; HubSpot's 10k offset cap is far
+  // above any milestone we celebrate (1k–10k lands inside it).
+  for (;;) {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: [{ filters: [
+          { propertyName: 'status', operator: 'IN', values: ['completed', 'complete', 'Completed', 'Complete'] },
+          { propertyName: 'completed_at', operator: 'HAS_PROPERTY' },
+        ] }],
+        sorts: [{ propertyName: 'completed_at', direction: 'ASCENDING' }],
+        properties: props,
+        limit: 100,
+        ...(after ? { after } : {}),
+      }),
+    });
+    const results = resp.results || [];
+    for (const r of results) {
+      seen++;
+      if (seen === n) {
+        const p = r.properties || {};
+        const at = String(p.completed_at || '').trim();
+        const iso = /^\d+$/.test(at) ? new Date(Number(at)).toISOString() : at;
+        return {
+          rank: n, id: String(r.id),
+          inspectorEmail: String(p.inspector_email || '').trim(),
+          inspectorName: String(p.inspector_name || '').trim(),
+          address: String(p.property_address_snapshot || '').trim(),
+          completedAt: iso,
+          external: String(p.inspection_id_external || '').trim(),
+        };
+      }
+    }
+    after = resp.paging?.next?.after;
+    if (!after || !results.length) return null;   // exhausted before reaching N
+  }
+}
+
 /** Count of CANCELLED inspections (excluded from the analytics snapshot, but
  *  retained as a number for a future cancellation-rate view). Best-effort. */
 export async function countInspectionsCancelled(): Promise<number> {

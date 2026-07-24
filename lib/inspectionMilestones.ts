@@ -15,7 +15,7 @@
  * the completion flow into failure — it only logs.
  */
 import { put, head, del } from '@vercel/blob';
-import { countCompletedInspections, readInspectionProps } from '@/lib/hubspot';
+import { countCompletedInspections, readInspectionProps, findNthCompletedInspection } from '@/lib/hubspot';
 import { sendMilestoneEmail } from '@/lib/notifications/milestone1k';
 
 export const INSPECTION_MILESTONES = [1000, 2500, 5000, 10000];
@@ -75,4 +75,51 @@ export async function celebrateInspectionMilestoneIfHit(inspectionId: string): P
   } catch (e) {
     console.warn('[milestone] check skipped:', String((e as any)?.message || e).slice(0, 160));
   }
+}
+
+export interface MilestoneResendReport {
+  milestone: number;
+  total: number;                 // current completed count
+  reached: boolean;              // total >= milestone
+  claimed: boolean;              // milestone already celebrated (blob exists)
+  inspection: Awaited<ReturnType<typeof findNthCompletedInspection>>;   // the Nth completed inspection + inspector
+  action: 'dry-run' | 'sent' | 'already-claimed' | 'not-reached' | 'not-found' | 'no-inspector' | 'send-failed';
+  error?: string;
+}
+
+/**
+ * Identify the inspection whose completion hit a milestone (the Nth completed
+ * inspection, in completion order) and — on apply — email that inspector the
+ * celebration, recording the once-only claim so the live path won't double-send.
+ * `force` re-sends even if the milestone was already claimed (stuck claim / manual
+ * resend). Dry-run identifies without sending. Admin-triggered.
+ */
+export async function resendInspectionMilestone(
+  milestone: number, opts: { apply: boolean; force?: boolean } = { apply: false },
+): Promise<MilestoneResendReport> {
+  const m = milestone;
+  const base = { milestone: m, total: 0, reached: false, claimed: false, inspection: null } as MilestoneResendReport;
+  if (!INSPECTION_MILESTONES.includes(m)) return { ...base, action: 'not-found', error: `Unknown milestone ${m}. Valid: ${INSPECTION_MILESTONES.join(', ')}` };
+
+  const total = await countCompletedInspections();
+  const claimed = await milestoneClaimed(m);
+  if (total < m) return { ...base, total, claimed, action: 'not-reached' };
+
+  const inspection = await findNthCompletedInspection(m);
+  if (!inspection) return { ...base, total, reached: true, claimed, action: 'not-found', error: `Could not locate the ${m}th completed inspection (records with a completion timestamp: fewer than ${m}).` };
+  const report: MilestoneResendReport = { milestone: m, total, reached: true, claimed, inspection, action: 'dry-run' };
+
+  if (!opts.apply) return report;
+  if (claimed && !opts.force) return { ...report, action: 'already-claimed' };
+  if (!inspection.inspectorEmail) return { ...report, action: 'no-inspector', error: `Inspection ${inspection.id} has no inspector_email.` };
+
+  const r = await sendMilestoneEmail(inspection.inspectorEmail, { count: m, recipientName: inspection.inspectorName });
+  if (!r.sent) return { ...report, action: 'send-failed', error: r.error };
+  // Record the claim (overwrite so a forced resend refreshes who it credited) so
+  // the live completion path never sends this milestone again.
+  try {
+    await put(claimKey(m), JSON.stringify({ milestone: m, at: new Date().toISOString(), inspectionId: inspection.id, email: inspection.inspectorEmail, total, resent: true }),
+      { access: 'public', contentType: 'application/json', addRandomSuffix: false, allowOverwrite: true });
+  } catch (e) { console.warn('[milestone] resend claim write failed (email already sent):', e); }
+  return { ...report, claimed: true, action: 'sent' };
 }
