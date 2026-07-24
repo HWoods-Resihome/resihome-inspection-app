@@ -198,6 +198,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     externalId: insp.inspectionIdExternal,
     templateLabel: templateLabelFor(tmpl) || tmpl,
     propertyAddress: insp.propertyAddressSnapshot,
+    lotNumber: data.propertyLotNumber,
     inspectorName: insp.inspectorName,
     bedrooms: insp.bedroomsAtInspection || 0,
     bathrooms: insp.bathroomsAtInspection || 0,

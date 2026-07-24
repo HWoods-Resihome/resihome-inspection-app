@@ -104,6 +104,8 @@ export default function ExistingInspection() {
   const [propertyAirFiltersType3, setPropertyAirFiltersType3] = useState<string | null>(null);
   const [propertySepticFee, setPropertySepticFee] = useState<number | null>(null);
   const [propertyPoolFee, setPropertyPoolFee] = useState<number | null>(null);
+  // Lot # (RRQC only) — shown beside the address on the record + PDF.
+  const [propertyLotNumber, setPropertyLotNumber] = useState<string | null>(null);
   // Rently smart-lock telemetry → online/offline ring on the Unlock icon.
   const [rentlyDeviceType, setRentlyDeviceType] = useState<string | null>(null);
   const [rentlyShHubStatus, setRentlyShHubStatus] = useState<string | null>(null);
@@ -210,6 +212,7 @@ export default function ExistingInspection() {
           typeof data.propertySepticFee === 'number' ? data.propertySepticFee : null
         );
         setPropertyPoolFee(typeof data.propertyPoolFee === 'number' ? data.propertyPoolFee : null);
+        setPropertyLotNumber(typeof data.propertyLotNumber === 'string' && data.propertyLotNumber.trim() ? data.propertyLotNumber.trim() : null);
         setRentlyDeviceType(typeof data.propertyRentlyDeviceType === 'string' ? data.propertyRentlyDeviceType : null);
         setRentlyShHubStatus(typeof data.propertyRentlyShHubStatus === 'string' ? data.propertyRentlyShHubStatus : null);
         setRentlyShLockStatus(typeof data.propertyRentlyShLockStatus === 'string' ? data.propertyRentlyShLockStatus : null);
@@ -389,6 +392,7 @@ export default function ExistingInspection() {
           templateLabel: templateLabelFor(inspection.templateType) || inspection.templateType,
           inspectionName: inspection.inspectionName,
           propertyAddress: inspection.propertyAddressSnapshot,
+          lotNumber: propertyLotNumber,
           inspectorName: inspection.inspectorName,
           bedrooms: inspection.bedroomsAtInspection || 0,
           bathrooms: inspection.bathroomsAtInspection || 0,
@@ -814,6 +818,7 @@ export default function ExistingInspection() {
           communityName={communityName}
           communityLocation={communityLocation}
           propertyPoolFee={propertyPoolFee}
+          lotNumber={propertyLotNumber}
           propertyAirFiltersTotal={propertyAirFiltersTotal}
           propertyGasProvider={propertyGasProvider}
           propertyAirFiltersType1={propertyAirFiltersType1}

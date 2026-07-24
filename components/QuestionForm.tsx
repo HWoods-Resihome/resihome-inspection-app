@@ -110,6 +110,9 @@ type Props = {
   propertyGasProvider?: string | null;
   /** property pool_fee — gates the Final Checklist Pool Condition question. */
   propertyPoolFee?: number | null;
+  /** Property lot number — shown as "(Lot #: …)" beside the address (RRQC only,
+   *  when present). */
+  lotNumber?: string | null;
   propertyAirFiltersType1?: string | null;
   propertyAirFiltersType2?: string | null;
   propertyAirFiltersType3?: string | null;
@@ -226,7 +229,7 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName, lockRing, propertyRecordId,
-  bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, moveInDate, communityName, communityLocation, onSubmit, onCancel, onNavigateTo,
+  bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, moveInDate, communityName, communityLocation, lotNumber, onSubmit, onCancel, onNavigateTo,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
   propertyAirFiltersTotal, propertyGasProvider, propertyPoolFee, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
@@ -2185,11 +2188,18 @@ export function QuestionForm({
               ) : (
                 <>
                   {/* Full address on ONE line — never wraps; the font shrinks to fit
-                      the available width. */}
-                  <FitText
-                    text={propertyName}
-                    className="font-heading font-semibold text-ink"
-                  />
+                      the available width. RRQC shows "(Lot #: …)" to its right. */}
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <div className="min-w-0 flex-1">
+                      <FitText
+                        text={propertyName}
+                        className="font-heading font-semibold text-ink"
+                      />
+                    </div>
+                    {lotNumber && (
+                      <span className="shrink-0 text-sm font-heading font-semibold text-gray-500">(Lot #: {lotNumber})</span>
+                    )}
+                  </div>
                   <div className="text-xs text-gray-500 truncate">
                     {bedrooms} Bed / {bathrooms} Bath
                     {squareFootage != null && squareFootage > 0 && (

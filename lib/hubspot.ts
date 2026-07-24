@@ -4934,6 +4934,11 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   /** Frozen listing snapshot JSON (status/price/listed/MIR/move-in) captured at
    *  completion. Empty until the inspection is completed. */
   listingSnapshotJson: string | null;
+  /** Property `lot_number` — shown as "(Lot #: …)" beside the address on RRQC
+   *  (New Construction) inspections + PDFs. null when blank / not applicable.
+   *  Only fetched for RRQC (isolated read so an absent field can't break the
+   *  main property read). */
+  propertyLotNumber: string | null;
 } | null> {
   const { inspection: typeId, property: propertyTypeId } = typeIds();
   const properties = [
@@ -4981,6 +4986,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     let propertyPestControlEnrolled = false;
     let propertyTenantHasPet = false;
     let propertyLastTenantPetCount: number | null = null;
+    let propertyLotNumber: string | null = null;
     let propertyAirFiltersTotal: number | null = null;
     let propertyGasProvider: string | null = null;
     let propertyAirFiltersType1: string | null = null;
@@ -5007,6 +5013,18 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         }
       } catch (e: any) {
         console.warn(`[fetchInspectionWithPropertyRef] last_tenant_time_in_home_months unavailable for ${propertyIdRef} (defaulting to 12):`, String(e).slice(0, 160));
+      }
+      // Lot # — RRQC (New Construction) only, and ISOLATED so an absent/renamed
+      // lot field can't 400 the main property read below. Try the common field-
+      // name variants; first non-empty wins. Blank/absent → stays null (hidden).
+      if (String(p.template_type || '') === 'qc_new_construction_rrqc') {
+        for (const field of ['lot_number', 'lot__number', 'lot', 'lot_no']) {
+          try {
+            const lr = await hubspotFetch(`/crm/v3/objects/${propertyTypeId}/${propertyIdRef}?properties=${encodeURIComponent(field)}`);
+            const v = lr.properties?.[field];
+            if (v != null && String(v).trim() !== '') { propertyLotNumber = String(v).trim(); break; }
+          } catch { /* field not on this portal — try the next variant */ }
+        }
       }
       try {
         const propProps = [
@@ -5171,6 +5189,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyPestControlEnrolled,
       propertyTenantHasPet,
       propertyLastTenantPetCount,
+      propertyLotNumber,
       listingSnapshotJson: (p.listing_snapshot_json || '').toString() || null,
     };
   } catch (e: any) {

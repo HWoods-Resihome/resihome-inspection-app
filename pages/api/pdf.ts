@@ -28,6 +28,7 @@ interface GeneratePdfBody {
   templateLabel: string;
   inspectionName: string;
   propertyAddress: string;
+  lotNumber?: string | null;
   inspectorName: string;
   bedrooms: number;
   bathrooms: number;
@@ -152,6 +153,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       externalId: body.externalId,
       templateLabel: body.templateLabel,
       propertyAddress: body.propertyAddress,
+      lotNumber: body.lotNumber ?? null,
       inspectorName: body.inspectorName,
       bedrooms: body.bedrooms,
       bathrooms: body.bathrooms,
