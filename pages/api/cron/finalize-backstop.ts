@@ -119,7 +119,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try {
         const props = await readInspectionProps(iid, ['hbmm_ticket_id', 'pdf_vendor_urls_json', 'pdf_master_url', 'pdf_generated_at']).catch(() => null);
         if (!props) { out.push({ id: iid, outcome: 'not_found' }); continue; }
-        if (!String(props.pdf_generated_at || '').trim()) { out.push({ id: iid, outcome: 'no_finalize_pdfs' }); continue; }
+        // Older finalizes predate the pdf_generated_at marker — accept any record
+        // that actually has stored PDFs to build the ticket from.
+        const hasPdfs = !!(String(props.pdf_generated_at || '').trim() || String(props.pdf_master_url || '').trim() || String(props.pdf_vendor_urls_json || '').trim());
+        if (!hasPdfs) { out.push({ id: iid, outcome: 'no_finalize_pdfs' }); continue; }
         const oldTicket = String(props.hbmm_ticket_id || '').trim();
         const data = await fetchInspectionWithPropertyRef(iid);
         const hbmmId = Number(data?.propertyHbmmId || '');
