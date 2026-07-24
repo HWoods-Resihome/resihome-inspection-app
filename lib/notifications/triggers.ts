@@ -34,13 +34,24 @@ export async function notifyInspectionCompleted(o: {
   /** Extra To recipients beyond the inspector (e.g. a community's RRQC walk
    *  distribution address). Invalid/blank entries are dropped downstream. */
   extraTo?: Array<string | null | undefined>;
+  /** The report PDF bytes, when the caller already has them (e.g. QC finalize
+   *  renders the PDF in-process). Used directly instead of re-fetching pdfUrl —
+   *  which avoids a redundant download and, more importantly, the brief CDN
+   *  propagation lag on a just-uploaded file that would otherwise drop the
+   *  attachment. Falls back to fetching pdfUrl when not provided. */
+  attachmentBuffer?: Buffer | null;
 }): Promise<void> {
   try {
     const to = String(o.inspectorEmail || '').trim();
     if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'inspection_completed')))) return;
     const alsoTo = (o.extraTo || []).map((x) => String(x || '').trim()).filter((x) => validEmail(x));
     let attachment: { filename: string; content: Buffer; mimeType: string } | null = null;
-    if (o.pdfUrl) { const buf = await fetchToBuffer(o.pdfUrl); if (buf) attachment = { filename: pdfName('inspection', o.inspectionId), content: buf, mimeType: 'application/pdf' }; }
+    if (o.attachmentBuffer) {
+      attachment = { filename: pdfName('inspection', o.inspectionId), content: o.attachmentBuffer, mimeType: 'application/pdf' };
+    } else if (o.pdfUrl) {
+      const buf = await fetchToBuffer(o.pdfUrl);
+      if (buf) attachment = { filename: pdfName('inspection', o.inspectionId), content: buf, mimeType: 'application/pdf' };
+    }
     await sendNotificationEmail({
       to, alsoTo, subject: `Inspection Completed — ${o.address}`,
       heading: 'Inspection Completed',

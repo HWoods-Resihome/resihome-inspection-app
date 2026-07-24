@@ -30,6 +30,7 @@ import {
   populateBillingFields,
 } from '@/lib/hubspot';
 import { celebrateInspectionMilestoneIfHit } from '@/lib/inspectionMilestones';
+import { notifyInspectionCompleted } from '@/lib/notifications/triggers';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { resolveSections } from '@/lib/sections';
 import { bustInspectionsCache } from '@/pages/api/inspections';
@@ -443,6 +444,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // matched agent's value). Best-effort — never blocks the completion.
     try { await populateBillingFields(id); } catch (e) { console.warn('[qc-finalize] billing populate failed (continuing):', e); }
     await bustInspectionsCache(); // status → completed; reflect in the list at once
+
+    // "Inspection Completed" email to the inspector, with the QC report attached
+    // — brings QC in line with the other inspection types (Scope emails at
+    // finalize; 1099 / Vacancy / Community / RRQC email from /api/pdf). QC renders
+    // its PDF in-process, so pass the buffer we already have (no re-fetch, and
+    // immune to the just-uploaded file's CDN propagation lag). Best-effort and
+    // gated on the inspector's own notification toggle; a failure never blocks the
+    // completion. The terminal-state guard above means this only fires on a first
+    // completion (a reopen → re-finalize legitimately re-sends, like the others).
+    try {
+      const emHost = req.headers['x-forwarded-host'] || req.headers.host || '';
+      const emProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+      if (emHost) {
+        await notifyInspectionCompleted({
+          inspectionId: id,
+          inspectorEmail: inspection.inspectorEmail,
+          templateLabel: ctx.templateLabel,
+          address: ctx.propertyName,
+          pdfUrl,
+          attachmentBuffer: pdfBuf,
+          baseUrl: `${emProto}://${emHost}`,
+        });
+      }
+    } catch (e) {
+      console.warn('[qc-finalize] completion email skipped (continuing):', e);
+    }
+
     res.status(200).json({
       success: true,
       elapsedMs: Date.now() - t0,
