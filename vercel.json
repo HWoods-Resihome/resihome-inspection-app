@@ -65,6 +65,9 @@
     },
     "pages/api/cron/services-leasestart-sync.ts": {
       "maxDuration": 300
+    },
+    "pages/api/cron/finalize-backstop.ts": {
+      "maxDuration": 300
     }
   },
   "crons": [
@@ -127,6 +130,10 @@
     {
       "path": "/api/cron/services-leasestart-sync",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/finalize-backstop",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

@@ -4267,6 +4267,42 @@ export async function attachPdfUrlToInspection(inspectionRecordId: string, pdfUr
  * on 404. Used for lightweight checks (e.g. the finalize lock) without pulling
  * a full InspectionSummary.
  */
+/**
+ * Backstop sweeps (pages/api/cron/finalize-backstop): inspections in one of
+ * `statusValues` where `missingProp` was never written — e.g. pending-approval
+ * scopes whose master PDF didn't generate, or completed scopes whose HBMM
+ * ticket create failed. `requireProp` narrows to records where a marker exists
+ * (pdf_generated_at ⇒ the finalize pipeline ran); `sinceProp`/`sinceMs` bound
+ * the window so the sweep never trawls history.
+ */
+export async function searchInspectionsMissingProp(opts: {
+  statusValues: string[];
+  missingProp: string;
+  requireProp?: string;
+  sinceProp?: string;
+  sinceMs?: number;
+  props?: string[];
+  limit?: number;
+}): Promise<{ id: string; props: Record<string, any> }[]> {
+  const { inspection } = typeIds();
+  const filters: any[] = [
+    { propertyName: 'status', operator: 'IN', values: opts.statusValues },
+    { propertyName: opts.missingProp, operator: 'NOT_HAS_PROPERTY' },
+  ];
+  if (opts.requireProp) filters.push({ propertyName: opts.requireProp, operator: 'HAS_PROPERTY' });
+  if (opts.sinceProp && opts.sinceMs) filters.push({ propertyName: opts.sinceProp, operator: 'GT', value: String(opts.sinceMs) });
+  const resp = await hubspotFetch(`/crm/v3/objects/${inspection}/search`, {
+    method: 'POST',
+    body: JSON.stringify({
+      filterGroups: [{ filters }],
+      properties: Array.from(new Set(['status', ...(opts.props || [])])),
+      sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }],
+      limit: Math.min(opts.limit ?? 25, 100),
+    }),
+  });
+  return (resp?.results || []).map((r: any) => ({ id: String(r.id), props: r.properties || {} }));
+}
+
 export async function readInspectionProps(
   recordId: string,
   props: string[]

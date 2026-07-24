@@ -59,6 +59,7 @@ import { getGmailRefreshToken, encryptToken } from '@/lib/gmailAuth';
 import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, TICKET_TYPE_EVICTION, TICKET_CATEGORY_EVICTION, TICKET_CATEGORY_CAPEX, type CreateTicketResult } from '@/lib/maintenanceAi';
 import { enqueueTicketEnforcement } from '@/lib/ticketEnforceQueue';
 import { vendorTicketKind } from '@/lib/vendors';
+import { sendNotificationEmail, appBaseUrl } from '@/lib/notifications/send';
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
@@ -101,7 +102,17 @@ const FINALIZE_LOCK_PROP = process.env.FINALIZE_LOCK_PROPERTY || 'finalize_in_pr
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const session = await getSessionFromRequest(req);
+  let session = await getSessionFromRequest(req);
+  // System path: the finalize-backstop cron regenerates MISSING pending-approval
+  // PDFs machine-to-machine. Accepted ONLY with the CRON_SECRET bearer AND
+  // regenerateOnly=true (refreshes PDFs in place — no status flip, no approver
+  // stamp, no email/ticket/SFTP side effects). Internal-domain identity so the
+  // external-write denial below doesn't treat the system as a 1099 user.
+  if (!session && !!process.env.CRON_SECRET
+      && (req.headers.authorization || '') === `Bearer ${process.env.CRON_SECRET}`
+      && !!(req.body || {}).regenerateOnly) {
+    session = { userId: 'system', email: 'system@resihome.com', name: 'ResiWalk System' } as unknown as typeof session;
+  }
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
 
   const id = String(req.query.id || '');
@@ -1130,6 +1141,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ticketResult = { ok: false, configured: true, error: String(e?.message || e).slice(0, 300) };
         console.warn('[finalize] maintenance ticket threw (caught, finalize continues):', e);
       }
+    }
+    // A configured-but-FAILED ticket create was previously console-only — ops
+    // discovered it by noticing HBMM was empty and entering tickets by hand.
+    // Alert the services inbox immediately (best-effort; the finalize-backstop
+    // cron also retries the create on its next pass).
+    if (!regenerateOnly && ticketResult && ticketResult.configured && !ticketResult.ok) {
+      const inboxTo = (process.env.SERVICES_ALERTS_INBOX || process.env.SERVICE_NOTES_INBOX || 'services@resihome.com').trim();
+      const failAddr = `${inspectionData.propertyAddressStreet || ''}`.trim() || `inspection ${id}`;
+      void sendNotificationEmail({
+        to: inboxTo,
+        subject: `HBMM ticket FAILED: ${failAddr}`,
+        heading: 'Maintenance Ticket Not Created',
+        intro: 'The finalize completed but the HBMM maintenance ticket could not be created. The backstop job will retry automatically; if it keeps failing, create the ticket manually.',
+        rows: [['Inspection', failAddr], ['Error', String(ticketResult.error || 'unknown').slice(0, 300)]],
+        linkUrl: `${appBaseUrl(req)}/inspection/${encodeURIComponent(id)}`,
+        linkLabel: 'Open Inspection',
+      }).catch(() => { /* never blocks finalize */ });
     }
     const ticketUrl = ticketResult?.ok ? buildTicketUrl(ticketResult.ticketId) : null;
 
