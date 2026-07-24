@@ -4,7 +4,6 @@
  * completed" email notification (which attaches the vendor copy). Photos are
  * fetched + downscaled to data URIs so react-pdf renders them reliably.
  */
-import sharp from 'sharp';
 import React from 'react';
 import { renderToBuffer } from '@react-pdf/renderer';
 import { fetchServiceWorkOrder, readServiceForms, findServiceBidChildren } from '@/lib/hubspot';
@@ -12,7 +11,8 @@ import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/workt
 import { DEFAULT_SERVICE_FORMS, formKey } from '@/lib/services/serviceForms';
 import { PROOF_URL_KEY } from '@/lib/services/model';
 import { ServicePdf, type ServicePdfData } from '@/lib/servicePdf';
-import { safeProxyFetch, readBodyCapped, isAllowedPhotoHost } from '@/lib/safeProxyFetch';
+import { isAllowedPhotoHost } from '@/lib/safeProxyFetch';
+import { embedPhotoDataUri } from '@/lib/pdfImages';
 import { reviewerDisplayName } from '@/lib/reviewerName';
 
 const money = (v: any) => { const n = Number(v); return Number.isFinite(n) ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''; };
@@ -28,31 +28,32 @@ const prettyAnswer = (v: any): string => {
   return String(v ?? '');
 };
 
-const PHOTO_FETCH_TIMEOUT_MS = 8000; // one hung upstream photo must not stall the whole PDF
+// Service photos embed smaller than the inspection reports (a Service PDF is a
+// simple one-pager) — 360px @ q62.
+const SERVICE_EMBED_EDGE = 360;
+const SERVICE_EMBED_QUALITY = 62;
+// Global ceiling on the WHOLE embed phase for one service render. The endpoint
+// (pages/api/services/[id]/pdf.ts) and the "service completed" email both run
+// under a 60s budget, so cap embedding well below it — over-budget photos fall
+// back to links rather than timing the render out.
+const SERVICE_EMBED_BUDGET_MS = 45000;
 
-async function toDataUri(url: string): Promise<string | null> {
-  try {
-    const clean = url.split('#')[0];
-    // SSRF guard: only allowed photo hosts, fetched via safeProxyFetch (validates
-    // every redirect hop resolves to a public IP) so a stored URL can't pull an
-    // internal/metadata address into the admin-viewed PDF.
-    if (!isAllowedPhotoHost(clean)) return null;
-    const r = await safeProxyFetch(clean, { signal: AbortSignal.timeout(PHOTO_FETCH_TIMEOUT_MS) });
-    if (!r.ok) return null;
-    const buf = await readBodyCapped(r, 40 * 1024 * 1024);
-    // failOn:'truncated' → a partial/corrupt upload throws (→ dropped) instead of
-    // decoding as a BLACK frame; also reject a solid near-black frame outright.
-    const base = sharp(buf, { failOn: 'truncated' }).rotate();
-    try {
-      const stats = await base.clone().stats();
-      if (stats.channels.slice(0, 3).every((c) => c.max <= 8)) return null;
-    } catch { /* stats failed → the resize below surfaces a real decode error */ }
-    const jpeg = await base.resize(360, 360, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 62 }).toBuffer();
-    return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
-  } catch { return null; }
+async function toDataUri(url: string, deadline: number): Promise<string | null> {
+  const clean = url.split('#')[0];
+  // SSRF guard: keep the strict host allowlist as a pre-check. embedPhotoDataUri
+  // then fetches via safeProxyFetch, which also refuses any redirect hop
+  // resolving to a private/internal IP, so a stored URL can't pull an
+  // internal/metadata address into the admin-viewed PDF.
+  if (!isAllowedPhotoHost(clean)) return null;
+  // Shared helper: warm thumbnail cache (immutable HubSpot files — a re-view /
+  // email re-render embeds seen photos instantly), retry over a just-uploaded
+  // file's CDN propagation lag, black/truncated-frame rejection, and the batch
+  // deadline. Cached separately from the 520px inspection thumbnails (keyed by
+  // size), so the two never collide.
+  return embedPhotoDataUri(clean, { edge: SERVICE_EMBED_EDGE, quality: SERVICE_EMBED_QUALITY, deadline });
 }
 // Global limiter shared by every photo group in a render: before/after, pet,
-// proof, and bid photos together previously fired ~44 unbounded fetch+sharp ops
+// proof, and bid photos together previously fired ~44 unbounded fetch+encode ops
 // at once, which starved the event loop and made the PDF feel hung. Six at a
 // time keeps the pipe full without the stampede.
 const ENCODE_CONCURRENCY = 6;
@@ -63,8 +64,8 @@ async function withEncodeSlot<T>(fn: () => Promise<T>): Promise<T> {
   _active++;
   try { return await fn(); } finally { _active--; _waiters.shift()?.(); }
 }
-async function encodeAll(urls: string[], cap = 8): Promise<string[]> {
-  const out = await Promise.all(urls.slice(0, cap).map((u) => withEncodeSlot(() => toDataUri(u))));
+async function encodeAll(urls: string[], deadline: number, cap = 8): Promise<string[]> {
+  const out = await Promise.all(urls.slice(0, cap).map((u) => withEncodeSlot(() => toDataUri(u, deadline))));
   return out.filter((x): x is string => !!x);
 }
 
@@ -96,12 +97,14 @@ export async function renderServicePdfBuffer(id: string, opts: { variant: 'vendo
   // them BEFORE the before photos (see ServicePdf).
   const arrivalUrlsRaw = (answersRaw as any)['grass_height__photos'];
   const arrivalUrls: string[] = Array.isArray(arrivalUrlsRaw) ? arrivalUrlsRaw.map(String) : splitUrls(arrivalUrlsRaw);
+  // One shared embed deadline for every photo group in this render.
+  const embedDeadline = Date.now() + SERVICE_EMBED_BUDGET_MS;
   const [before, after, petBefore, petAfter, proofPhotos, arrival] = await Promise.all([
-    encodeAll(splitUrls(p.before_photo_urls)), encodeAll(splitUrls(p.after_photo_urls)),
-    encodeAll(splitUrls(p.pet_before_photo_urls)), encodeAll(splitUrls(p.pet_after_photo_urls)),
+    encodeAll(splitUrls(p.before_photo_urls), embedDeadline), encodeAll(splitUrls(p.after_photo_urls), embedDeadline),
+    encodeAll(splitUrls(p.pet_before_photo_urls), embedDeadline), encodeAll(splitUrls(p.pet_after_photo_urls), embedDeadline),
     // Photos extracted from the vendor's proof-of-service PDF (AI-review step).
-    encodeAll(splitUrls(p.proof_photo_urls), 12),
-    encodeAll(arrivalUrls),
+    encodeAll(splitUrls(p.proof_photo_urls), embedDeadline, 12),
+    encodeAll(arrivalUrls, embedDeadline),
   ]);
   // Link to the vendor's original proof document (from their completion answers).
   const proofLinkRaw = String(answersRaw[PROOF_URL_KEY] || '').trim();
@@ -112,7 +115,7 @@ export async function renderServicePdfBuffer(id: string, opts: { variant: 'vendo
     description: c.props.service_description || '',
     cost: money(c.props.vendor_cost),
     status: c.props.status || '',
-    photos: await encodeAll(splitUrls(c.props.before_photo_urls)),
+    photos: await encodeAll(splitUrls(c.props.before_photo_urls), embedDeadline),
   })));
 
   const d: ServicePdfData = {

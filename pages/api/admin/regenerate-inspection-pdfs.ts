@@ -31,7 +31,7 @@ import {
   updateInspection,
 } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
-import { resolveImagesInParallel } from '@/lib/pdf-images';
+import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
 import { getPosterUrl } from '@/lib/media';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { summarizeFinalChecklist, finalChecklistPhotos, type FcAnswers, type FcCompletionCtx, type FcSummaryGroup } from '@/lib/finalChecklist';
@@ -181,14 +181,13 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     } catch { /* optional */ }
   }
 
-  // Resolve + embed thumbnails (small file), keep original URLs for clickable links.
+  // Resolve + embed thumbnails (small file), keep original URLs for clickable
+  // links — via the shared helper (warm cache + retry + global budget).
   const allUrls: string[] = [];
   for (const arr of Object.values(answersBySection)) for (const a of arr) for (const u of (a.photoUrls || [])) allUrls.push(getPosterUrl(u));
   for (const arr of Object.values(sectionPhotosBy)) for (const u of arr) allUrls.push(getPosterUrl(u));
   for (const u of fcPhotos) allUrls.push(getPosterUrl(u));
-  const resolved = await resolveImagesInParallel(allUrls);
-  const embeddedByUrl: Record<string, string> = {};
-  for (const [u, d] of resolved) embeddedByUrl[u] = d;
+  const embeddedByUrl = await buildEmbeddedPhotoMap(allUrls);
 
   let triggeredCount = 0;
   for (const arr of Object.values(answersBySection)) for (const a of arr) if (a.note || a.quantity != null || a.assignedTo) triggeredCount++;

@@ -30,7 +30,7 @@ const MAX_ATTEMPTS = 4;
 // degrade most of their photos to links.)
 const TOTAL_BUDGET_MS = 150000;
 // Hard ceiling on a fetched source image so a huge/attacker-supplied URL can't
-// OOM the PDF render (mirrors lib/pdf-images.ts).
+// OOM the PDF render.
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024; // output is <=520px; a 12MB source is ample. Bounds peak memory (concurrency x this) so a few oversized uploads can't OOM the render.
 
 /**
@@ -40,7 +40,7 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024; // output is <=520px; a 12MB source is
  * otherwise leave the photo as a "View photo" link in the report instead of the
  * image. A sharp DECODE error isn't retried (won't change on re-fetch).
  */
-async function fetchAndEmbed(url: string, deadline: number): Promise<string | null> {
+async function fetchAndEmbed(url: string, deadline: number, edge: number, quality: number): Promise<string | null> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) return null;  // out of budget → link fallback
@@ -52,7 +52,7 @@ async function fetchAndEmbed(url: string, deadline: number): Promise<string | nu
       // at an internal/metadata address and, if it returns a sharp-decodable image
       // (incl. SVG), exfiltrate it into the finalized PDF. safeProxyFetch follows
       // redirects manually and refuses any hop resolving to a private/internal IP;
-      // readBodyCapped bounds the read. Mirrors the guarded lib/pdf-images.ts.
+      // readBodyCapped bounds the read.
       const r = await safeProxyFetch(url, { signal: ctrl.signal });
       if (!r.ok) {
         const retryable = r.status === 404 || r.status === 403 || r.status === 429 || r.status >= 500;
@@ -72,8 +72,8 @@ async function fetchAndEmbed(url: string, deadline: number): Promise<string | nu
         if (stats.channels.slice(0, 3).every((c) => c.max <= 8)) return null;
       } catch { /* stats failed → let the resize below surface a real decode error */ }
       const jpeg = await base
-        .resize(EMBED_EDGE, EMBED_EDGE, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: EMBED_QUALITY })
+        .resize(edge, edge, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality })
         .toBuffer();
       return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
     } catch (e: any) {
@@ -97,39 +97,75 @@ async function fetchAndEmbed(url: string, deadline: number): Promise<string | nu
  */
 // Warm-instance thumbnail cache: uploaded photos are immutable (a HubSpot file
 // URL never changes content), so a poster fetched+downscaled once can be reused
-// by any later render on this instance — a re-finalize / qc pass embeds its
-// already-seen photos instantly and spends the whole budget on NEW ones. Bounded
-// (insertion-order eviction) so a long-lived instance can't grow unbounded:
-// ~60KB per data URI × 600 ≈ 36MB ceiling.
+// by any later render on this instance — a re-finalize / qc pass / service render
+// embeds its already-seen photos instantly and spends the whole budget on NEW
+// ones. Bounded (insertion-order eviction) so a long-lived instance can't grow
+// unbounded: ~60KB per data URI × 600 ≈ 36MB ceiling.
+// Keyed by URL *and* the target size/quality: the same photo is embedded at
+// different dimensions by different reports (inspection PDFs at 520px, service
+// PDFs at 360px), and those must never be served for each other.
 const _thumbCache = new Map<string, string>();
 const THUMB_CACHE_MAX = 600;
-function cacheThumb(url: string, data: string): void {
+const thumbKey = (url: string, edge: number, quality: number) => `${url}@${edge}q${quality}`;
+function cacheThumb(key: string, data: string): void {
   if (_thumbCache.size >= THUMB_CACHE_MAX) {
     const oldest = _thumbCache.keys().next().value;
     if (oldest !== undefined) _thumbCache.delete(oldest);
   }
-  _thumbCache.set(url, data);
+  _thumbCache.set(key, data);
 }
 
-export async function buildEmbeddedPhotoMap(entries: string[]): Promise<Record<string, string>> {
+/**
+ * Fetch + downscale ONE photo to a JPEG data URI, served from the warm cache when
+ * seen before at this size/quality. The single-photo primitive every PDF path
+ * shares (inspection reports via buildEmbeddedPhotoMap; service reports directly)
+ * so the cache, retry, SSRF guard, and black/truncated-frame handling are
+ * identical everywhere. Returns null on failure (caller renders a link).
+ *
+ * `deadline` is an absolute epoch-ms ceiling for THIS photo's fetch/retries;
+ * default gives it the full per-batch budget. Callers running many photos should
+ * share one deadline so the whole phase stays within the function's budget.
+ */
+export async function embedPhotoDataUri(
+  url: string,
+  opts?: { edge?: number; quality?: number; deadline?: number },
+): Promise<string | null> {
+  const edge = opts?.edge ?? EMBED_EDGE;
+  const quality = opts?.quality ?? EMBED_QUALITY;
+  const key = thumbKey(url, edge, quality);
+  const hit = _thumbCache.get(key);
+  if (hit) return hit;
+  const deadline = opts?.deadline ?? Date.now() + TOTAL_BUDGET_MS;
+  const data = await fetchAndEmbed(url, deadline, edge, quality);
+  if (data) cacheThumb(key, data);
+  return data;
+}
+
+export async function buildEmbeddedPhotoMap(
+  entries: string[],
+  opts?: { deadlineMs?: number },
+): Promise<Record<string, string>> {
   // Unique poster URLs (http/https only — skip blob:/data: and dedupe).
   const posters = Array.from(new Set(
     entries.map((e) => getPosterUrl(e)).filter((u) => /^https?:\/\//i.test(u))
   ));
   const out: Record<string, string> = {};
-  // Serve cache hits first — they cost nothing and don't touch the budget.
+  // Serve cache hits first — they cost nothing and don't touch the budget. The
+  // batch renders at the standard embed size, so key the lookup to match.
   const misses: string[] = [];
   for (const url of posters) {
-    const hit = _thumbCache.get(url);
+    const hit = _thumbCache.get(thumbKey(url, EMBED_EDGE, EMBED_QUALITY));
     if (hit) out[url] = hit; else misses.push(url);
   }
-  const deadline = Date.now() + TOTAL_BUDGET_MS;
+  // Bound the WHOLE phase — callers on a tighter route (e.g. the 60s /api/pdf)
+  // pass a smaller deadlineMs so the image phase can't eat the function budget.
+  const deadline = Date.now() + Math.max(1000, opts?.deadlineMs ?? TOTAL_BUDGET_MS);
   let cursor = 0;
   const worker = async () => {
     while (cursor < misses.length && Date.now() < deadline) {
       const url = misses[cursor++];
-      const data = await fetchAndEmbed(url, deadline);
-      if (data) { out[url] = data; cacheThumb(url, data); } // else unmapped → link fallback
+      const data = await embedPhotoDataUri(url, { deadline }); // caches internally
+      if (data) out[url] = data; // else unmapped → link fallback
     }
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, misses.length) }, worker));

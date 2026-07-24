@@ -6,7 +6,7 @@ import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
 import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection, readInspectionProps, fetchInspectionById, fetchPropertyCommunityRrqcWalkEmail } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
 import { externalOwnedWriteDenial } from '@/lib/inspectionGuard';
-import { resolveImagesInParallel } from '@/lib/pdf-images';
+import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
 import { getPosterUrl } from '@/lib/media';
 import type { AnswerInput } from '@/lib/types';
 import { notifyInspectionCompleted } from '@/lib/notifications/triggers';
@@ -88,20 +88,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       for (const u of body.finalChecklistPhotos) allUrls.push(getPosterUrl(u));
     }
 
-    // Step 2: pre-fetch + resize all in parallel (the big perf win).
+    // Step 2: pre-fetch + downscale all in parallel (the big perf win), via the
+    // shared embed helper — warm thumbnail cache + retry on CDN propagation lag +
+    // a global time budget. This route's maxDuration is 60s (vercel.json), so cap
+    // the image phase well under it; remaining photos fall back to clickable links
+    // rather than timing the whole function out.
     const t1 = Date.now();
-    // This route's maxDuration is 60s (vercel.json) — cap the image phase well
-    // under it so the render + response still fit. Remaining photos fall back to
-    // clickable links rather than timing the whole function out.
-    const urlToDataUri = await resolveImagesInParallel(allUrls, { deadlineMs: 40_000 });
+    const embeddedByUrl = await buildEmbeddedPhotoMap(allUrls, { deadlineMs: 40_000 });
     const tImg = Date.now() - t1;
-    console.log(`[pdf] resolved ${urlToDataUri.size} images in ${tImg}ms`);
+    console.log(`[pdf] resolved ${Object.keys(embeddedByUrl).length} images in ${tImg}ms`);
 
-    // Step 3: build PDF data. We KEEP the original photo URLs (so the PDF can
-    // LINK each photo to its full-size file — clickable like the Scope report)
-    // and pass a poster→thumbnail map separately for the embedded (small) image.
-    const embeddedByUrl: Record<string, string> = {};
-    for (const [url, dataUri] of urlToDataUri) embeddedByUrl[url] = dataUri;
+    // Step 3: build PDF data. We KEEP the original photo URLs on the answers (so
+    // the PDF can LINK each photo to its full-size file — clickable like the Scope
+    // report); embeddedByUrl (poster URL → small data URI) supplies the drawn img.
 
     // Group answers by an effective "section display name":
     //   - non-repeating: just the section ("Yard / Exterior")

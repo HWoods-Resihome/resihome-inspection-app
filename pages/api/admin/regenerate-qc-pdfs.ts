@@ -37,8 +37,7 @@ import { resolveSections } from '@/lib/sections';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
 import { buildShortLink } from '@/lib/shortLinks';
-import { resolveImagesInParallel } from '@/lib/pdf-images';
-import { getPosterUrl } from '@/lib/media';
+import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
 
 const QC_TEMPLATE = 'pm_turn_reinspect_qc';
 
@@ -182,12 +181,11 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
 
   const sections: QcPdfSection[] = sectionOrder.map((k) => sectionMap.get(k)!);
 
-  // Pre-resolve photos to embedded thumbnails (keep original URLs for links).
+  // Pre-resolve photos to embedded thumbnails (keep original URLs for links) —
+  // via the shared helper (warm cache + retry + global budget).
   const allPhotoUrls: string[] = [];
   for (const s of sections) allPhotoUrls.push(...s.beforePhotos, ...s.afterPhotos);
-  const resolved = await resolveImagesInParallel(allPhotoUrls);
-  const embeddedByUrl: Record<string, string> = {};
-  for (const [url, dataUri] of resolved) embeddedByUrl[getPosterUrl(url)] = dataUri;
+  const embeddedByUrl = await buildEmbeddedPhotoMap(allPhotoUrls);
 
   // Verdict from the stored value (fall back to fail-if-any-fail).
   const verdict: 'pass' | 'fail' = inspection.qcVerdict === 'pass' || inspection.qcVerdict === 'fail'

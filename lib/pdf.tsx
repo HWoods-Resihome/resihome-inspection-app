@@ -244,8 +244,8 @@ function renderPhotos(entries: string[], embedded?: Record<string, string>, gall
   return entries.map((entry, i) => {
     const poster = getPosterUrl(entry);
     const data = embedded && embedded[poster];
-    // resolveImagesInParallel returns a base64 data URI on success and falls back
-    // to the ORIGINAL url on failure. A raw url here means the embed failed —
+    // buildEmbeddedPhotoMap maps a poster URL to a base64 data URI on success and
+    // OMITS it on failure. A missing/raw value here means the embed failed —
     // react-pdf can't reliably fetch it at render time either, so drawing an
     // <Image> would leave a blank, fixed-size 100×75 tile (the "large empty
     // space without photos"). When the embed failed, render a compact text link
