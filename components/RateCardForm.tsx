@@ -2798,8 +2798,13 @@ export function RateCardForm(props: RateCardFormProps) {
       gasProvider: props.propertyGasProvider ?? null,
       lineExists: fcLineExists,
     }),
-    [fcAnswers, props.propertySepticFee, props.propertyAirFiltersTotal, props.filterSizeOptions,
-     props.propertyAirFiltersType1, props.propertyAirFiltersType2, props.propertyAirFiltersType3, linesBySection],
+    // Every ctx input must be a dep — a missing one (gas provider especially)
+    // leaves the gate evaluating a STALE context and lets a required question
+    // slip past submit while the renderer shows it. fcLineExists reads only
+    // linesBySection, which stands in for it here (the fn is re-declared per render).
+    [fcAnswers, props.propertySepticFee, props.propertyPoolFee, props.propertyAirFiltersTotal, props.filterSizeOptions,
+     props.propertyAirFiltersType1, props.propertyAirFiltersType2, props.propertyAirFiltersType3,
+     props.communityName, props.propertyGasProvider, linesBySection],
   );
   const finalChecklistComplete = fcGap === null;
   // The Final Checklist is EDITABLE + gates Submit only for scheduled/in-progress

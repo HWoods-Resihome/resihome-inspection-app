@@ -221,14 +221,35 @@ export function fcMissingLineCodes(catalogCodes: Set<string> | string[]): string
   return fcReferencedLineCodes().filter((c) => !present.has(c));
 }
 
+/** True when an answer holds ANY inspector-entered content (a selection, a
+ *  multi-select pick, a note, or a photo) — used to keep answered questions
+ *  visible/required even when their property-driven gate flips off later. */
+function fcAnswerHasContent(ans: FcAnswerState | undefined): boolean {
+  if (!ans) return false;
+  return !!((ans.value || '').trim()
+    || (ans.multi || []).filter(Boolean).length
+    || (ans.note || '').trim()
+    || (ans.photoUrls || []).length);
+}
+
 /** Whether a question is currently shown (respects conditional visibility). `a`
  *  (the answers map) is needed for cross-answer dependencies (showWhenAnswered);
  *  callers that have the answers should pass them. */
 export function fcQuestionVisible(q: FcQuestion, ctx: FcCompletionCtx, a?: FcAnswers): boolean {
   // Community-only questions (mailbox keys) hide on non-community properties.
   if (q.requiresCommunity && !ctx.hasCommunity) return false;
-  // Gas utility question hides on all-electric / unmapped homes.
-  if (q.requiresGasProvider && !hasRealGasProvider(ctx.gasProvider)) return false;
+  // Gas utility question hides on all-electric / unmapped homes — UNLESS the Gas
+  // question already holds an answer (or this question itself does). Visibility is
+  // STICKY on data: the submit gate skips hidden questions, so if the property's
+  // gas_provider reads blank/all-electric on a later load (HubSpot edit, stale or
+  // failed property fetch, offline cache) an answered Gas with an empty REQUIRED
+  // "Check All" would silently pass submit and show up empty on the completed
+  // record. Once the inspector has answered Gas, the home evidently has gas —
+  // keep the whole gas group visible and gated regardless of what ctx says.
+  if (q.requiresGasProvider && !hasRealGasProvider(ctx.gasProvider)) {
+    const gasAnswered = !!((a?.['fc_gas']?.value || '').trim());
+    if (!gasAnswered && !fcAnswerHasContent(a?.[q.id])) return false;
+  }
   // Cross-answer dependency: hide until the referenced question is answered (e.g.
   // gas appliances appear once Gas is On/Off).
   if (q.showWhenAnswered && !((a?.[q.showWhenAnswered]?.value || '').trim())) return false;
@@ -440,9 +461,9 @@ export function remapFcAnswerUrls(a: FcAnswers, urlMap: Map<string, string>): { 
  *  Returns null when the checklist is complete. Single source of truth for both
  *  the completeness gate and the submit tooltip/flash. */
 // Per-question completeness. Returns the short reason it's INCOMPLETE, or null
-// when satisfied. Shared by the submit gate and the section progress counts so
-// they can never diverge.
-function fcQuestionGap(
+// when satisfied. Shared by the submit gate, the section progress counts, and
+// the read-only "Not answered" flag so they can never diverge.
+export function fcQuestionGap(
   q: FcQuestion, ans: FcAnswerState, ctx: FcCompletionCtx, a: FcAnswers,
   opts?: { skipLineRules?: boolean }
 ): string | null {

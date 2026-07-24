@@ -24,6 +24,9 @@ const complete = (): FcAnswers => ({
   fc_electric: { value: 'On' },
   fc_water: { value: 'On' },
   fc_gas: { value: 'On' },
+  // Once Gas holds an answer the dependent "Check All" (gas appliances) is
+  // visible + required even without ctx.gasProvider — sticky visibility.
+  fc_gas_appliances: { multi: ['Stove'] },
   fc_trash_bins: { value: 'N/A' },
 });
 
@@ -137,6 +140,29 @@ describe('finalChecklistGap', () => {
     expect(fcPoolStamps({ fc_pool_condition: { value: 'Pass' } })).toEqual({ poolCondition: 'Pass', poolFeedback: '', poolPhotoUrls: '' });
     expect(fcPoolStamps({ fc_pool_condition: { value: 'Fail', note: 'green water', photoUrls: ['u1', 'u2'] } }))
       .toEqual({ poolCondition: 'Fail', poolFeedback: 'green water', poolPhotoUrls: 'u1\nu2' });
+  });
+
+  it('gas visibility is STICKY on data: an answered Gas keeps Check All required even without a ctx gas provider', () => {
+    // The production bug: Gas was answered while the property had a real gas
+    // provider, but on a later load gas_provider read blank — the old gate
+    // hid BOTH questions and let an empty required "Check All" pass submit.
+    const a = complete();
+    a.fc_gas = { value: 'On' };
+    delete a.fc_gas_appliances;
+    expect(finalChecklistGap(a, baseCtx)).toContain('Check All');        // no provider in ctx
+    expect(finalChecklistGap(a, { ...baseCtx, gasProvider: 'This Home is All Electric' })).toContain('Check All');
+    // With at least one appliance picked it clears again.
+    a.fc_gas_appliances = { multi: ['Water Heater'] };
+    expect(finalChecklistGap(a, baseCtx)).toBeNull();
+  });
+
+  it('gas questions stay hidden (not required) when never answered on a no-provider home', () => {
+    const a = complete();
+    delete a.fc_gas;
+    delete a.fc_gas_appliances;
+    expect(finalChecklistGap(a, baseCtx)).toBeNull();                    // hidden → complete
+    // A real provider makes Gas required as before.
+    expect(finalChecklistGap(a, { ...baseCtx, gasProvider: 'Atlanta Gas Light' })).toContain('Gas');
   });
 
   it('requires septic only when septic_fee > 0', () => {

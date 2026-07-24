@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import {
-  FINAL_CHECKLIST, FC_FILTER_OTHER, fcSectionCounts, fcVisibleDeviceFields, fcQuestionVisible,
+  FINAL_CHECKLIST, FC_FILTER_OTHER, fcSectionCounts, fcVisibleDeviceFields, fcQuestionVisible, fcQuestionGap,
   type FcQuestion, type FcAddLineRule,
   type FcAnswerState, type FcAnswers, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
@@ -679,6 +679,14 @@ export function FinalChecklist(props: Props) {
         </div>
         {q.help && <p className="text-xs text-gray-500 italic -mt-1 mb-2">{q.help}</p>}
         {renderQuestion(q)}
+        {/* Read-only: flag a required question that slipped through incomplete
+            (legacy records completed before the sticky-visibility gate) so the
+            reviewer sees the gap instead of a silently empty row. */}
+        {readOnly && !!fcQuestionGap(q, ans(q.id), countCtx, answers, { skipLineRules }) && (
+          <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-heading font-semibold text-red-700 bg-red-50 border border-red-200 rounded-full px-2.5 py-1">
+            <span aria-hidden="true">⚠</span> Not answered
+          </div>
+        )}
       </div>
     ));
     // Seamless: just the question rows (no card, no header) so they embed as the
