@@ -14,14 +14,14 @@ export async function buildBillingXlsx(object: 'inspections' | 'services', rows:
   sheet.addRow(headers as string[]);
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
-  for (const r of rows) sheet.addRow(rowToCells(r));
+  for (const r of rows) sheet.addRow(rowToCells(r, object));
   // Money format on the "… Amount" columns (1-indexed), wherever they sit.
   headers.forEach((h, i) => { if (/amount/i.test(String(h))) sheet.getColumn(i + 1).numFmt = '"$"#,##0.00'; });
   // Reasonable widths from header + sampled cell lengths.
   headers.forEach((h, i) => {
     const col = sheet.getColumn(i + 1);
     let w = String(h).length;
-    rows.slice(0, 200).forEach((r) => { const v = rowToCells(r)[i]; w = Math.max(w, String(v ?? '').length); });
+    rows.slice(0, 200).forEach((r) => { const v = rowToCells(r, object)[i]; w = Math.max(w, String(v ?? '').length); });
     col.width = Math.min(48, Math.max(10, w + 2));
   });
   const ab = await wb.xlsx.writeBuffer();

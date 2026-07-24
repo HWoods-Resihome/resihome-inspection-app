@@ -312,12 +312,10 @@ async function reviewOrderAndApply(
 ): Promise<{ clean: boolean; verdict: ServiceVerdict; item: ReviewResult['items'][number] }> {
   const service = String(order.props.address_snapshot || order.props.service_name || order.id);
   const v = await reviewOne(order, allChecks);
-  // A community grass-cut MASTER must ALWAYS go to a human: the reviewer curates
-  // the covered-home list and the close-out splits it into per-property billing.
-  const isMasterCut = order.props.scope === 'community' && order.props.worktype === 'landscaping'
-    && order.props.subtype === 'cut' && !String(order.props.master_service_id || '').trim()
-    && !!String(order.props.covered_property_ids || '').trim();
-  const clean = v.verdict === 'clean' && !isMasterCut;
+  // Community grass-cut masters now bill at the community level (total vendor/
+  // client cost, no per-property split), so they auto-complete on a clean review
+  // like any other service — no forced human-review-to-split step.
+  const clean = v.verdict === 'clean';
 
   if (apply) {
     const workPrefix = v.workEvidenced ? '' : '⚠ Work not evidenced: before/after photos don’t clearly show the work was done — verify before completing.\n\n';
@@ -326,7 +324,7 @@ async function reviewOrderAndApply(
     const notes = [v.notes, ...(v.issues.length ? ['Issues:', ...v.issues.map((i) => `• ${i}`)] : [])].join('\n');
     const props: Record<string, any> = {
       ai_verdict: v.verdict === 'clean' ? 'clean' : 'needs_review',
-      ai_notes: timePrefix.concat(workPrefix).concat(geoPrefix).concat(isMasterCut && v.verdict === 'clean' ? 'Community grass-cut master — routed to review to confirm covered homes and split into per-property billing.\n\n' : '').concat(notes).slice(0, 2000),
+      ai_notes: timePrefix.concat(workPrefix).concat(geoPrefix).concat(notes).slice(0, 2000),
       status: clean ? 'completed' : 'review',
     };
     if (v.proofSummary) props.proof_summary = v.proofSummary;

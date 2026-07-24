@@ -1497,6 +1497,32 @@ export async function fetchCommunityById(communityId: string): Promise<Community
   }
 }
 
+/** Map community recordId → its `master_id` (the field used as the billing id for
+ *  community services). Batched; fails soft to an empty map if the property or
+ *  the community object isn't present. */
+export async function fetchCommunityMasterIdsByIds(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const uniq = [...new Set(ids.map((x) => String(x || '').trim()).filter(Boolean))];
+  if (!uniq.length) return out;
+  const meta = await resolveCommunityMeta();
+  if (!meta) return out;
+  for (let i = 0; i < uniq.length; i += 100) {
+    try {
+      const resp = await hubspotFetch(`/crm/v3/objects/${meta.typeId}/batch/read`, {
+        method: 'POST',
+        body: JSON.stringify({ properties: ['master_id'], inputs: uniq.slice(i, i + 100).map((id) => ({ id })) }),
+      });
+      for (const rec of resp.results || []) {
+        const v = String(rec.properties?.master_id || '').trim();
+        if (v) out.set(String(rec.id), v);
+      }
+    } catch (e) {
+      console.warn('[billing] community master_id batch-read failed (blank ids):', String((e as any)?.message || e).slice(0, 160));
+    }
+  }
+  return out;
+}
+
 /**
  * All Community records as { id, name }, sorted by name. Null when the Community
  * object can't be resolved. Prefers the `community_name` property, falling back

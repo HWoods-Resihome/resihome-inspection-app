@@ -18,7 +18,7 @@
 import { readInsightsSnapshot } from '@/lib/insightsSnapshot';
 import { templateLabel } from '@/lib/templateLabels';
 import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
-import { fetchAgentBillingByEmails, fetchPropertyBillingByIds, fetchVendorCompanyCodesByEmails, searchServiceWorkOrdersByStatus } from '@/lib/hubspot';
+import { fetchAgentBillingByEmails, fetchPropertyBillingByIds, fetchVendorCompanyCodesByEmails, searchServiceWorkOrdersByStatus, fetchCommunityMasterIdsByIds } from '@/lib/hubspot';
 
 export const INTERNAL_EMPLOYEE = 'Internal Employee';   // inspections: no agent broker
 export const INTERNAL_VENDOR = 'Internal Vendor';       // services: no company code
@@ -56,7 +56,16 @@ export interface BillingRow {
   clientAmount: number;
   region: string;
   portfolio: string;
-  completedDate: string;   // YYYY-MM-DD
+  completedDate: string;   // YYYY-MM-DD (internal; displayed as M-D-YY)
+  dueDate: string;         // YYYY-MM-DD (services only; '' for inspections)
+}
+
+/** YYYY-MM-DD → M-D-YY (e.g. "2026-07-24" → "7-24-26"). '' passes through. */
+function fmtMDY(iso: string | null | undefined): string {
+  const s = String(iso || '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return s;
+  return `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}`;
 }
 
 const num = (v: unknown): number | null => {
@@ -85,15 +94,19 @@ export const INSPECTION_COLUMNS = [
   'Template Type', 'Inspector Name', 'Broker Code', 'Completed Date', 'Vendor Invoice Amount', 'Client Invoice Amount',
 ] as const;
 export const SERVICE_COLUMNS = [
-  'Service ID', 'Entity ID', 'Region', 'Portfolio', 'Full Address',
-  'Service Type', 'Vendor', 'Company Code', 'Completed Date', 'Vendor Invoice Amount', 'Client Invoice Amount',
+  'Service ID', 'Entity / Master ID', 'Region', 'Portfolio', 'Full Address',
+  'Service Type', 'Vendor', 'Company Code', 'Completed Date', 'Due Date', 'Vendor Invoice Amount', 'Client Invoice Amount',
 ] as const;
 
-export function rowToCells(r: BillingRow): (string | number)[] {
-  return [
+export function rowToCells(r: BillingRow, object: 'inspections' | 'services' = 'inspections'): (string | number)[] {
+  const common = [
     r.externalId, r.entityId, r.region, r.portfolio, r.fullAddress,
-    r.typeLabel, r.personName, r.brokerCode, r.completedDate, r.vendorAmount, r.clientAmount,
+    r.typeLabel, r.personName, r.brokerCode, fmtMDY(r.completedDate),
   ];
+  // Services carry a Due Date column between Completed Date and the amounts.
+  return object === 'services'
+    ? [...common, fmtMDY(r.dueDate), r.vendorAmount, r.clientAmount]
+    : [...common, r.vendorAmount, r.clientAmount];
 }
 
 /** Distinct filter option values across a row set (for the UI dropdowns). */
@@ -153,7 +166,7 @@ export async function fetchInspectionBillingRows(filters: BillingFilters = {}): 
       typeLabel,
       vendorAmount: vendorCost,
       clientAmount: clientCost,
-      region, portfolio, completedDate,
+      region, portfolio, completedDate, dueDate: '',
     });
   }
   rows.sort((a, b) => (b.completedDate).localeCompare(a.completedDate) || a.fullAddress.localeCompare(b.fullAddress));
@@ -165,27 +178,31 @@ export async function fetchInspectionBillingRows(filters: BillingFilters = {}): 
  *  Broker Code defaults to Internal Employee (services aren't agent-billed). */
 export async function fetchServiceBillingRows(filters: BillingFilters = {}): Promise<BillingRow[]> {
   const records = (await searchServiceWorkOrdersByStatus('completed', 5000).catch(() => null)) || [];
-  const propIds = records.map((x) => String(x.props.property_id_ref || '').trim()).filter(Boolean);
-  const vendorEmails = records.map((x) => String(x.props.vendor_email || '').trim()).filter(Boolean);
-  const [propMap, codeMap] = await Promise.all([
+  // Bill at the COMMUNITY MASTER level: keep community masters (total vendor/client
+  // cost across the covered homes) + all standalone/property services, and DROP the
+  // per-property split children (master_service_id set) — the old per-property
+  // allocation is retired. Community rows show the community's master_id; property
+  // rows show the property's entity_id.
+  const kept = records.filter(({ props: p }) => !String(p.master_service_id || '').trim());
+  const propIds = kept.map((x) => String(x.props.property_id_ref || '').trim()).filter(Boolean);
+  const vendorEmails = kept.map((x) => String(x.props.vendor_email || '').trim()).filter(Boolean);
+  const communityIds = [...new Set(kept.filter((x) => String(x.props.scope) === 'community').map((x) => String(x.props.community_id_ref || '').trim()).filter(Boolean))];
+  const [propMap, codeMap, masterIdMap] = await Promise.all([
     fetchPropertyBillingByIds(propIds),
     fetchVendorCompanyCodesByEmails(vendorEmails),
+    fetchCommunityMasterIdsByIds(communityIds),
   ]);
 
   const rows: BillingRow[] = [];
-  for (const { id, props: p } of records) {
-    // Bill at the PROPERTY level: exclude the community grass-cut MASTER (it
-    // carries covered_property_ids / a covered count and represents many homes)
-    // and keep its per-property billing-line children (master_service_id set) +
-    // all standalone services. This is the inverse of the vendor-performance
-    // roll-up, which counts the master and drops the children.
-    const coveredCount = Number(String(p.covered_property_count ?? '').trim());
-    const isCommunityMaster = (Number.isFinite(coveredCount) && coveredCount > 0) || String(p.covered_property_ids || '').trim().length > 2;
-    if (isCommunityMaster) continue;
+  for (const { id, props: p } of kept) {
+    const isCommunity = String(p.scope) === 'community';
     const prop = p.property_id_ref ? propMap.get(String(p.property_id_ref)) : undefined;
+    // Community coverage → community master_id; property coverage → property entity_id.
+    const idValue = isCommunity ? (masterIdMap.get(String(p.community_id_ref || '').trim()) || '') : (prop?.entityId || '');
     const region = String(p.region_snapshot || prop?.region || '').trim();
     const portfolio = prop?.portfolio || '';
     const completedDate = dateOnly(p.completed_at);
+    const dueDate = dateOnly(p.due_date);
     const vendorName = String(p.vendor_name || '').trim() || INTERNAL_VENDOR;
     const vendorCost = num(p.vendor_cost) ?? DEFAULT_VENDOR_COST;
     const clientCost = num(p.client_cost) ?? DEFAULT_CLIENT_COST;
@@ -197,14 +214,14 @@ export async function fetchServiceBillingRows(filters: BillingFilters = {}): Pro
     if (!inRange(completedDate, filters.from, filters.to)) continue;
     rows.push({
       externalId: serviceExternalId(id, completedDate),
-      entityId: prop?.entityId || '',
+      entityId: idValue,
       fullAddress: [String(p.address_snapshot || p.community_name || '').trim(), String(p.locality_snapshot || '').trim()].filter(Boolean).join(', '),
       personName: vendorName,
       brokerCode: companyCode,
       typeLabel,
       vendorAmount: vendorCost,
       clientAmount: clientCost,
-      region, portfolio, completedDate,
+      region, portfolio, completedDate, dueDate,
     });
   }
   rows.sort((a, b) => (b.completedDate).localeCompare(a.completedDate) || a.fullAddress.localeCompare(b.fullAddress));

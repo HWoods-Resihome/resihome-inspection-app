@@ -9,7 +9,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { canViewInsights } from '@/lib/insightsAccess';
-import { fetchBillingRows, billingColumns, billingFacetsFast, type BillingFilters } from '@/lib/insightsBilling';
+import { fetchBillingRows, billingColumns, billingFacetsFast, rowToCells, type BillingFilters } from '@/lib/insightsBilling';
 import { buildBillingXlsx, billingFilename } from '@/lib/insightsBillingXlsx';
 import { fetchPropertyCoverage } from '@/lib/hubspot';
 
@@ -57,7 +57,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       facets.regions = Array.from(new Set([...facets.regions, ...covRegions])).sort((a, b) => a.localeCompare(b));
       facets.portfolios = Array.from(new Set([...facets.portfolios, ...covPortfolios])).sort((a, b) => a.localeCompare(b));
     }
-    return res.status(200).json({ object, columns: billingColumns(object), rows, facets, total: rows.length });
+    // Send pre-formatted CELL ARRAYS (M-D-YY dates, services Due Date, community
+    // master_id / property entity_id) so the on-screen table matches the xlsx
+    // exactly — both go through rowToCells.
+    return res.status(200).json({ object, columns: billingColumns(object), rows: rows.map((r) => rowToCells(r, object)), facets, total: rows.length });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
   }
