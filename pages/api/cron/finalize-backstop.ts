@@ -77,6 +77,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 
+  // Docs catch-up: ?enqueueDocs=<inspectionId,inspectionId,...> — for tickets the
+  // backstop created BEFORE docs-enqueueing existed. Reads each inspection's
+  // CURRENT hbmm_ticket_id and queues a docs job; the 2-minute type sweep drains
+  // them (3 browser runs per pass), attaching Master + vendor PDFs + type.
+  if (typeof req.query.enqueueDocs === 'string' && req.query.enqueueDocs.trim()) {
+    const target = (process.env.HBMM_TICKET_TYPE_TARGET || 'Turnkey').trim();
+    const queued: { id: string; outcome: string }[] = [];
+    for (const iid of req.query.enqueueDocs.split(',').map((x) => x.trim()).filter(Boolean)) {
+      if (!/^\d+$/.test(iid)) { queued.push({ id: iid, outcome: 'bad_id' }); continue; }
+      try {
+        const cur = await readInspectionProps(iid, ['hbmm_ticket_id']).catch(() => null);
+        const tid = Number(String(cur?.hbmm_ticket_id || '').trim());
+        if (!Number.isFinite(tid) || tid <= 0) { queued.push({ id: iid, outcome: 'no_ticket_id' }); continue; }
+        await enqueueTicketEnforcement(tid, target, iid, true);
+        queued.push({ id: iid, outcome: `queued_#${tid}` });
+      } catch (e: any) { queued.push({ id: iid, outcome: `error: ${String(e?.message || e).slice(0, 120)}` }); }
+    }
+    return res.status(200).json({ ok: true, queued });
+  }
+
   // One-off repair (wrong-environment creates): ?unstamp=<inspectionId>:<ticketId>,...
   // clears hbmm_ticket_id ONLY where it exactly matches the supplied (known-wrong)
   // ticket id, so the sweep re-creates those tickets in the corrected environment.
@@ -150,7 +170,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const created = await createMaintenanceTicket({ propertyId: hbmmId, description });
           if (created.ok && created.ticketId) {
             await updateInspection(c.id, { hbmm_ticket_id: created.ticketId });
-            await enqueueTicketEnforcement(created.ticketId, (process.env.HBMM_TICKET_TYPE_TARGET || 'Turnkey').trim(), c.id).catch(() => {});
+            // docs:true — unlike the live flow there is no browser tab to upload
+            // the PDFs, so the sweep's headless run attaches them + sets the type.
+            await enqueueTicketEnforcement(created.ticketId, (process.env.HBMM_TICKET_TYPE_TARGET || 'Turnkey').trim(), c.id, true).catch(() => {});
             ticketResults.push({ id: c.id, outcome: `created_#${created.ticketId}` });
           } else {
             ticketResults.push({ id: c.id, outcome: `failed: ${String(created.error || (created.configured ? 'unknown' : 'MAINTENANCE_AI not configured')).slice(0, 200)}` });

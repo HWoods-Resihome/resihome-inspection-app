@@ -13,7 +13,35 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import {
   listTicketEnforceJobs, removeTicketEnforcement, bumpTicketEnforcement, touchTicketEnforcement,
 } from '@/lib/ticketEnforceQueue';
-import { setTicketTypeViaUi } from '@/lib/ticketUpload';
+import { setTicketTypeViaUi, uploadTicketDocuments, type TicketUploadFile } from '@/lib/ticketUpload';
+import { fetchInspectionWithPropertyRef } from '@/lib/hubspot';
+import { vendorGetsOwnPdf, vendorTicketKind } from '@/lib/vendors';
+
+// Docs jobs (backstop-created tickets): rebuild the Turnkey upload plan from the
+// inspection — Master PDF + the standard-trade vendor PDFs (mirrors the live
+// upload-ticket-docs plan). Empty when the record can't be loaded.
+async function turnkeyFilesFor(inspectionId: string): Promise<TicketUploadFile[]> {
+  const data = await fetchInspectionWithPropertyRef(inspectionId).catch(() => null);
+  if (!data) return [];
+  const nameFromUrl = (url: string, fallback: string) => {
+    try { const seg = new URL(url).pathname.split('/').pop(); if (seg) return decodeURIComponent(seg); } catch { /* keep */ }
+    return fallback;
+  };
+  const files: TicketUploadFile[] = [];
+  const masterUrl = data.inspection.pdfMasterUrl || '';
+  if (masterUrl) files.push({ name: nameFromUrl(masterUrl, 'Master Rate Card.pdf'), url: masterUrl });
+  if (data.inspection.pdfVendorUrlsJson) {
+    try {
+      const map = JSON.parse(data.inspection.pdfVendorUrlsJson) || {};
+      for (const [vendor, url] of Object.entries(map)) {
+        if (vendorGetsOwnPdf(vendor) && vendorTicketKind(vendor) === 'turnkey' && typeof url === 'string' && url) {
+          files.push({ name: nameFromUrl(url, `${vendor} Rate Card.pdf`), url });
+        }
+      }
+    } catch { /* malformed — master-only */ }
+  }
+  return files;
+}
 
 // A browser run is slow; allow the full serverless ceiling.
 export const config = { maxDuration: 300 };
@@ -43,7 +71,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // tick within the cooldown skips it.
     await touchTicketEnforcement(job.ticketId);
     try {
-      const ui = await setTicketTypeViaUi({ ticketId: job.ticketId, target: job.target });
+      // Docs job → one browser run uploads the PDFs AND enforces the type;
+      // plain job → the type-only run as before.
+      const docFiles = job.docs && job.inspectionId ? await turnkeyFilesFor(job.inspectionId) : [];
+      const ui = docFiles.length
+        ? await uploadTicketDocuments({ ticketId: job.ticketId, files: docFiles, ticketTypeTarget: job.target })
+        : await setTicketTypeViaUi({ ticketId: job.ticketId, target: job.target });
       if (ui.ok) {
         await removeTicketEnforcement(job.ticketId);
         results.push({ ticketId: job.ticketId, outcome: 'confirmed' });
