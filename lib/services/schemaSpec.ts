@@ -63,6 +63,10 @@ export const SERVICE_OBJECT: ObjectSpec = {
     T('due_anchor', 'Due Anchor'),
     NUM('days_before_lease_start', 'Days Before Lease Start'),
     T('region_snapshot', 'Region'),
+    // Portfolio, snapshotted at generation. Community-coverage services carry no
+    // linked Property to read a portfolio from, so we stamp it here (derived from
+    // an associated community property) — this is what surfaces in Insights billing.
+    T('portfolio_snapshot', 'Portfolio'),
     T('address_snapshot', 'Address'),
     T('locality_snapshot', 'Locality (City, ST ZIP)'),
     T('community_name', 'Community Name'),

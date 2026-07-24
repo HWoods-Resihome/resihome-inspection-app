@@ -200,7 +200,9 @@ export async function fetchServiceBillingRows(filters: BillingFilters = {}): Pro
     // Community coverage → community master_id; property coverage → property entity_id.
     const idValue = isCommunity ? (masterIdMap.get(String(p.community_id_ref || '').trim()) || '') : (prop?.entityId || '');
     const region = String(p.region_snapshot || prop?.region || '').trim();
-    const portfolio = prop?.portfolio || '';
+    // Property coverage → live linked-Property portfolio; community coverage →
+    // the portfolio snapshotted from an associated home at generation/backfill.
+    const portfolio = String(prop?.portfolio || p.portfolio_snapshot || '').trim();
     const completedDate = dateOnly(p.completed_at);
     const dueDate = dateOnly(p.due_date);
     const vendorName = String(p.vendor_name || '').trim() || INTERNAL_VENDOR;

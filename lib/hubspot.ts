@@ -1553,7 +1553,7 @@ export async function listServiceCommunities(): Promise<{ id: string; name: stri
   } catch (e) { console.warn('[community] list failed:', e); return null; }
 }
 
-export interface CommunityProperty { id: string; address: string; locality: string; region: string; rrqcPassDate: string; status: string }
+export interface CommunityProperty { id: string; address: string; locality: string; region: string; portfolio: string; rrqcPassDate: string; status: string }
 
 /** All properties associated to a Community, with address + `rrqc_pass_date`.
  *  Powers the community grass-cut eligible snapshot (rrqcPassDate set) and the
@@ -1562,7 +1562,7 @@ export async function fetchCommunityProperties(communityId: string): Promise<Com
   const ids = await fetchCommunityPropertyIds(communityId);
   if (!ids.length) return [];
   const { property } = typeIds();
-  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'rrqc_pass_date', PROPERTY_STATUS_PROPERTY];
+  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'portfolio', 'rrqc_pass_date', PROPERTY_STATUS_PROPERTY];
   const out: CommunityProperty[] = [];
   for (let i = 0; i < ids.length; i += 100) {
     try {
@@ -1583,6 +1583,7 @@ export async function fetchCommunityProperties(communityId: string): Promise<Com
           address: address || `(Property ${r.id})`,
           locality: [city, st, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
           region: String(p.region || '').trim(),
+          portfolio: String(p.portfolio || '').trim(),
           rrqcPassDate: String(p.rrqc_pass_date || '').trim(),
           status,
         });
@@ -1590,6 +1591,24 @@ export async function fetchCommunityProperties(communityId: string): Promise<Com
     } catch (e) { console.warn('[community] batch read failed:', e); }
   }
   return out;
+}
+
+/** A Community's region + portfolio, derived from its associated Properties (the
+ *  Community object carries neither directly). Returns the MOST COMMON non-empty
+ *  value for each field — a community's homes share one region/portfolio, so the
+ *  mode is the community's value and shrugs off a single mistagged home. Blank
+ *  when the community has no readable property. */
+export async function fetchCommunityRegionPortfolio(communityId: string): Promise<{ region: string; portfolio: string }> {
+  if (!communityId) return { region: '', portfolio: '' };
+  const props = await fetchCommunityProperties(communityId).catch(() => [] as CommunityProperty[]);
+  const mode = (vals: string[]): string => {
+    const counts = new Map<string, number>();
+    for (const v of vals) { const s = String(v || '').trim(); if (s) counts.set(s, (counts.get(s) || 0) + 1); }
+    let best = '', top = 0;
+    for (const [k, n] of counts) if (n > top) { best = k; top = n; }
+    return best;
+  };
+  return { region: mode(props.map((p) => p.region)), portfolio: mode(props.map((p) => p.portfolio)) };
 }
 
 /** Property record ids associated to a Community (all pages). Empty when none. */
@@ -1693,7 +1712,7 @@ export async function inspectServiceLikeObjects(): Promise<any> {
 // object isn't configured yet, so the UI can use sample data in the meantime) ──
 const SERVICE_LIST_PROPS = [
   'service_name', 'worktype', 'subtype', 'status', 'is_bid_item', 'scope', 'due_date',
-  'region_snapshot', 'address_snapshot', 'locality_snapshot', 'community_name',
+  'region_snapshot', 'portfolio_snapshot', 'address_snapshot', 'locality_snapshot', 'community_name',
   'property_status_snapshot', 'latitude', 'longitude', 'vendor_name', 'pet_stations',
   'property_id_ref', 'community_id_ref', 'submitted_at', 'completed_at', 'ontime',
   'master_service_id', 'for_billing',
@@ -1718,7 +1737,7 @@ function mapServiceRow(r: any): ServiceRecord {
     scope: p.scope === 'community' ? 'community' : 'property',
     address: p.address_snapshot || p.service_name || '(Service)',
     locality: p.locality_snapshot || '',
-    portfolio: '',
+    portfolio: p.portfolio_snapshot || '',
     region: p.region_snapshot || '',
     worktype: (p.worktype || 'landscaping') as Worktype,
     subtype: p.subtype || '',
@@ -2276,7 +2295,7 @@ export async function createServiceWorkOrder(props: Record<string, any>): Promis
 // Full property set for the single-work-order (completion) view.
 const SERVICE_DETAIL_PROPS = [
   'service_name', 'worktype', 'subtype', 'status', 'scope', 'is_bid_item',
-  'service_description', 'due_date', 'region_snapshot', 'address_snapshot',
+  'service_description', 'due_date', 'region_snapshot', 'portfolio_snapshot', 'address_snapshot',
   'locality_snapshot', 'community_name', 'property_status_snapshot',
   'vendor_name', 'vendor_email', 'pet_stations', 'vendor_cost', 'markup_pct',
   'client_cost', 'vendor_cost_adjustment', 'vendor_cost_adjustment_reason',
@@ -2408,6 +2427,27 @@ export async function searchServiceWorkOrdersByStatus(status: string, limit = 20
     } while (after && out.length < limit);
     return out;
   } catch (e) { console.warn('[services] status search failed:', e); return null; }
+}
+
+/** Service Work Orders in a given coverage scope (raw props + id), across ALL
+ *  statuses — powers the community region/portfolio backfill. null when the
+ *  object type id isn't configured. */
+export async function searchServiceWorkOrdersByScope(scope: 'property' | 'community', limit = 5000): Promise<{ id: string; props: Record<string, any> }[] | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  try {
+    const out: { id: string; props: Record<string, any> }[] = [];
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100, after, properties: SERVICE_DETAIL_PROPS, filterGroups: [{ filters: [{ propertyName: 'scope', operator: 'EQ', value: scope }] }] }),
+      });
+      for (const r of resp.results || []) out.push({ id: String(r.id), props: r.properties || {} });
+      after = resp.paging?.next?.after;
+    } while (after && out.length < limit);
+    return out;
+  } catch (e) { console.warn('[services] scope search failed:', e); return null; }
 }
 
 /** Delete Service Work Orders (teardown). dry-run lists targets; apply deletes them.

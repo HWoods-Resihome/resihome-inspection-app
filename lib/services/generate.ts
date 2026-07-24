@@ -21,7 +21,7 @@
  * follow the active cadence (else First Order Due, else +5); vendors are assigned by
  * equal-volume rotation with sticky-per-address (see ./rotation).
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, patchServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool, readGenEnrollSeen, writeGenEnrollSeen, fetchPropertyMoveInDate } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, patchServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchCommunityRegionPortfolio, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool, readGenEnrollSeen, writeGenEnrollSeen, fetchPropertyMoveInDate } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { DEFAULT_GRASS_TIERS } from './grassPricing';
@@ -209,7 +209,7 @@ function seedFirstDue(p: Record<string, any>, cads: Cad[], todayISO: string, ski
   return rollToActiveDue(due, cads, skip);
 }
 
-interface Target { id: string; scope: 'property' | 'community'; address: string; locality: string; region: string; community?: string;
+interface Target { id: string; scope: 'property' | 'community'; address: string; locality: string; region: string; portfolio?: string; community?: string;
   // Set only for a one-time, deal-triggered rule: the specific leasing deal whose
   // stage triggered enrollment. Folded into the enrollment key so each new deal
   // (new lease) re-triggers while the same deal sitting in the stage does not. */
@@ -579,7 +579,14 @@ export async function runServiceGeneration(
       const isCommunityCut = t.scope === 'community' && worktype === 'landscaping' && subtype === 'cut';
       let commId = '';
       let eligibleIds: string[] = [];
-      if (t.scope === 'community') commId = await communityIdByName(t.community || t.address);
+      // Community coverage carries no linked Property, so derive its region +
+      // portfolio from an associated community home (most-common value) and stamp
+      // both — that's what Insights billing reads for community rows.
+      let commGeo = { region: t.region, portfolio: t.portfolio || '' };
+      if (t.scope === 'community') {
+        commId = await communityIdByName(t.community || t.address);
+        if (commId) commGeo = await fetchCommunityRegionPortfolio(commId);
+      }
       if (isCommunityCut) {
         // Eligibility = community properties matching ALL enrollment criteria
         // (e.g. "RRQC Pass Date is known" AND "Property Status is Vacant").
@@ -601,11 +608,14 @@ export async function runServiceGeneration(
         service_name: `${wtLabel(worktype)} · ${subLabel(worktype, subtype)} — ${t.address}`,
         worktype, subtype, status: 'assigned', is_bid_item: 'false',
         scope: t.scope, service_description: p.service_description || '',
-        due_date: dueDate, region_snapshot: t.region, address_snapshot: t.address,
+        due_date: dueDate, region_snapshot: commGeo.region || t.region, address_snapshot: t.address,
         locality_snapshot: t.locality, pet_stations: p.pet_stations === 'true' ? 'true' : 'false',
         vendor_name: vendor || '', vendor_email: await resolveVendorEmail(vendor),
         generated_by_rule_id: ruleId, enrollment_key: enrollmentKey,
       };
+      // Community coverage: stamp the portfolio derived from the associated homes
+      // (property coverage reads its portfolio live from the linked Property).
+      if (t.scope === 'community' && commGeo.portfolio) orderProps.portfolio_snapshot = commGeo.portfolio;
       if (t.community) orderProps.community_name = t.community;
       if (Number.isFinite(markupPct)) orderProps.markup_pct = markupPct;
       if (t.scope === 'property') orderProps.property_id_ref = t.id;
