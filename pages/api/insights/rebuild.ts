@@ -15,6 +15,7 @@ import { isAppAdmin } from '@/lib/adminAccess';
 import { runAsBackground } from '@/lib/hubspot';
 import { buildInsightsSnapshot, writeInsightsSnapshot, buildDailyRollup, writeDailyRollup, type InsightsSnapshot } from '@/lib/insightsSnapshot';
 import { buildBillingSnapshot, writeBillingSnapshot } from '@/lib/insightsBillingSnapshot';
+import { runInspectionMilestoneCheck } from '@/lib/inspectionMilestones';
 
 // Single-flight per instance: concurrent triggers (a cron + an admin click, or a
 // double-click) ride ONE build instead of racing two that clobber the blob with
@@ -72,6 +73,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         await writeBillingSnapshot(await buildBillingSnapshot(snap));
         console.log('[insights/rebuild] billing snapshot: %dms', Date.now() - t);
       } catch (e) { console.warn('[insights/rebuild] billing snapshot failed:', e); }
+      // Milestone backstop: celebrate any un-sent inspection milestone the live
+      // completion path missed (indexing lag / downtime / pre-feature crossing).
+      // Once-only + best-effort — never fails the rebuild.
+      await runInspectionMilestoneCheck();
     }
     const summary = {
       ok: true, asOf: snap.asOf, total: snap.total, scanned: snap.scanned,

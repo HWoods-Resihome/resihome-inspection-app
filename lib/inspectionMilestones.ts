@@ -15,7 +15,7 @@
  * the completion flow into failure — it only logs.
  */
 import { put, head, del } from '@vercel/blob';
-import { countCompletedInspections, readInspectionProps, findNthCompletedInspection } from '@/lib/hubspot';
+import { countCompletedInspections, findNthCompletedInspection } from '@/lib/hubspot';
 import { sendMilestoneEmail } from '@/lib/notifications/milestone1k';
 
 export const INSPECTION_MILESTONES = [1000, 2500, 5000, 10000];
@@ -37,44 +37,69 @@ async function claimMilestone(m: number, meta: Record<string, any>): Promise<boo
   } catch { return false; }   // already exists (someone else claimed) or store error
 }
 
+/** Release a claim so a later run retries (send failed / winner unresolved). */
+async function releaseClaim(m: number): Promise<void> {
+  try { await del(claimKey(m)); } catch { /* leave claimed; better a missed email than a dupe loop */ }
+}
+
 /**
- * Check whether completing this inspection crossed a milestone; if so, celebrate
- * the inspector. Call (awaited, but it never throws) right after an inspection is
- * marked completed. `inspectionId` is used to look up the inspector to email.
+ * Celebrate ONE reached milestone: atomically claim it, resolve the inspector who
+ * logged the actual Nth completed inspection (in completion order — NOT whoever's
+ * completion happened to trigger the check, so the right person is always
+ * credited), and email them. Rolls the claim back if the winner can't be resolved
+ * yet (e.g. the Nth record isn't search-indexed for a few seconds after it's
+ * written) or the send fails, so a later completion / the cron backstop retries.
  */
-export async function celebrateInspectionMilestoneIfHit(inspectionId: string): Promise<void> {
+async function celebrateMilestone(m: number, total: number): Promise<'sent' | 'skipped' | 'unresolved' | 'failed'> {
+  if (!(await claimMilestone(m, { via: 'auto', total }))) return 'skipped';   // someone else got it
+  const nth = await findNthCompletedInspection(m);
+  const email = String(nth?.inspectorEmail || '').trim();
+  if (!nth || !email) {
+    console.warn(`[milestone] ${m} reached but the ${m}th inspection isn't resolvable yet (indexing lag / no inspector) — releasing claim to retry.`);
+    await releaseClaim(m);
+    return 'unresolved';
+  }
+  const r = await sendMilestoneEmail(email, { count: m, recipientName: nth.inspectorName });
+  if (r.sent) { console.log(`[milestone] ${m} celebrated → ${email} (inspection ${nth.id}, total ${total})`); return 'sent'; }
+  console.warn(`[milestone] ${m} send failed (${r.error}); releasing claim to retry.`);
+  await releaseClaim(m);
+  return 'failed';
+}
+
+/**
+ * Check whether the portal has crossed any un-celebrated milestone and, if so,
+ * celebrate it. Safe to call from either trigger:
+ *   • right after an inspection is marked completed (the live path), and
+ *   • the 30-min Insights rebuild cron (a backstop, so a crossing missed by the
+ *     live path — indexing lag, a completion during downtime, or the threshold
+ *     passing before this feature shipped — is still caught within 30 minutes).
+ * Idempotent + once-only via the blob claim; never throws (only logs).
+ */
+export async function runInspectionMilestoneCheck(): Promise<void> {
   try {
     if (!process.env.BLOB_READ_WRITE_TOKEN) return;   // no claim store → skip (never spams)
     // Cheapest possible pre-check: only touch HubSpot if SOME milestone is still
-    // unclaimed (once all are done this is a couple of blob HEADs and out).
-    const unclaimedAll: number[] = [];
-    for (const m of INSPECTION_MILESTONES) if (!(await milestoneClaimed(m))) unclaimedAll.push(m);
-    if (!unclaimedAll.length) return;
+    // unclaimed (once all are done this is a few blob HEADs and out).
+    const unclaimed: number[] = [];
+    for (const m of INSPECTION_MILESTONES) if (!(await milestoneClaimed(m))) unclaimed.push(m);
+    if (!unclaimed.length) return;
 
     const total = await countCompletedInspections();   // throws → caught below (skip)
-    const due = unclaimedAll.filter((m) => total >= m);
-    if (!due.length) return;
-
-    // Resolve the inspector who logged this milestone inspection.
-    const props = await readInspectionProps(inspectionId, ['inspector_email', 'inspector_name']).catch(() => ({} as Record<string, any>));
-    const email = String(props?.inspector_email || '').trim();
-    const name = String(props?.inspector_name || '').trim();
-    if (!email) { console.warn(`[milestone] hit ${due.join(',')} but inspection ${inspectionId} has no inspector_email — not sending.`); return; }
-
-    for (const m of due) {
-      // Claim first (atomic once-only), then send; roll the claim back on failure.
-      if (!(await claimMilestone(m, { inspectionId, email, total }))) continue;   // someone else got it
-      const r = await sendMilestoneEmail(email, { count: m, recipientName: name });
-      if (r.sent) {
-        console.log(`[milestone] ${m} celebrated → ${email} (inspection ${inspectionId}, total ${total})`);
-      } else {
-        console.warn(`[milestone] ${m} send failed (${r.error}); releasing claim to retry next completion.`);
-        try { await del(claimKey(m)); } catch { /* leave claimed; better a missed email than a dupe loop */ }
-      }
-    }
+    const due = unclaimed.filter((m) => total >= m).sort((a, b) => a - b);
+    for (const m of due) await celebrateMilestone(m, total);
   } catch (e) {
     console.warn('[milestone] check skipped:', String((e as any)?.message || e).slice(0, 160));
   }
+}
+
+/**
+ * Completion-path hook: call (awaited, never throws) right after an inspection is
+ * marked completed. The inspectionId is no longer needed to pick the recipient —
+ * the winner is resolved as the actual Nth completed inspection — but the param is
+ * kept so existing call sites are unchanged.
+ */
+export async function celebrateInspectionMilestoneIfHit(_inspectionId?: string): Promise<void> {
+  return runInspectionMilestoneCheck();
 }
 
 export interface MilestoneResendReport {

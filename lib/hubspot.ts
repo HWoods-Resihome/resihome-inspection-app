@@ -3246,10 +3246,17 @@ export async function countInspectionsByStatus(q: InspectionQuery): Promise<Insp
   return out;
 }
 
+// The app-wide "completed" status set. IMPORTANT: 'submitted' is a completed-
+// equivalent everywhere else (insightsSnapshot statusBucket, isCompletedStatus,
+// the status-group map) — the completed-count tile the portal shows includes it.
+// The milestone metric MUST use the SAME set or it sits below what the app
+// displays and the threshold is never observed as crossed. Cancelled / pending /
+// scheduled / in_progress stay excluded.
+const COMPLETED_STATUS_VALUES = ['completed', 'complete', 'Completed', 'Complete', 'submitted', 'Submitted'];
+
 /** Total COMPLETED inspections across the whole portal — the milestone metric.
- *  COMPLETED ONLY: matches status completed/complete and NOTHING else, so
- *  cancelled ('cancelled'), submitted, pending_approval, scheduled, and
- *  in_progress are all excluded from the count. Single lightweight search
+ *  Matches the app-wide completed definition (completed/complete/submitted),
+ *  excluding cancelled/pending/scheduled/in_progress. Single lightweight search
  *  (limit 1, reads `total`). Throws on failure so the caller skips the milestone
  *  check rather than firing on a bad (0) count. */
 export async function countCompletedInspections(): Promise<number> {
@@ -3257,7 +3264,7 @@ export async function countCompletedInspections(): Promise<number> {
   const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
     method: 'POST',
     body: JSON.stringify({
-      filterGroups: [{ filters: [{ propertyName: 'status', operator: 'IN', values: ['completed', 'complete', 'Completed', 'Complete'] }] }],
+      filterGroups: [{ filters: [{ propertyName: 'status', operator: 'IN', values: COMPLETED_STATUS_VALUES }] }],
       properties: ['hs_object_id'],
       limit: 1,
     }),
@@ -3285,7 +3292,7 @@ export async function findNthCompletedInspection(n: number): Promise<
       method: 'POST',
       body: JSON.stringify({
         filterGroups: [{ filters: [
-          { propertyName: 'status', operator: 'IN', values: ['completed', 'complete', 'Completed', 'Complete'] },
+          { propertyName: 'status', operator: 'IN', values: COMPLETED_STATUS_VALUES },
           { propertyName: 'completed_at', operator: 'HAS_PROPERTY' },
         ] }],
         sorts: [{ propertyName: 'completed_at', direction: 'ASCENDING' }],
