@@ -266,8 +266,8 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             title={panelOpen ? 'Close notes/photos' : 'Add notes/photos (Optional)'}
             className={`shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full transition ${
               panelOpen
-                ? 'bg-gray-700 text-white hover:bg-gray-800'
-                : 'bg-gray-100 text-gray-600 hover:bg-brand/10 hover:text-brand'
+                ? 'bg-brand text-white hover:bg-brand-dark'
+                : 'bg-brand/10 text-brand hover:bg-brand/20'
             } ${hasContent && !panelOpen ? 'ring-2 ring-brand/40' : ''}`}
           >
             {/* Camera + pencil glyph combo (icon-only — the label lives in
