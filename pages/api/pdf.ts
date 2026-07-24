@@ -90,7 +90,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Step 2: pre-fetch + resize all in parallel (the big perf win).
     const t1 = Date.now();
-    const urlToDataUri = await resolveImagesInParallel(allUrls);
+    // This route's maxDuration is 60s (vercel.json) — cap the image phase well
+    // under it so the render + response still fit. Remaining photos fall back to
+    // clickable links rather than timing the whole function out.
+    const urlToDataUri = await resolveImagesInParallel(allUrls, { deadlineMs: 40_000 });
     const tImg = Date.now() - t1;
     console.log(`[pdf] resolved ${urlToDataUri.size} images in ${tImg}ms`);
 

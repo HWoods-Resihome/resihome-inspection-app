@@ -36,8 +36,7 @@ import { bustInspectionsCache } from '@/pages/api/inspections';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
 import { buildShortLink } from '@/lib/shortLinks';
-import { resolveImagesInParallel } from '@/lib/pdf-images';
-import { getPosterUrl } from '@/lib/media';
+import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
 
 export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
 
@@ -280,20 +279,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const sections: QcPdfSection[] = sectionOrder.map((k) => sectionMap.get(k)!);
 
-    // Pre-resolve every before/after photo URL to a JPEG data URI in parallel,
-    // then swap them into the section data. This is the same approach the
-    // /api/pdf route uses and is far more reliable than letting @react-pdf
-    // fetch each HubSpot URL itself at render time (which can silently fail).
+    // Pre-resolve every before/after photo URL to a small embedded JPEG (keyed by
+    // poster URL) up front, rather than letting @react-pdf fetch each HubSpot URL
+    // itself at render time (which can silently fail).
     const allPhotoUrls: string[] = [];
     for (const s of sections) {
       allPhotoUrls.push(...s.beforePhotos, ...s.afterPhotos);
     }
-    const resolved = await resolveImagesInParallel(allPhotoUrls);
-    // Keep the ORIGINAL urls on the sections (so the PDF can LINK each photo to
-    // its full-size file / gallery — clickable) and pass the poster→thumbnail
-    // map separately for the embedded (small) image.
-    const embeddedByUrl: Record<string, string> = {};
-    for (const [url, dataUri] of resolved) embeddedByUrl[getPosterUrl(url)] = dataUri;
+    // Use the SAME helper the Master report uses (buildEmbeddedPhotoMap). QC is
+    // the heaviest report — it embeds BOTH the before (source scope) and after
+    // galleries — and this helper is built for that: it has a global time budget
+    // (an upstream photo-CDN blip degrades over-budget photos to clickable links
+    // instead of running this 300s function into the 504s this route alerted on)
+    // AND a warm-instance thumbnail cache, so the source scope's before-photos —
+    // already downscaled by that scope's own finalize — re-embed for free instead
+    // of being fully re-decoded here (the CPU that spiked). The section objects
+    // keep their ORIGINAL urls so each photo still LINKS to its full-size file /
+    // gallery; embeddedByUrl supplies the small drawn image.
+    const embeddedByUrl = await buildEmbeddedPhotoMap(allPhotoUrls);
 
     // Listing line for the header — prefer the frozen snapshot (re-runs stay
     // frozen), else a live lookup on first finalize. Best-effort.

@@ -41,19 +41,31 @@ const MAX_ATTEMPTS = 6;
 const RETRY_BUDGET_MS = 35000;   // hard ceiling on total time spent on ONE url
 const BACKOFF_CAP_MS = 5000;
 
-async function fetchAndResize(url: string): Promise<string | null> {
+async function fetchAndResize(url: string, deadlineAt: number): Promise<string | null> {
   const start = Date.now();
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const elapsed = Date.now() - start;
-    if (elapsed >= RETRY_BUDGET_MS) break; // out of budget — give up (renders as link)
-    // Time-box each fetch by the SMALLER of the per-attempt ceiling and the
-    // remaining budget, so the budget guard is honored even mid-fetch.
-    const attemptTimeout = Math.min(IMAGE_FETCH_TIMEOUT_MS, RETRY_BUDGET_MS - elapsed);
+    if (elapsed >= RETRY_BUDGET_MS) break; // out of per-url budget — give up (renders as link)
+    // Also stop if we've blown the WHOLE batch's deadline — one url's per-url
+    // budget must never let it run past the global ceiling.
+    const globalRemaining = deadlineAt - Date.now();
+    if (globalRemaining <= 0) break;
+    // Time-box each fetch by the SMALLEST of the per-attempt ceiling, the
+    // remaining per-url budget, and the remaining global batch budget, so both
+    // guards are honored even mid-fetch.
+    const attemptTimeout = Math.min(IMAGE_FETCH_TIMEOUT_MS, RETRY_BUDGET_MS - elapsed, globalRemaining);
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), attemptTimeout);
     // Exponential backoff before a RETRY (500ms, 1s, 2s, 4s, capped), bounded by
-    // the remaining budget; only used when this attempt fails and another remains.
-    const backoff = () => Math.min(BACKOFF_CAP_MS, 500 * 2 ** (attempt - 1), Math.max(0, RETRY_BUDGET_MS - (Date.now() - start)));
+    // BOTH the remaining per-url budget and the remaining global batch deadline;
+    // only used when this attempt fails and another remains.
+    const backoff = () => Math.min(
+      BACKOFF_CAP_MS,
+      500 * 2 ** (attempt - 1),
+      Math.max(0, RETRY_BUDGET_MS - (Date.now() - start)),
+      Math.max(0, deadlineAt - Date.now()),
+    );
+    const budgetLeft = () => Date.now() - start < RETRY_BUDGET_MS && Date.now() < deadlineAt;
     try {
       // SSRF guard: these URLs come from the (authenticated) /api/pdf request
       // body, so a caller could point one at an internal/metadata address and,
@@ -66,7 +78,7 @@ async function fetchAndResize(url: string): Promise<string | null> {
       if (!res.ok) {
         // Retry the propagation-lag statuses; give up on a genuine client error.
         const retryable = res.status === 404 || res.status === 403 || res.status === 429 || res.status >= 500;
-        if (retryable && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((r) => setTimeout(r, backoff())); continue; }
+        if (retryable && attempt < MAX_ATTEMPTS && budgetLeft()) { clearTimeout(timer); await new Promise((r) => setTimeout(r, backoff())); continue; }
         console.warn(`[pdf-images] Failed to fetch ${url}: ${res.status}`);
         return null;
       }
@@ -85,7 +97,7 @@ async function fetchAndResize(url: string): Promise<string | null> {
       const isAbort = e?.name === 'AbortError';
       // A network/timeout error is worth another try; a decode error isn't.
       const looksTransient = isAbort || /fetch failed|network|ECONN|ETIMEDOUT|socket/i.test(String(e?.message || e));
-      if (looksTransient && attempt < MAX_ATTEMPTS && Date.now() - start < RETRY_BUDGET_MS) { clearTimeout(timer); await new Promise((r) => setTimeout(r, backoff())); continue; }
+      if (looksTransient && attempt < MAX_ATTEMPTS && budgetLeft()) { clearTimeout(timer); await new Promise((r) => setTimeout(r, backoff())); continue; }
       const why = isAbort ? `timed out after ${attemptTimeout}ms` : (e?.message || e);
       console.warn(`[pdf-images] Error processing ${url}: ${why}`);
       return null;
@@ -96,12 +108,31 @@ async function fetchAndResize(url: string): Promise<string | null> {
   return null;
 }
 
+// Global ceiling on the WHOLE image-resolution phase. The per-url retry budget
+// (RETRY_BUDGET_MS) bounds a single photo, but with no batch-wide cap a large
+// gallery during an upstream (HubSpot CDN) blip lets EVERY url burn its own
+// multi-second retry budget — ceil(N/CONCURRENCY) lanes × ~35s each — which on a
+// photo-heavy report ran the finalize function straight into its 300s ceiling
+// (504 Gateway Timeout). Once this deadline passes, remaining urls fall back to
+// their original URL immediately (the same "render as link" degradation as any
+// fetch failure) instead of each spinning its own retries. Default leaves plenty
+// of headroom under a 300s route for the render + upload + HubSpot writes; the
+// 60s /api/pdf route passes a smaller value.
+const DEFAULT_BATCH_DEADLINE_MS = 150_000;
+
 /**
  * Resolve every URL in the given list, in parallel, to a data URI.
  * Deduplicates -- each URL is fetched at most once.
  * Returns a Map: original URL -> data URI (or original URL if fetch failed).
+ *
+ * `opts.deadlineMs` caps the total time spent resolving the whole batch. Set it
+ * comfortably below the calling route's maxDuration so the render/upload/write
+ * steps that follow still fit in the function budget.
  */
-export async function resolveImagesInParallel(urls: string[]): Promise<Map<string, string>> {
+export async function resolveImagesInParallel(
+  urls: string[],
+  opts?: { deadlineMs?: number },
+): Promise<Map<string, string>> {
   const unique = Array.from(new Set(urls.filter(Boolean)));
   if (unique.length === 0) return new Map();
 
@@ -109,12 +140,17 @@ export async function resolveImagesInParallel(urls: string[]): Promise<Map<strin
   const CONCURRENCY = 8;
   const out = new Map<string, string>();
   let idx = 0;
+  const deadlineAt = Date.now() + Math.max(1000, opts?.deadlineMs ?? DEFAULT_BATCH_DEADLINE_MS);
+  let deadlineHit = 0;
 
   async function worker() {
     while (idx < unique.length) {
       const i = idx++;
       const url = unique[i];
-      const result = await fetchAndResize(url);
+      // Past the batch deadline: don't start new fetches — fall straight back to
+      // the original URL so the phase can't overrun the function budget.
+      if (Date.now() >= deadlineAt) { out.set(url, url); deadlineHit++; continue; }
+      const result = await fetchAndResize(url, deadlineAt);
       // On failure, fall back to the original URL (React-PDF will try to load it,
       // and either succeed or show a placeholder).
       out.set(url, result || url);
@@ -123,5 +159,8 @@ export async function resolveImagesInParallel(urls: string[]): Promise<Map<strin
 
   const workers = Array.from({ length: Math.min(CONCURRENCY, unique.length) }, () => worker());
   await Promise.all(workers);
+  if (deadlineHit > 0) {
+    console.warn(`[pdf-images] batch deadline reached — ${deadlineHit}/${unique.length} image(s) left as links to stay within the function budget`);
+  }
   return out;
 }
