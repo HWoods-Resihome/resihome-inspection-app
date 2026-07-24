@@ -234,8 +234,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       vendorName: pSlack.vendor_name || null,
     };
     if (bidId) void notifyServiceBidCreatedSlack({ ...slackCtx, bidId, description: String(bid?.description || ''), vendorCost: Number(bid?.vendorCost) || null });
-    // Services team inbox: a new ESTIMATED (bid) service now exists.
-    if (bidId) void notifyServicesInboxStatus({
+    // Services team inbox: a new ESTIMATED (bid) service now exists. AWAIT — on
+    // Vercel an un-awaited promise is frozen the instant the handler returns, so
+    // a fire-and-forget send would silently never reach the Gmail API.
+    if (bidId) await notifyServicesInboxStatus({
       serviceId: bidId, status: 'estimated',
       address: slackCtx.address, locality: String(pSlack.locality_snapshot || ''),
       worktypeLabel: worktypeLabel(String(pSlack.worktype || '')), subtypeLabel: 'Bid Item',
@@ -246,8 +248,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (routeToReview) {
       void recordServiceAudit({ serviceId: id, action: 'ai_review', actorName: 'System', detail: 'Not completed — AI skipped, routed to Review', meta: { skipped: true } });
       void notifyServiceSubmittedSlack(slackCtx);
-      // Services team inbox: this order is now sitting in Review.
-      void notifyServicesInboxStatus({
+      // Services team inbox: this order is now sitting in Review. AWAIT (see above)
+      // so it isn't dropped when we return the response on the next line.
+      await notifyServicesInboxStatus({
         serviceId: id, status: 'review',
         address: slackCtx.address, locality: String(pSlack.locality_snapshot || ''),
         worktypeLabel: worktypeLabel(String(pSlack.worktype || '')), subtypeLabel: subtypeLabel(String(pSlack.worktype || ''), String(pSlack.subtype || '')),

@@ -346,10 +346,12 @@ async function reviewOrderAndApply(
       detail: clean ? 'AI review clean → Completed' : `AI review flagged → Review${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).length ? ` (${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).join(', ')})` : ''}`,
       meta: { verdict: v.verdict, workEvidenced: v.workEvidenced, geofenceOk: v.geofenceOk },
     });
-    // Services team inbox: the AI just moved this order into Review.
+    // Services team inbox: the AI just moved this order into Review. AWAIT — an
+    // un-awaited promise is frozen the moment the serverless handler returns, so
+    // fire-and-forget would routinely drop the send (this alert never arrived).
     if (!clean) {
       const op = order.props;
-      void notifyServicesInboxStatus({
+      await notifyServicesInboxStatus({
         serviceId: order.id, status: 'review',
         address: String(op.address_snapshot || op.service_name || ''), locality: String(op.locality_snapshot || ''),
         worktypeLabel: worktypeLabel(String(op.worktype || '')), subtypeLabel: subtypeLabel(String(op.worktype || ''), String(op.subtype || '')),
