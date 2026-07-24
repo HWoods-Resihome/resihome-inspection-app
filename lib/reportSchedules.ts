@@ -98,7 +98,12 @@ export function resolveRange(range: RelativeRange, now: Date = new Date(), inclu
 export function isScheduleDue(s: ReportSchedule, now: Date = new Date()): boolean {
   if (!s.enabled || !s.recipients?.length) return false;
   const p = etParts(now);
-  if (p.hour !== (s.hourET | 0)) return false;
+  // Fire at OR AFTER the chosen hour (was an exact-hour match). The hourly cron
+  // only lines up with a given hour once, so a single failed/missed 8 AM tick
+  // used to drop the whole day's send with no retry. Combined with the
+  // once-per-ET-day dedup below, ">=" self-heals a missed hour later the same
+  // day while still sending exactly once.
+  if (p.hour < (s.hourET | 0)) return false;
   const todayET = iso(p.y, p.m, p.d);
   if (s.lastRunDate === todayET) return false;   // already sent this ET day
   if (s.cadence === 'daily') return true;

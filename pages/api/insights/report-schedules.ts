@@ -13,7 +13,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { canViewInsights } from '@/lib/insightsAccess';
-import { listSchedules, upsertSchedule, deleteSchedule, normalizeSchedule, sendScheduleNow, type ReportSchedule } from '@/lib/reportSchedules';
+import { listSchedules, upsertSchedule, deleteSchedule, normalizeSchedule, sendScheduleNow, isScheduleDue, markScheduleRun, etParts, type ReportSchedule } from '@/lib/reportSchedules';
 
 export const config = { maxDuration: 60 };
 
@@ -30,6 +30,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'POST') {
     const b = req.body || {};
+    // Diagnose: show why each saved schedule is / isn't due right now (ET).
+    if (b.action === 'diagnose') {
+      const now = new Date();
+      const p = etParts(now);
+      const todayET = `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
+      const schedules = (await listSchedules()).map((s) => ({
+        id: s.id, name: s.name, enabled: s.enabled, cadence: s.cadence,
+        hourET: s.hourET, dayOfWeek: s.dayOfWeek, dayOfMonth: s.dayOfMonth,
+        recipients: s.recipients?.length || 0, lastRunDate: s.lastRunDate || null,
+        dueNow: isScheduleDue(s, now),
+        checks: {
+          enabled: s.enabled, hasRecipients: !!s.recipients?.length,
+          hourReached: p.hour >= (s.hourET | 0), alreadyRanToday: s.lastRunDate === todayET,
+          dayMatch: s.cadence === 'daily' ? true : s.cadence === 'weekly' ? p.dow === (s.dayOfWeek ?? 1) : p.d === (s.dayOfMonth ?? 1),
+        },
+      }));
+      return res.status(200).json({ nowET: { hour: p.hour, dow: p.dow, today: todayET }, schedules });
+    }
+    // Manual run: send a saved schedule NOW and stamp it (mirrors the cron), so a
+    // missed send can be recovered on demand. { action:'run', id }.
+    if (b.action === 'run') {
+      const found = (await listSchedules()).find((x) => x.id === String(b.id || ''));
+      if (!found) return res.status(404).json({ error: 'Schedule not found.' });
+      const now = new Date();
+      const r = await sendScheduleNow(found, req, now);
+      if (!r.sent) return res.status(502).json({ error: r.error === 'system_email_not_configured' ? 'System email is not configured (SYSTEM_GMAIL_*).' : `Email failed: ${r.error || 'unknown'}` });
+      const p = etParts(now);
+      await markScheduleRun(found.id, `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`);
+      return res.status(200).json({ ok: true, rows: r.rows, ranAt: now.toISOString() });
+    }
     // Test send: use the posted schedule as-is (may be unsaved), or a saved id.
     if (b.action === 'test') {
       try {
