@@ -145,6 +145,9 @@ async function hubspotFetch(path: string, init: RequestInit = {}): Promise<any> 
     (err as any).status = 503;
     throw err;
   }
+  // Pace search calls under HubSpot's stricter search cap BEFORE taking a
+  // concurrency slot (so we never hold a slot while waiting on a token).
+  if (path.includes('/search')) await acquireSearchToken();
   await hsAcquire();
   try {
     return await hubspotFetchInner(url, method, path, init);
@@ -162,6 +165,31 @@ const HS_MAX_CONCURRENT = Math.max(1, Number(process.env.HUBSPOT_MAX_CONCURRENT)
 // Slots reserved for foreground: background may use at most (MAX - RESERVE).
 const HS_FG_RESERVE = Math.max(1, Math.min(HS_MAX_CONCURRENT - 1, Number(process.env.HUBSPOT_FG_RESERVE) || 3));
 const HS_BG_LIMIT = Math.max(1, HS_MAX_CONCURRENT - HS_FG_RESERVE);
+
+// ---- HubSpot /search rate limiter (per-instance token bucket) --------------
+// The CRM search API has a much STRICTER secondly cap (~4 req/sec) than the
+// general limit, and it's separate from the concurrency governor above — 8
+// concurrent searches fired on one page load (e.g. the status-count fan-out plus
+// a couple lookups) land in the same second and 429, which the retries then have
+// to ride out (and occasionally can't → a surfaced "Upstream request failed
+// (429)"). This paces ONLY search calls: burst up to the cap, then refill at the
+// cap per second. Time-based refill, so it can never deadlock a held slot.
+const HS_SEARCH_PER_SEC = Math.max(1, Number(process.env.HUBSPOT_SEARCH_PER_SEC) || 4);
+let _searchTokens = HS_SEARCH_PER_SEC;
+let _searchRefilledAt = Date.now();
+async function acquireSearchToken(): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    const elapsed = now - _searchRefilledAt;
+    if (elapsed > 0) {
+      _searchTokens = Math.min(HS_SEARCH_PER_SEC, _searchTokens + (elapsed / 1000) * HS_SEARCH_PER_SEC);
+      _searchRefilledAt = now;
+    }
+    if (_searchTokens >= 1) { _searchTokens -= 1; return; }
+    const waitMs = Math.max(15, Math.ceil(((1 - _searchTokens) / HS_SEARCH_PER_SEC) * 1000));
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+}
 
 // Marks a unit of work as "background" for the governor. Any hubspotFetch made
 // (directly or transitively) inside the callback is throttled to the background
