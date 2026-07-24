@@ -126,6 +126,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const out = {
       ok: true, dryRun,
       maintenanceAiConfigured: !!(process.env.MAINTENANCE_AI_API_KEY || '').trim(),
+      // WHICH HBMM the creates go to — the code default is the dev/int host, so
+      // a missing/wrong MAINTENANCE_AI_BASE_URL silently creates tickets in the
+      // wrong environment (real IDs, invisible in prod HBMM).
+      maintenanceAiHost: (process.env.MAINTENANCE_AI_BASE_URL || 'https://hbmm-admin-int.resicapdev.com (CODE DEFAULT — dev/int!)').trim(),
       pdf: { candidates: pdfCandidates.map((c) => ({ id: c.id, submittedAt: c.props.submitted_at || null })), fixed: pdfResults },
       tickets: { candidates: ticketCandidates.map((c) => ({ id: c.id, completedAt: c.props.completed_at || null })), fixed: ticketResults },
     };
