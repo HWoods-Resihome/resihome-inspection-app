@@ -204,6 +204,17 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Machine-to-machine finalize (the finalize-backstop cron regenerating a
+  // missing pending-approval PDF): pass through ONLY with the exact CRON_SECRET
+  // bearer. The handler re-verifies the secret AND requires regenerateOnly, so
+  // this can never approve/complete an inspection.
+  if (/^\/api\/inspections\/[^/]+\/finalize$/.test(pathname)) {
+    const cs = process.env.CRON_SECRET;
+    if (cs && (req.headers.get('authorization') || '') === `Bearer ${cs}`) {
+      return NextResponse.next();
+    }
+  }
+
   // Public marketing/legal pages for the "ResiWalk - 1099" Google OAuth app
   // (home, privacy, terms) — must be reachable WITHOUT login for verification.
   if (pathname === '/1099' || pathname.startsWith('/1099/')) {
