@@ -49,16 +49,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ nowET: { hour: p.hour, dow: p.dow, today: todayET }, schedules });
     }
     // Manual run: send a saved schedule NOW and stamp it (mirrors the cron), so a
-    // missed send can be recovered on demand. { action:'run', id }.
+    // missed send can be recovered on demand. Wrapped so a build/fetch/email
+    // throw surfaces as a clear message (the whole point when troubleshooting a
+    // silent miss). { action:'run', id }.
     if (b.action === 'run') {
-      const found = (await listSchedules()).find((x) => x.id === String(b.id || ''));
-      if (!found) return res.status(404).json({ error: 'Schedule not found.' });
-      const now = new Date();
-      const r = await sendScheduleNow(found, req, now);
-      if (!r.sent) return res.status(502).json({ error: r.error === 'system_email_not_configured' ? 'System email is not configured (SYSTEM_GMAIL_*).' : `Email failed: ${r.error || 'unknown'}` });
-      const p = etParts(now);
-      await markScheduleRun(found.id, `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`);
-      return res.status(200).json({ ok: true, rows: r.rows, ranAt: now.toISOString() });
+      try {
+        const found = (await listSchedules()).find((x) => x.id === String(b.id || ''));
+        if (!found) return res.status(404).json({ error: 'Schedule not found.' });
+        const now = new Date();
+        const r = await sendScheduleNow(found, req, now);
+        if (!r.sent) return res.status(502).json({ error: r.error === 'system_email_not_configured' ? 'System email is not configured (SYSTEM_GMAIL_*).' : `Email failed: ${r.error || 'unknown'}`, rows: r.rows });
+        const p = etParts(now);
+        await markScheduleRun(found.id, `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`);
+        return res.status(200).json({ ok: true, rows: r.rows, ranAt: now.toISOString() });
+      } catch (e: any) { return res.status(500).json({ error: `Run threw: ${String(e?.message || e).slice(0, 300)}` }); }
     }
     // Test send: use the posted schedule as-is (may be unsaved), or a saved id.
     if (b.action === 'test') {
