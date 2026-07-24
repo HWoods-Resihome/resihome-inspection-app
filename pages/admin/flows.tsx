@@ -68,19 +68,6 @@ export default function AdminFlowsPage() {
     }).catch(() => setAuthChecked(true));
   }, [router]);
 
-  // TEMP: preview the 1,000-inspections milestone celebration email.
-  const [mBusy, setMBusy] = useState(false);
-  const [mMsg, setMMsg] = useState<string | null>(null);
-  async function sendMilestonePreview() {
-    setMBusy(true); setMMsg(null);
-    try {
-      const r = await fetch('/api/admin/milestone-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      const d = await r.json();
-      setMMsg(r.ok ? `Sent to ${d.to} — check your inbox (and spam).` : (d.error || 'Send failed'));
-    } catch (e: any) { setMMsg(String(e?.message || e)); }
-    finally { setMBusy(false); }
-  }
-
   async function runSetup() {
     setBusy(true); setError(null);
     try {
@@ -152,15 +139,6 @@ export default function AdminFlowsPage() {
           {results && Object.values(results).some((v) => v.startsWith('error')) && (
             <p className="mt-3 text-[12px] text-gray-500">If a property shows an error, the app’s HubSpot token likely lacks schema-write scope — grant the token the “CRM → schemas” write scope and re-run.</p>
           )}
-        </Section>
-
-        {/* ---- TEMP: Milestone email preview ---- */}
-        <Section title="🎉 Milestone Email (preview)" desc="Sends the 1,000-completed-inspections celebration email to hwoods@resihome.com so you can preview the flare before it goes live. Temporary — safe to remove once approved.">
-          <button type="button" onClick={sendMilestonePreview} disabled={mBusy}
-            className="h-10 px-5 rounded-xl bg-brand text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300">
-            {mBusy ? 'Sending…' : 'Send preview to hwoods@resihome.com'}
-          </button>
-          {mMsg && <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded text-sm text-gray-700">{mMsg}</div>}
         </Section>
 
         {/* ---- Regenerate PDFs ---- */}
