@@ -33,7 +33,7 @@ export function ImpersonationBanner() {
         body: JSON.stringify({ stop: true }),
       });
     } catch { /* clear-cookie best effort */ }
-    window.location.href = '/'; // full reload so the real session takes over everywhere
+    window.location.href = '/app'; // full reload so the real session takes over everywhere (into the app, not marketing)
   };
 
   return (

@@ -33,7 +33,7 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
   };
 
   handleHome = () => {
-    if (typeof window !== 'undefined') window.location.href = '/';
+    if (typeof window !== 'undefined') window.location.href = '/app';
   };
 
   render() {

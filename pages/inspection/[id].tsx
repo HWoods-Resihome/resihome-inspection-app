@@ -166,7 +166,7 @@ export default function ExistingInspection() {
     // can land a person here; hanging on "Loading inspection…" (the old behavior)
     // strands them. Bounce to home instead. Still no fetch, no bogus error report.
     if (inspectionId === '_precache_shell_') {
-      if (typeof window !== 'undefined') window.location.replace('/');
+      if (typeof window !== 'undefined') window.location.replace('/app');
       return;
     }
     // The prev/next InspectionPager swaps only `inspectionId` while this page
@@ -462,7 +462,7 @@ export default function ExistingInspection() {
         const data = await r.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${r.status}`);
       }
-      router.replace('/?just_cancelled=1');
+      router.replace('/app');
     } catch (e: any) {
       void dialog.alert(`Cancel failed: ${e.message || e}`);
     }
@@ -585,7 +585,7 @@ export default function ExistingInspection() {
               )}
             </div>
           )}
-          <button onClick={() => router.replace('/?just_submitted=1')} className="mt-4 bg-brand text-white font-heading font-semibold px-4 py-2 rounded-lg">
+          <button onClick={() => router.replace('/app')} className="mt-4 bg-brand text-white font-heading font-semibold px-4 py-2 rounded-lg">
             Back to Inspections List
           </button>
         </div>
@@ -736,7 +736,7 @@ export default function ExistingInspection() {
           pdfUrl={isCompleted ? (shareLinks?.report || inspection.pdfUrl || undefined) : undefined}
           readOnly={readOnly}
           onSubmit={() => router.replace('/app')}
-          onCancel={() => { window.location.assign('/'); }}
+          onCancel={() => { window.location.assign('/app'); }}
           onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           onCancelInspection={readOnly ? undefined : handleCancelInspection}
         />
@@ -780,7 +780,7 @@ export default function ExistingInspection() {
           inspectionRegion={inspection.regionSnapshot || ''}
           sectionListJson={inspection.sectionListJson}
           onSubmit={() => router.replace('/app')}
-          onCancel={() => { window.location.assign('/'); }}
+          onCancel={() => { window.location.assign('/app'); }}
           onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
@@ -821,7 +821,7 @@ export default function ExistingInspection() {
           propertyAirFiltersType3={propertyAirFiltersType3}
           filterSizeOptions={filterSizeOptions}
           onSubmit={handleSubmit}
-          onCancel={() => { window.location.assign('/'); }}
+          onCancel={() => { window.location.assign('/app'); }}
           onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}

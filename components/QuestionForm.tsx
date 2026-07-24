@@ -771,19 +771,10 @@ export function QuestionForm({
   // Per-section collapse of the photo strip.
   const [photosCollapsed, setPhotosCollapsed] = useState<Record<string, boolean>>({});
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    const c = new Set<string>();
-    // Q&A templates: everything open except repeating bedroom/bathroom
-    // instances 2..N and the Half Bath.
-    for (const inst of sectionInstances) {
-      if ((inst.roomType === 'bedroom' && (inst.instanceNumber ?? 0) > 1)
-         || (inst.roomType === 'bathroom' && (inst.instanceNumber ?? 0) > 1)
-         || inst.instanceKey === 'bathroom-half') {
-        c.add(inst.instanceKey);
-      }
-    }
-    return c;
-  });
+  // Q&A templates (leasing / RRQC / community / vacancy): ALL sections start
+  // EXPANDED — including repeating bedroom/bathroom instances 2..N and the Half
+  // Bath (previously auto-collapsed). Per owner: nothing collapsed by default.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set<string>());
 
   function toggleCollapsed(instanceKey: string) {
     setCollapsed((prev) => {

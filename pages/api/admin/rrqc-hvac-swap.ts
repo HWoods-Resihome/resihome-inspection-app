@@ -36,21 +36,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!session || !(await isAppAdmin(session.email).catch(() => false))) return res.status(403).json({ error: 'Admin only' });
 
   const apply = req.query.apply === '1' || req.query.apply === 'true';
+  // Optional explicit source section label (case-insensitive exact match) — use
+  // this if the 1099 form's section isn't literally "HVAC / Utilities" and the
+  // fuzzy default doesn't catch it. e.g. ?source=Utilities
+  const sourceParam = typeof req.query.source === 'string' ? req.query.source.trim().toLowerCase() : '';
+  const matchSource = (section: string) =>
+    sourceParam ? section.trim().toLowerCase() === sourceParam : isTargetSource(section);
   try {
     const all = await listAllQuestionRecords();
 
+    // Discovery: distinct section labels (+ counts) on each form, so we can SEE
+    // the exact names when a match comes back empty.
+    const sectionsFor = (tmpl: string) => {
+      const m = new Map<string, number>();
+      for (const q of all) if (q.applies.includes(tmpl)) m.set(q.section || '(none)', (m.get(q.section || '(none)') || 0) + 1);
+      return [...m.entries()].map(([section, count]) => ({ section, count }));
+    };
+
     // 1) RRQC questions in the sections we're removing.
     const toRemove = all.filter((q) => q.applies.includes(RRQC) && REMOVE_SECTION_RE.test(q.section));
-    // 2) 1099 questions in the HVAC / Utilities section not already on RRQC.
-    const sourceHvacUtil = all.filter((q) => q.applies.includes(SOURCE_1099) && isTargetSource(q.section));
+    // 2) 1099 questions in the HVAC / Utilities (or ?source=) section not already on RRQC.
+    const sourceHvacUtil = all.filter((q) => q.applies.includes(SOURCE_1099) && matchSource(q.section));
     const toAdd = sourceHvacUtil.filter((q) => !q.applies.includes(RRQC));
 
     const plan = {
       mode: apply ? 'apply' : 'dry-run',
+      sourceMatch: sourceParam ? `exact: "${sourceParam}"` : 'fuzzy: section contains "hvac" AND "util"',
       remove: toRemove.map((q) => ({ recordId: q.recordId, section: q.section, question: q.questionText, willArchive: q.applies.length === 1 })),
       add: toAdd.map((q) => ({ recordId: q.recordId, section: q.section, question: q.questionText })),
       sourceHvacUtilSections: [...new Set(sourceHvacUtil.map((q) => q.section))],
       rrqcRemovedSections: [...new Set(toRemove.map((q) => q.section))],
+      // Discovery aids — inspect these if `add` is empty to find the real label.
+      all1099Sections: sectionsFor(SOURCE_1099),
+      allRrqcSections: sectionsFor(RRQC),
       counts: { remove: toRemove.length, archive: toRemove.filter((q) => q.applies.length === 1).length, add: toAdd.length },
     };
 

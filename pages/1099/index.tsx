@@ -19,7 +19,7 @@ export default function ResiWalk1099Home() {
         <header className="flex items-center gap-3 mb-8">
           {/* Logo → app home. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <a href="/" aria-label="Go to home" title="Home"><img src="/icon-192.png" alt="ResiWalk - 1099" className="w-14 h-14 rounded-2xl shadow" /></a>
+          <a href="/app" aria-label="Go to home" title="Home"><img src="/icon-192.png" alt="ResiWalk - 1099" className="w-14 h-14 rounded-2xl shadow" /></a>
           <div>
             <h1 className="text-2xl font-heading font-extrabold text-ink">ResiWalk - 1099</h1>
             <p className="text-sm text-gray-500">Property inspections for ResiHome leasing agents</p>

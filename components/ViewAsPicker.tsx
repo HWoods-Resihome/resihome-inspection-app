@@ -58,7 +58,7 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
         body: JSON.stringify({ email: r.email, name: r.name }),
       });
     } catch { /* best effort */ }
-    window.location.href = '/'; // reload as the impersonated user
+    window.location.href = '/app'; // reload as the impersonated user (into the app, not marketing)
   };
 
   return (
