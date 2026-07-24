@@ -74,6 +74,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       props: ['inspection_name', 'property_address_snapshot', 'completed_at', 'hbmm_ticket_id', 'template_type'], limit: 100,
     }).catch(() => []);
     const report = rows
+      // Rate Card SCOPE inspections only (the ticket/document pipeline).
+      .filter((r) => String(r.props.template_type || '').toLowerCase() === 'pm_scope_rate_card')
       .sort((x, y) => String(y.props.completed_at || '').localeCompare(String(x.props.completed_at || '')))
       .map((r) => ({
         inspectionId: r.id,

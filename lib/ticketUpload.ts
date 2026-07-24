@@ -42,6 +42,10 @@ export interface TicketUploadResult {
   uploaded: number;
   steps: string[];
   error?: string;
+  /** skipIfHasDocs: the ticket already had documents attached — nothing uploaded. */
+  skippedHasDocs?: boolean;
+  /** skipIfHasDocs: how many existing document links the probe counted. */
+  docCount?: number;
   /** base64 PNG of the page at the point of failure (for selector tuning). */
   screenshot?: string;
 }
@@ -86,7 +90,7 @@ async function downloadToTmp(file: TicketUploadFile, dir: string, idx: number): 
 /**
  * Upload the given files to a ticket via the HoneyBadger UI. Best-effort.
  */
-export async function uploadTicketDocuments(args: { ticketId: number; files: TicketUploadFile[]; ticketTypeTarget?: string; typeOnly?: boolean }): Promise<TicketUploadResult> {
+export async function uploadTicketDocuments(args: { ticketId: number; files: TicketUploadFile[]; ticketTypeTarget?: string; typeOnly?: boolean; skipIfHasDocs?: boolean }): Promise<TicketUploadResult> {
   const steps: string[] = [];
   const log = (s: string) => { steps.push(s); };
   // typeOnly (the admin ticket-type test) runs login → navigate → enforce the
@@ -316,6 +320,29 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     await sleep(3500);
     const diag = await page.evaluate(() => /upload document/i.test(document.body?.innerText || document.body?.textContent || '')).catch(() => false);
     log(`opened ticket (url=${page.url()} · hasUploadDocText=${diag})`);
+
+    // 4a. Existing-documents probe (the document-backfill scrub): when
+    // skipIfHasDocs is set, a ticket that already carries documents is left
+    // exactly as-is — no upload, no type edit. Heuristic count of document
+    // links (PDF/document anchors), overridable via HBMM_SEL_DOC_ROWS for
+    // precise tuning. A failed probe counts as unknown → we proceed to upload
+    // (the scrub is only pointed at tickets believed to be missing docs).
+    if (args.skipIfHasDocs && !typeOnly) {
+      const docSel = env('HBMM_SEL_DOC_ROWS', '');
+      const docCount = await page.evaluate((sel: string) => {
+        if (sel) return document.querySelectorAll(sel).length;
+        return Array.from(document.querySelectorAll('a')).filter((el) => {
+          const href = String(el.getAttribute('href') || '');
+          const text = String(el.textContent || '').trim();
+          return /\.pdf(\b|$)/i.test(href) || /\.pdf$/i.test(text) || /DownloadDocument|\/Document\//i.test(href);
+        }).length;
+      }, docSel).catch(() => -1);
+      log(`existing-documents probe: ${docCount < 0 ? 'probe failed (unknown → uploading)' : `${docCount} document link(s)`}`);
+      if (docCount > 0) {
+        log('ticket already has documents — skipping (skipIfHasDocs)');
+        return { ok: true, configured: true, uploaded: 0, steps, skippedHasDocs: true, docCount };
+      }
+    }
 
     // 4b. FALLBACK — ensure the ticket type is "Turnkey" BEFORE adding documents.
     // The create/update API doesn't always stick the type (it can land as

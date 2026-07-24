@@ -54,9 +54,16 @@ const BATCH = Math.max(1, Number(process.env.HBMM_ENFORCE_BATCH || 3) || 3);
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const secret = process.env.CRON_SECRET || '';
-  if (!secret) return res.status(200).json({ ok: true, skipped: true, reason: 'CRON_SECRET not configured.' });
   const auth = req.headers.authorization || '';
-  if (auth !== `Bearer ${secret}`) return res.status(401).json({ error: 'Unauthorized' });
+  let authorized = !!secret && auth === `Bearer ${secret}`;
+  if (!authorized) {
+    // Admin session → manual trigger (watch a docs-backfill test run live).
+    const { getSessionFromRequest } = await import('@/lib/auth');
+    const { isAppAdmin } = await import('@/lib/adminAccess');
+    const session = await getSessionFromRequest(req).catch(() => null);
+    authorized = !!session?.email && (await isAppAdmin(session.email).catch(() => false));
+  }
+  if (!authorized) return res.status(401).json({ error: 'Unauthorized' });
 
   const all = await listTicketEnforceJobs();
   const now = Date.now();
@@ -75,7 +82,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // plain job → the type-only run as before.
       const docFiles = job.docs && job.inspectionId ? await turnkeyFilesFor(job.inspectionId) : [];
       const ui = docFiles.length
-        ? await uploadTicketDocuments({ ticketId: job.ticketId, files: docFiles, ticketTypeTarget: job.target })
+        ? await uploadTicketDocuments({ ticketId: job.ticketId, files: docFiles, ticketTypeTarget: job.target, skipIfHasDocs: true })
         : await setTicketTypeViaUi({ ticketId: job.ticketId, target: job.target });
       if (ui.ok) {
         await removeTicketEnforcement(job.ticketId);
