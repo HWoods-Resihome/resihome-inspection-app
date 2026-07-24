@@ -326,7 +326,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
   const docTitle = data.templateLabel;
   const headerName = isCommunity
     ? (data.communityName || data.propertyAddress)
-    : `${data.propertyAddress}${data.lotNumber ? ` (Lot #: ${data.lotNumber})` : ''}`;
+    : `${data.propertyAddress}${data.lotNumber ? ` (Lot #${data.lotNumber})` : ''}`;
 
   // Listing highlights line for the header (Status · Listing $X · Listed date ·
   // Move-In M/D/YY). Move-In only appears on deposit-taken listings.

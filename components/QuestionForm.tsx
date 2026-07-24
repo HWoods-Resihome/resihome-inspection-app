@@ -2188,18 +2188,12 @@ export function QuestionForm({
               ) : (
                 <>
                   {/* Full address on ONE line — never wraps; the font shrinks to fit
-                      the available width. RRQC shows "(Lot #: …)" to its right. */}
-                  <div className="flex items-baseline gap-2 min-w-0">
-                    <div className="min-w-0 flex-1">
-                      <FitText
-                        text={propertyName}
-                        className="font-heading font-semibold text-ink"
-                      />
-                    </div>
-                    {lotNumber && (
-                      <span className="shrink-0 text-sm font-heading font-semibold text-gray-500">(Lot #: {lotNumber})</span>
-                    )}
-                  </div>
+                      the available width. RRQC appends "(Lot #…)" one space after
+                      the zip (inline, not right-aligned). */}
+                  <FitText
+                    text={lotNumber ? `${propertyName} (Lot #${lotNumber})` : propertyName}
+                    className="font-heading font-semibold text-ink"
+                  />
                   <div className="text-xs text-gray-500 truncate">
                     {bedrooms} Bed / {bathrooms} Bath
                     {squareFootage != null && squareFootage > 0 && (
