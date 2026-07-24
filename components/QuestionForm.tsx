@@ -242,10 +242,17 @@ export function QuestionForm({
     templateType === 'pm_vacancy_occupancy_check' ||
     templateType === 'pm_community_inspection';
   const isCommunity = templateType === 'pm_community_inspection';
+  // RRQC is NOT scope-style (keeps its own header/behavior), but per owner it
+  // ALSO gets the reused Final Checklist "HVAC & Air Filters" + "Utilities"
+  // sections (merged into one "HVAC / Utilities" block) — with full behavior
+  // (air-filter prefills, gas gating, septic/pool fee logic, meter photos). It
+  // does NOT get Smart Home Tech from the checklist (it has its own Smart Home /
+  // Locks question section).
+  const isRrqc = templateType === 'qc_new_construction_rrqc';
   // Community / Visit inspections drop the reused Scope widgets (HVAC & Air
   // Filters, Smart Home Tech, Utilities) entirely. Everything else scope-style
-  // (1099, occupancy) keeps them.
-  const fcEnabled = scopeStyle && !isCommunity;
+  // (1099, occupancy) keeps them; RRQC opts in for HVAC / Utilities only.
+  const fcEnabled = (scopeStyle && !isCommunity) || isRrqc;
   // Property values used to prefill the HVAC air-filter widget.
   const propertyValues = useMemo<Record<string, string>>(() => ({
     air_filters___total_quantity: propertyAirFiltersTotal != null ? String(propertyAirFiltersTotal) : '',
@@ -261,6 +268,9 @@ export function QuestionForm({
   // way the rate card does: one JSON-blob Answer record (answer_id_external
   // FINALCHECKLIST-<id>). No line-item behavior here (no onAddLine).
   const FC_ONLY = useMemo(() => ['hvac_air_filters', 'smart_home_tech', 'utilities'], []);
+  // The FC sections THIS template uses. RRQC = HVAC/Utilities only (no Smart Home
+  // from the checklist). Everything else scope-style uses the full set.
+  const fcSectionsForTemplate = useMemo(() => (isRrqc ? ['hvac_air_filters', 'utilities'] : FC_ONLY), [isRrqc, FC_ONLY]);
   // Offline-queue sectionId tag for Final Checklist photos (HVAC label stickers,
   // etc.). The camKey (`qid:key`) rides in lineExternalId. The flush recognizes
   // this tag and swaps the synced URL back into fcAnswers — WITHOUT it, FC photos
@@ -1310,7 +1320,7 @@ export function QuestionForm({
   const occupied = isVacancy && Object.values(answers).some((a) => /\boccupied\b/i.test(a.answerValue || ''));
   const isHiddenWhenOccupied = (q: Question) => occupied && /general\s*condition.*interior/i.test(q.questionText || '');
   // FC sections still counted/required for submit (drop HVAC + Utilities when occupied).
-  const fcGateIds = occupied ? FC_ONLY.filter((id) => id !== 'hvac_air_filters' && id !== 'utilities') : FC_ONLY;
+  const fcGateIds = occupied ? fcSectionsForTemplate.filter((id) => id !== 'hvac_air_filters' && id !== 'utilities') : fcSectionsForTemplate;
 
   // Air-filter writeback: when the inspector changes the HVAC widget's filter
   // quantity / sizes, sync them onto the Property object (debounced). fcAnswers
@@ -2015,16 +2025,20 @@ export function QuestionForm({
   // "HVAC / Utilities" section (utilities at the end). Other scope-style templates
   // keep the standalone-section layout (Smart Home above Whole House/Yard).
   const is1099 = templateType === 'leasing_agent_1099_property_inspection';
-  const smartFc = fcEnabled && smartAnchorKey
+  // RRQC has its OWN Smart Home / Locks question section, so it never renders the
+  // checklist's Smart Home Tech widget.
+  const smartFc = fcEnabled && smartAnchorKey && !isRrqc
     ? makeFc(['smart_home_tech'], is1099 ? { seamless: true } : undefined)
     : null;
   // When occupied (Vacancy/Occupancy), drop HVAC & Air Filters + Utilities from
-  // the bottom group; Smart Home Tech stays.
-  const bottomKeys = smartAnchorKey
-    ? (occupied ? [] : ['hvac_air_filters', 'utilities'])
-    : (occupied ? ['smart_home_tech'] : FC_ONLY);
+  // the bottom group; Smart Home Tech stays. RRQC always shows HVAC / Utilities.
+  const bottomKeys = isRrqc
+    ? ['hvac_air_filters', 'utilities']
+    : smartAnchorKey
+      ? (occupied ? [] : ['hvac_air_filters', 'utilities'])
+      : (occupied ? ['smart_home_tech'] : FC_ONLY);
   const bottomFc = fcEnabled && bottomKeys.length
-    ? makeFc(bottomKeys, is1099 ? { mergeName: 'HVAC / Utilities' } : undefined)
+    ? makeFc(bottomKeys, (is1099 || isRrqc) ? { mergeName: 'HVAC / Utilities' } : undefined)
     : null;
 
   // Header status badge + "Submitted" stamp (only while actually submitted).
