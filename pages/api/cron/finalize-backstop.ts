@@ -107,6 +107,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 
+  // Explicit re-create: ?createFor=<inspectionId,...> — creates the HBMM ticket
+  // for EXACTLY the named inspections (validation verdicts), regardless of the
+  // sweep window. Replaces any existing stamp (reported as replaced_<old> for
+  // traceability) and queues the docs upload. Cap 10 per call.
+  if (typeof req.query.createFor === 'string' && req.query.createFor.trim()) {
+    const target = (process.env.HBMM_TICKET_TYPE_TARGET || 'Turnkey').trim();
+    const out: { id: string; outcome: string }[] = [];
+    for (const iid of req.query.createFor.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 10)) {
+      if (!/^\d+$/.test(iid)) { out.push({ id: iid, outcome: 'bad_id' }); continue; }
+      try {
+        const props = await readInspectionProps(iid, ['hbmm_ticket_id', 'pdf_vendor_urls_json', 'pdf_master_url', 'pdf_generated_at']).catch(() => null);
+        if (!props) { out.push({ id: iid, outcome: 'not_found' }); continue; }
+        if (!String(props.pdf_generated_at || '').trim()) { out.push({ id: iid, outcome: 'no_finalize_pdfs' }); continue; }
+        const oldTicket = String(props.hbmm_ticket_id || '').trim();
+        const data = await fetchInspectionWithPropertyRef(iid);
+        const hbmmId = Number(data?.propertyHbmmId || '');
+        if (!data?.propertyHbmmId || !Number.isFinite(hbmmId)) { out.push({ id: iid, outcome: 'no_hbmm_property_id' }); continue; }
+        const vendorUrls: Record<string, string> = (() => { try { return JSON.parse(props.pdf_vendor_urls_json || '{}'); } catch { return {}; } })();
+        const shareMasterUrl = String(props.pdf_master_url || '').trim() ? buildShortLink(base, iid, 'master') : null;
+        const shareVendorLinks: Record<string, string> = {};
+        for (const vendor of Object.keys(vendorUrls)) {
+          if (String(vendorUrls[vendor] || '').trim()) shareVendorLinks[vendor] = buildShortLink(base, iid, 'vendor', vendor);
+        }
+        const turnkeyHasWork = Object.entries(vendorUrls).some(([v, u]) => (u || '').trim() && vendorTicketKind(v) === 'turnkey');
+        const description = turnkeyHasWork
+          ? buildTicketDescription(shareVendorLinks, shareMasterUrl, { kind: 'turnkey' })
+          : `Zero Dollar Turn${shareMasterUrl ? `\n\nMaster: ${shareMasterUrl}` : ''}`;
+        const created = await createMaintenanceTicket({ propertyId: hbmmId, description });
+        if (created.ok && created.ticketId) {
+          await updateInspection(iid, { hbmm_ticket_id: created.ticketId });
+          await enqueueTicketEnforcement(created.ticketId, target, iid, true).catch(() => {});
+          out.push({ id: iid, outcome: `created_#${created.ticketId}${oldTicket ? ` (replaced_${oldTicket})` : ''}` });
+        } else {
+          out.push({ id: iid, outcome: `failed: ${String(created.error || 'unknown').slice(0, 200)}` });
+        }
+      } catch (e: any) { out.push({ id: iid, outcome: `error: ${String(e?.message || e).slice(0, 160)}` }); }
+    }
+    return res.status(200).json({ ok: true, createFor: out });
+  }
+
   // Docs catch-up: ?enqueueDocs=<inspectionId,inspectionId,...> — for tickets the
   // backstop created BEFORE docs-enqueueing existed. Reads each inspection's
   // CURRENT hbmm_ticket_id and queues a docs job; the 2-minute type sweep drains
