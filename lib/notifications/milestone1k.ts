@@ -30,7 +30,7 @@ export function buildMilestone1kEmail(opts: { recipientName?: string; count?: nu
   const mailtoCc = /@/.test(PRIZE_CC) ? `&cc=${encodeURIComponent(PRIZE_CC)}` : '';
   const prizeMailto = `mailto:${PRIZE_TO}?subject=${encodeURIComponent('My 1,000th Inspection Prize 🎉')}${mailtoCc}&body=${encodeURIComponent('Hi Hayden & Eric — I just hit 1,000 completed inspections in ResiWalk and would love to claim my prize!')}`;
 
-  const subject = `🎉 You did it — 1,000 inspections in ResiWalk!`;
+  const subject = `🎉 You logged ResiWalk's 1,000th inspection!`;
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:${INK};">
@@ -41,17 +41,18 @@ export function buildMilestone1kEmail(opts: { recipientName?: string; count?: nu
       <tr><td style="background:${PINK};background:linear-gradient(135deg,${PINK} 0%,${PINK_DEEP} 100%);padding:34px 24px 26px;text-align:center;">
         <div style="font-size:34px;line-height:1;letter-spacing:2px;">🎉 🎊 🥳 🎊 🎉</div>
         <div style="margin-top:14px;color:#ffffff;font-size:15px;font-weight:bold;letter-spacing:3px;text-transform:uppercase;opacity:.92;">Milestone Unlocked</div>
-        <div style="margin-top:6px;color:#ffffff;font-size:64px;font-weight:900;line-height:1;">${count}</div>
-        <div style="margin-top:6px;color:#ffffff;font-size:17px;font-weight:bold;opacity:.95;">Completed Inspections</div>
+        <div style="margin-top:6px;color:#ffffff;font-size:64px;font-weight:900;line-height:1;">${count}<span style="font-size:30px;font-weight:800;">th</span></div>
+        <div style="margin-top:6px;color:#ffffff;font-size:17px;font-weight:bold;opacity:.95;">Inspection in ResiWalk</div>
+        <div style="margin-top:12px;display:inline-block;background:rgba(255,255,255,.18);color:#ffffff;font-size:13px;font-weight:bold;padding:6px 14px;border-radius:999px;">🏅 And you're the one who logged it</div>
       </td></tr>
 
       <!-- Message -->
       <tr><td style="padding:28px 30px 6px;">
         <div style="font-size:22px;font-weight:800;color:${INK};">${greeting}</div>
         <p style="font-size:15px;line-height:1.6;color:#3a3f47;margin:12px 0 0;">
-          You just crossed <strong>1,000 completed inspections</strong> in ResiWalk — a genuinely huge milestone.
-          That's a thousand homes walked, priced, and documented; a thousand reports your team could trust. Every
-          single one moved the work forward, and it adds up to something worth celebrating. 👏
+          You just completed ResiWalk's <strong>1,000th inspection</strong> — the walk that pushed the whole team
+          past a thousand. Out of every inspection logged in ResiWalk, the milestone landed on <strong>yours</strong>,
+          and that's a moment worth celebrating. 👏
         </p>
       </td></tr>
 
@@ -60,9 +61,9 @@ export function buildMilestone1kEmail(opts: { recipientName?: string; count?: nu
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ecfbfa;border:2px dashed ${TEAL};border-radius:14px;">
           <tr><td style="padding:20px 22px;text-align:center;">
             <div style="font-size:30px;line-height:1;">🎁</div>
-            <div style="margin-top:8px;font-size:18px;font-weight:800;color:${INK};">You've earned a special prize.</div>
+            <div style="margin-top:8px;font-size:18px;font-weight:800;color:${INK};">Being the one to hit #1,000 comes with an extra prize.</div>
             <p style="font-size:14px;line-height:1.55;color:#37474a;margin:8px 0 16px;">
-              To claim it, email <strong>Hayden &amp; Eric</strong> — they've got something set aside just for you.
+              Email <strong>Hayden &amp; Eric</strong> to claim what's waiting for you.
             </p>
             <a href="${prizeMailto}" style="display:inline-block;background:${PINK};color:#ffffff;text-decoration:none;font-weight:bold;font-size:15px;padding:13px 26px;border-radius:999px;">🏆 Email Hayden &amp; Eric to Claim</a>
           </td></tr>
@@ -71,7 +72,7 @@ export function buildMilestone1kEmail(opts: { recipientName?: string; count?: nu
 
       <tr><td style="padding:14px 30px 30px;">
         <p style="font-size:14px;line-height:1.6;color:#3a3f47;margin:0;">
-          Here's to the next thousand. Thank you for the care you put into every walk. 🚀
+          Here's to the next thousand — thanks for being the one to get us there. 🚀
         </p>
         <p style="font-size:14px;line-height:1.6;color:#3a3f47;margin:14px 0 0;">— The ResiWalk Team</p>
       </td></tr>
@@ -86,16 +87,16 @@ export function buildMilestone1kEmail(opts: { recipientName?: string; count?: nu
   const text = [
     '🎉 MILESTONE UNLOCKED 🎉',
     '',
-    `${count} COMPLETED INSPECTIONS`,
+    `The ${count}th inspection in ResiWalk — and you're the one who logged it. 🏅`,
     '',
     name ? `Congratulations, ${name}!` : 'Congratulations!',
     '',
-    "You just crossed 1,000 completed inspections in ResiWalk — a genuinely huge milestone. A thousand homes walked, priced, and documented. That's worth celebrating. 👏",
+    "You just completed ResiWalk's 1,000th inspection — the walk that pushed the whole team past a thousand. Out of every inspection logged in ResiWalk, the milestone landed on yours. 👏",
     '',
-    "🎁 You've earned a special prize. To claim it, email Hayden & Eric — they've got something set aside just for you.",
+    "🎁 Being the one to hit #1,000 comes with an extra prize. Email Hayden & Eric to claim what's waiting for you.",
     `   Email: ${PRIZE_TO}${/@/.test(PRIZE_CC) ? `, ${PRIZE_CC}` : ' (and Eric)'}`,
     '',
-    "Here's to the next thousand. Thank you for the care you put into every walk. 🚀",
+    "Here's to the next thousand — thanks for being the one to get us there. 🚀",
     '— The ResiWalk Team',
   ].join('\n');
 
