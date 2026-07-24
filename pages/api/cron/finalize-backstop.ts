@@ -37,7 +37,7 @@ export const config = { maxDuration: 300 };
 
 const PENDING_STATUSES = ['pending_approval', 'pending approval', 'pending-approval', 'pendingapproval', 'Pending Approval'];
 const COMPLETED_STATUSES = ['completed', 'complete', 'Completed'];
-const TICKET_WINDOW_MS = 72 * 3600_000;
+const TICKET_WINDOW_MS = 7 * 24 * 3600_000; // 7 days — the stamp dedup makes a wide window safe
 const PDF_FIXES_PER_RUN = 3;    // each regenerate can take ~60s
 const TICKET_FIXES_PER_RUN = 5;
 
