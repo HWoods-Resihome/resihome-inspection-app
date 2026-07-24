@@ -7,7 +7,7 @@
  * the system mailbox, and stamps lastRunDate. Requires CRON_SECRET.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { listSchedules, isScheduleDue, sendScheduleNow, markScheduleRun, etParts } from '@/lib/reportSchedules';
+import { listSchedules, isScheduleDue, sendScheduleNow, markScheduleRun, etParts, recordCronTick } from '@/lib/reportSchedules';
 
 export const config = { maxDuration: 300 };
 
@@ -21,6 +21,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const now = new Date();
   const p = etParts(now);
   const todayET = `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
+  // Heartbeat: prove the hourly cron is actually firing (visible via diagnose).
+  await recordCronTick(now);
   let sent = 0; let failed = 0;
   const results: any[] = [];
   try {

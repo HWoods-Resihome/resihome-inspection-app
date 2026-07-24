@@ -9,6 +9,7 @@
  *
  * Stored as one JSON array on the Agent record (report_schedules_json).
  */
+import { put, head } from '@vercel/blob';
 import { readReportSchedulesRaw, mutateReportSchedulesRaw } from '@/lib/hubspot';
 import { fetchBillingRows } from '@/lib/insightsBilling';
 import { buildBillingXlsx, billingFilename } from '@/lib/insightsBillingXlsx';
@@ -170,6 +171,29 @@ export async function markScheduleRun(id: string, dateET: string): Promise<void>
   await mutateReportSchedulesRaw<ReportSchedule[]>((cur) =>
     (Array.isArray(cur) ? cur : []).map((x) => (x.id === id ? { ...x, lastRunDate: dateET, lastRunAt: new Date().toISOString() } : x)),
   ).catch(() => {});
+}
+
+// ── Cron heartbeat ───────────────────────────────────────────────────────────
+// The cron records a tick each run so we can VERIFY the hourly schedule is
+// actually firing (a stale/absent tick means Vercel isn't invoking it — which no
+// amount of send-logic fixing would cure). Best-effort tiny blob, overwritten
+// each run. Surfaced by the diagnose action.
+const CRON_TICK_KEY = 'report-schedules/last-cron-tick.json';
+export async function recordCronTick(now: Date = new Date()): Promise<void> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return;
+  try {
+    const p = etParts(now);
+    await put(CRON_TICK_KEY, JSON.stringify({ at: now.toISOString(), hourET: p.hour, dow: p.dow }),
+      { access: 'public', contentType: 'application/json', addRandomSuffix: false, allowOverwrite: true });
+  } catch { /* best-effort — never fail the cron over the heartbeat */ }
+}
+export async function getLastCronTick(): Promise<{ at: string; hourET: number; dow: number } | null> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
+  try {
+    const h = await head(CRON_TICK_KEY);              // throws if never written
+    const r = await fetch(h.url, { cache: 'no-store' });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
 }
 
 /** Build + email a schedule's report right now (used by the cron and the

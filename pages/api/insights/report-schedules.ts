@@ -13,7 +13,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { canViewInsights } from '@/lib/insightsAccess';
-import { listSchedules, upsertSchedule, deleteSchedule, normalizeSchedule, sendScheduleNow, isScheduleDue, markScheduleRun, etParts, type ReportSchedule } from '@/lib/reportSchedules';
+import { listSchedules, upsertSchedule, deleteSchedule, normalizeSchedule, sendScheduleNow, isScheduleDue, markScheduleRun, etParts, getLastCronTick, type ReportSchedule } from '@/lib/reportSchedules';
 
 export const config = { maxDuration: 60 };
 
@@ -46,7 +46,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           dayMatch: s.cadence === 'daily' ? true : s.cadence === 'weekly' ? p.dow === (s.dayOfWeek ?? 1) : p.d === (s.dayOfMonth ?? 1),
         },
       }));
-      return res.status(200).json({ nowET: { hour: p.hour, dow: p.dow, today: todayET }, schedules });
+      // lastCronTick: proves whether Vercel is actually invoking the hourly cron.
+      // A recent `at` = cron is firing (self-heal will cover any missed hour); a
+      // stale/null tick = the cron isn't running (a platform/registration issue).
+      const lastCronTick = await getLastCronTick();
+      return res.status(200).json({ nowET: { hour: p.hour, dow: p.dow, today: todayET }, lastCronTick, schedules });
     }
     // Manual run: send a saved schedule NOW and stamp it (mirrors the cron), so a
     // missed send can be recovered on demand. Wrapped so a build/fetch/email
