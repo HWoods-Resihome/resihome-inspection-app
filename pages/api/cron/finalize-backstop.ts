@@ -67,9 +67,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // base-URL fix, beyond the known ?all=1 batch.
   if (req.query.stamped === '1') {
     const rows = await searchInspectionsMissingProp({
-      // Reuse the helper by inverting: we want HAS hbmm_ticket_id. missingProp is
-      // required by the helper, so probe a property that never exists.
-      statusValues: COMPLETED_STATUSES, missingProp: 'zz_never_set_probe',
+      statusValues: COMPLETED_STATUSES,
       requireProp: 'hbmm_ticket_id', sinceProp: 'completed_at', sinceMs: Date.now() - TICKET_WINDOW_MS,
       props: ['hbmm_ticket_id', 'completed_at'], limit: 100,
     }).catch(() => []);

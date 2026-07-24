@@ -4277,7 +4277,8 @@ export async function attachPdfUrlToInspection(inspectionRecordId: string, pdfUr
  */
 export async function searchInspectionsMissingProp(opts: {
   statusValues: string[];
-  missingProp: string;
+  /** Omit to skip the NOT_HAS_PROPERTY filter (audit mode: list by requireProp). */
+  missingProp?: string;
   requireProp?: string;
   sinceProp?: string;
   sinceMs?: number;
@@ -4287,8 +4288,8 @@ export async function searchInspectionsMissingProp(opts: {
   const { inspection } = typeIds();
   const filters: any[] = [
     { propertyName: 'status', operator: 'IN', values: opts.statusValues },
-    { propertyName: opts.missingProp, operator: 'NOT_HAS_PROPERTY' },
   ];
+  if (opts.missingProp) filters.push({ propertyName: opts.missingProp, operator: 'NOT_HAS_PROPERTY' });
   if (opts.requireProp) filters.push({ propertyName: opts.requireProp, operator: 'HAS_PROPERTY' });
   if (opts.sinceProp && opts.sinceMs) filters.push({ propertyName: opts.sinceProp, operator: 'GT', value: String(opts.sinceMs) });
   const resp = await hubspotFetch(`/crm/v3/objects/${inspection}/search`, {
