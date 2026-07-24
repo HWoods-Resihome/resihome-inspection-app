@@ -1,0 +1,120 @@
+/**
+ * 1,000-completed-inspections milestone email — a celebratory, on-brand
+ * congratulations with a call to email Hayden & Eric to claim a special prize.
+ *
+ * buildMilestone1kEmail() returns the subject + HTML/text. sendMilestone1kPreview()
+ * sends it from the system mailbox to a single address (used by the admin
+ * "preview" button). Kept self-contained so the celebratory markup doesn't have
+ * to fit the standard transactional template.
+ */
+import { sendReplyEmailWithToken } from '@/lib/gmail';
+
+const PINK = '#ff0060';
+const PINK_DEEP = '#c8004d';
+const TEAL = '#73e3df';
+const INK = '#0f1115';
+
+// Where the "claim your prize" button points. Hayden is known; add Eric's address
+// to the cc when it's available (PRIZE_CC env override, comma-separated).
+const PRIZE_TO = 'hwoods@resihome.com';
+const PRIZE_CC = (process.env.MILESTONE_PRIZE_CC || 'eric').trim();
+
+function esc(s: string): string {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+export function buildMilestone1kEmail(opts: { recipientName?: string; count?: number } = {}): { subject: string; html: string; text: string } {
+  const name = (opts.recipientName || '').trim();
+  const greeting = name ? `Congratulations, ${esc(name)}!` : 'Congratulations!';
+  const count = (opts.count ?? 1000).toLocaleString();
+  const mailtoCc = /@/.test(PRIZE_CC) ? `&cc=${encodeURIComponent(PRIZE_CC)}` : '';
+  const prizeMailto = `mailto:${PRIZE_TO}?subject=${encodeURIComponent('My 1,000th Inspection Prize 🎉')}${mailtoCc}&body=${encodeURIComponent('Hi Hayden & Eric — I just hit 1,000 completed inspections in ResiWalk and would love to claim my prize!')}`;
+
+  const subject = `🎉 You did it — 1,000 inspections in ResiWalk!`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:${INK};">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f4f5f7;padding:28px 12px;"><tr><td align="center">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,0.10);">
+
+      <!-- Celebration header -->
+      <tr><td style="background:${PINK};background:linear-gradient(135deg,${PINK} 0%,${PINK_DEEP} 100%);padding:34px 24px 26px;text-align:center;">
+        <div style="font-size:34px;line-height:1;letter-spacing:2px;">🎉 🎊 🥳 🎊 🎉</div>
+        <div style="margin-top:14px;color:#ffffff;font-size:15px;font-weight:bold;letter-spacing:3px;text-transform:uppercase;opacity:.92;">Milestone Unlocked</div>
+        <div style="margin-top:6px;color:#ffffff;font-size:64px;font-weight:900;line-height:1;">${count}</div>
+        <div style="margin-top:6px;color:#ffffff;font-size:17px;font-weight:bold;opacity:.95;">Completed Inspections</div>
+      </td></tr>
+
+      <!-- Message -->
+      <tr><td style="padding:28px 30px 6px;">
+        <div style="font-size:22px;font-weight:800;color:${INK};">${greeting}</div>
+        <p style="font-size:15px;line-height:1.6;color:#3a3f47;margin:12px 0 0;">
+          You just crossed <strong>1,000 completed inspections</strong> in ResiWalk — a genuinely huge milestone.
+          That's a thousand homes walked, priced, and documented; a thousand reports your team could trust. Every
+          single one moved the work forward, and it adds up to something worth celebrating. 👏
+        </p>
+      </td></tr>
+
+      <!-- Prize callout -->
+      <tr><td style="padding:20px 30px 8px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ecfbfa;border:2px dashed ${TEAL};border-radius:14px;">
+          <tr><td style="padding:20px 22px;text-align:center;">
+            <div style="font-size:30px;line-height:1;">🎁</div>
+            <div style="margin-top:8px;font-size:18px;font-weight:800;color:${INK};">You've earned a special prize.</div>
+            <p style="font-size:14px;line-height:1.55;color:#37474a;margin:8px 0 16px;">
+              To claim it, email <strong>Hayden &amp; Eric</strong> — they've got something set aside just for you.
+            </p>
+            <a href="${prizeMailto}" style="display:inline-block;background:${PINK};color:#ffffff;text-decoration:none;font-weight:bold;font-size:15px;padding:13px 26px;border-radius:999px;">🏆 Email Hayden &amp; Eric to Claim</a>
+          </td></tr>
+        </table>
+      </td></tr>
+
+      <tr><td style="padding:14px 30px 30px;">
+        <p style="font-size:14px;line-height:1.6;color:#3a3f47;margin:0;">
+          Here's to the next thousand. Thank you for the care you put into every walk. 🚀
+        </p>
+        <p style="font-size:14px;line-height:1.6;color:#3a3f47;margin:14px 0 0;">— The ResiWalk Team</p>
+      </td></tr>
+
+      <tr><td style="padding:16px 24px;background:#faf7f8;text-align:center;font-size:11px;color:#8a8f98;border-top:1px solid #eee;">
+        Sent from ResiWalk · Celebrating 1,000 completed inspections
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`;
+
+  const text = [
+    '🎉 MILESTONE UNLOCKED 🎉',
+    '',
+    `${count} COMPLETED INSPECTIONS`,
+    '',
+    name ? `Congratulations, ${name}!` : 'Congratulations!',
+    '',
+    "You just crossed 1,000 completed inspections in ResiWalk — a genuinely huge milestone. A thousand homes walked, priced, and documented. That's worth celebrating. 👏",
+    '',
+    "🎁 You've earned a special prize. To claim it, email Hayden & Eric — they've got something set aside just for you.",
+    `   Email: ${PRIZE_TO}${/@/.test(PRIZE_CC) ? `, ${PRIZE_CC}` : ' (and Eric)'}`,
+    '',
+    "Here's to the next thousand. Thank you for the care you put into every walk. 🚀",
+    '— The ResiWalk Team',
+  ].join('\n');
+
+  return { subject, html, text };
+}
+
+/** Send the milestone email from the system mailbox to a single address (preview).
+ *  Never throws. */
+export async function sendMilestone1kPreview(to: string, recipientName?: string): Promise<{ sent: boolean; error?: string }> {
+  const refreshToken = process.env.SYSTEM_GMAIL_REFRESH_TOKEN || '';
+  const fromEmail = process.env.SYSTEM_GMAIL_FROM || '';
+  if (!refreshToken || !fromEmail) return { sent: false, error: 'SYSTEM_GMAIL_* not configured' };
+  const { subject, html, text } = buildMilestone1kEmail({ recipientName });
+  try {
+    return await sendReplyEmailWithToken({
+      refreshToken, fromEmail, fromName: process.env.SYSTEM_GMAIL_FROM_NAME || 'ResiWalk',
+      to: [to], subject, htmlBody: html, textBody: text,
+    });
+  } catch (e: any) {
+    return { sent: false, error: String(e?.message || e).slice(0, 160) };
+  }
+}
