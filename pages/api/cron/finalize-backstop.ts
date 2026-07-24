@@ -61,6 +61,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const ticketCap = all ? 50 : TICKET_FIXES_PER_RUN;
   const base = appBaseUrl();
 
+  // One-off repair (wrong-environment creates): ?unstamp=<inspectionId>:<ticketId>,...
+  // clears hbmm_ticket_id ONLY where it exactly matches the supplied (known-wrong)
+  // ticket id, so the sweep re-creates those tickets in the corrected environment.
+  // Any other value (a manual/correct stamp) is left untouched and reported.
+  if (typeof req.query.unstamp === 'string' && req.query.unstamp.trim()) {
+    const unstamped: { id: string; outcome: string }[] = [];
+    for (const pair of req.query.unstamp.split(',').map((x) => x.trim()).filter(Boolean)) {
+      const [iid, tid] = pair.split(':');
+      if (!/^\d+$/.test(iid || '') || !/^\d+$/.test(tid || '')) { unstamped.push({ id: pair, outcome: 'bad_pair' }); continue; }
+      try {
+        const cur = await readInspectionProps(iid, ['hbmm_ticket_id']).catch(() => null);
+        const have = String(cur?.hbmm_ticket_id || '').trim();
+        if (have !== tid) { unstamped.push({ id: iid, outcome: have ? `left_alone_(has_${have})` : 'already_empty' }); continue; }
+        await updateInspection(iid, { hbmm_ticket_id: '' });
+        unstamped.push({ id: iid, outcome: 'cleared' });
+      } catch (e: any) { unstamped.push({ id: iid, outcome: `error: ${String(e?.message || e).slice(0, 120)}` }); }
+    }
+    return res.status(200).json({ ok: true, unstamped });
+  }
+
   try {
     // ---- Sweep 1: pending-approval scopes with no master PDF -------------
     const pdfCandidates = await searchInspectionsMissingProp({
