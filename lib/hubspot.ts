@@ -3110,6 +3110,26 @@ export async function countInspectionsByStatus(q: InspectionQuery): Promise<Insp
   return out;
 }
 
+/** Total COMPLETED inspections across the whole portal — the milestone metric.
+ *  COMPLETED ONLY: matches status completed/complete and NOTHING else, so
+ *  cancelled ('cancelled'), submitted, pending_approval, scheduled, and
+ *  in_progress are all excluded from the count. Single lightweight search
+ *  (limit 1, reads `total`). Throws on failure so the caller skips the milestone
+ *  check rather than firing on a bad (0) count. */
+export async function countCompletedInspections(): Promise<number> {
+  const { inspection: typeId } = typeIds();
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+    method: 'POST',
+    body: JSON.stringify({
+      filterGroups: [{ filters: [{ propertyName: 'status', operator: 'IN', values: ['completed', 'complete', 'Completed', 'Complete'] }] }],
+      properties: ['hs_object_id'],
+      limit: 1,
+    }),
+  });
+  if (typeof resp.total !== 'number') throw new Error('completed count: no total in response');
+  return resp.total;
+}
+
 /** Count of CANCELLED inspections (excluded from the analytics snapshot, but
  *  retained as a number for a future cancellation-rate view). Best-effort. */
 export async function countInspectionsCancelled(): Promise<number> {

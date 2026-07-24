@@ -29,6 +29,7 @@ import {
   stampPropertyStatusAtCompletion,
   populateBillingFields,
 } from '@/lib/hubspot';
+import { celebrateInspectionMilestoneIfHit } from '@/lib/inspectionMilestones';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { resolveSections } from '@/lib/sections';
 import { bustInspectionsCache } from '@/pages/api/inspections';
@@ -389,6 +390,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         throw e;
       }
     }
+
+    // Inspection-count milestone (1k/2.5k/5k/10k) → celebrate the inspector.
+    // QC finalize rejects an already-completed record above, so this is always a
+    // first completion. Never throws; awaited so it runs before the freeze.
+    await celebrateInspectionMilestoneIfHit(id);
 
     // Overall failure comment — written separately (best-effort) so a not-yet-
     // provisioned qc_overall_note can never disturb the verdict/counts update

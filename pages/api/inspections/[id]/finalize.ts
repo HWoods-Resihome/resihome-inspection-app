@@ -33,6 +33,7 @@ import {
   stampChargebackImported,
 } from '@/lib/hubspot';
 import { buildQaAnswerProps } from '@/lib/answerProps';
+import { celebrateInspectionMilestoneIfHit } from '@/lib/inspectionMilestones';
 import { isFinalizeAdmin } from '@/lib/finalizeAccess';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { isInternalResolution } from '@/lib/vendors';
@@ -938,6 +939,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // AND freeze the property status for the historical record. Skipped for
     // regenerateOnly — it isn't a completion.
     if (!regenerateOnly) {
+      // Inspection-count milestone (1k/2.5k/5k/10k) → celebrate the inspector.
+      // Only on a FIRST completion (a re-finalize doesn't add to the count).
+      // Never throws; awaited so it runs before the function can freeze.
+      if (!isRefinalize) await celebrateInspectionMilestoneIfHit(id);
       // These five stamps are mutually independent (each reads its own source and
       // PATCHes disjoint properties — HubSpot PATCH merges), so run them
       // CONCURRENTLY instead of five sequential round-trips. Promise.all keeps the

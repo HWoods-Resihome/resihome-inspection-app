@@ -9,7 +9,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { sendMilestone1kPreview } from '@/lib/notifications/milestone1k';
+import { sendMilestoneEmail } from '@/lib/notifications/milestone1k';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -20,10 +20,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const to = typeof body.to === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.to.trim())
     ? body.to.trim() : 'hwoods@resihome.com';
   const name = typeof body.name === 'string' ? body.name.trim().slice(0, 80) : '';
+  const ALLOWED = [1000, 2500, 5000, 10000];
+  const count = ALLOWED.includes(Number(body.count)) ? Number(body.count) : 1000;
   try {
-    const r = await sendMilestone1kPreview(to, name);
+    const r = await sendMilestoneEmail(to, { count, recipientName: name });
     if (!r.sent) return res.status(502).json({ error: r.error || 'Send failed' });
-    return res.status(200).json({ sent: true, to });
+    return res.status(200).json({ sent: true, to, count });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
   }

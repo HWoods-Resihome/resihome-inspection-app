@@ -1,11 +1,11 @@
 /**
- * 1,000-completed-inspections milestone email — a celebratory, on-brand
- * congratulations with a call to email Hayden & Eric to claim a special prize.
+ * Inspection-milestone celebration email (1,000 / 2,500 / 5,000 / 10,000). Sent
+ * to the inspector who LOGGED the milestone inspection — a company-wide moment
+ * that lands on their walk — with a call to email Hayden & Eric for a prize.
  *
- * buildMilestone1kEmail() returns the subject + HTML/text. sendMilestone1kPreview()
- * sends it from the system mailbox to a single address (used by the admin
- * "preview" button). Kept self-contained so the celebratory markup doesn't have
- * to fit the standard transactional template.
+ * buildMilestoneEmail() returns the subject + HTML/text. sendMilestoneEmail()
+ * sends it from the system mailbox to one recipient (used by both the admin
+ * preview button and the live milestone trigger).
  */
 import { sendReplyEmailWithToken } from '@/lib/gmail';
 
@@ -14,23 +14,24 @@ const PINK_DEEP = '#c8004d';
 const TEAL = '#73e3df';
 const INK = '#0f1115';
 
-// Where the "claim your prize" button points. Hayden is known; add Eric's address
-// to the cc when it's available (PRIZE_CC env override, comma-separated).
-const PRIZE_TO = 'hwoods@resihome.com';
-const PRIZE_CC = (process.env.MILESTONE_PRIZE_CC || 'eric').trim();
+// Prize claims go to Hayden AND Eric (both on the To line). Overridable via env
+// (comma-separated) if the recipients ever change.
+const PRIZE_RECIPIENTS = (process.env.MILESTONE_PRIZE_TO || 'hwoods@resihome.com,eric.williams@resihome.com')
+  .split(',').map((s) => s.trim()).filter(Boolean);
 
 function esc(s: string): string {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-export function buildMilestone1kEmail(opts: { recipientName?: string; count?: number } = {}): { subject: string; html: string; text: string } {
+export function buildMilestoneEmail(opts: { count?: number; recipientName?: string } = {}): { subject: string; html: string; text: string } {
   const name = (opts.recipientName || '').trim();
   const greeting = name ? `Congratulations, ${esc(name)}!` : 'Congratulations!';
-  const count = (opts.count ?? 1000).toLocaleString();
-  const mailtoCc = /@/.test(PRIZE_CC) ? `&cc=${encodeURIComponent(PRIZE_CC)}` : '';
-  const prizeMailto = `mailto:${PRIZE_TO}?subject=${encodeURIComponent('My 1,000th Inspection Prize 🎉')}${mailtoCc}&body=${encodeURIComponent('Hi Hayden & Eric — I just hit 1,000 completed inspections in ResiWalk and would love to claim my prize!')}`;
+  const n = opts.count ?? 1000;
+  const count = n.toLocaleString();
+  const to = PRIZE_RECIPIENTS.join(',');
+  const prizeMailto = `mailto:${to}?subject=${encodeURIComponent(`My ${count}th Inspection Prize 🎉`)}&body=${encodeURIComponent(`Hi Hayden & Eric — I just logged ResiWalk's ${count}th completed inspection and would love to claim my prize!`)}`;
 
-  const subject = `🎉 You logged ResiWalk's 1,000th inspection!`;
+  const subject = `🎉 You logged ResiWalk's ${count}th inspection!`;
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:${INK};">
@@ -50,8 +51,8 @@ export function buildMilestone1kEmail(opts: { recipientName?: string; count?: nu
       <tr><td style="padding:28px 30px 6px;">
         <div style="font-size:22px;font-weight:800;color:${INK};">${greeting}</div>
         <p style="font-size:15px;line-height:1.6;color:#3a3f47;margin:12px 0 0;">
-          You just completed ResiWalk's <strong>1,000th inspection</strong> — the walk that pushed the whole team
-          past a thousand. Out of every inspection logged in ResiWalk, the milestone landed on <strong>yours</strong>,
+          You just completed ResiWalk's <strong>${count}th inspection</strong> — the walk that pushed the whole team
+          past ${count}. Out of every inspection logged in ResiWalk, the milestone landed on <strong>yours</strong>,
           and that's a moment worth celebrating. 👏
         </p>
       </td></tr>
@@ -61,7 +62,7 @@ export function buildMilestone1kEmail(opts: { recipientName?: string; count?: nu
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ecfbfa;border:2px dashed ${TEAL};border-radius:14px;">
           <tr><td style="padding:20px 22px;text-align:center;">
             <div style="font-size:30px;line-height:1;">🎁</div>
-            <div style="margin-top:8px;font-size:18px;font-weight:800;color:${INK};">Being the one to hit #1,000 comes with an extra prize.</div>
+            <div style="margin-top:8px;font-size:18px;font-weight:800;color:${INK};">Being the one to hit #${count} comes with an extra prize.</div>
             <p style="font-size:14px;line-height:1.55;color:#37474a;margin:8px 0 16px;">
               Email <strong>Hayden &amp; Eric</strong> to claim what's waiting for you.
             </p>
@@ -72,13 +73,13 @@ export function buildMilestone1kEmail(opts: { recipientName?: string; count?: nu
 
       <tr><td style="padding:14px 30px 30px;">
         <p style="font-size:14px;line-height:1.6;color:#3a3f47;margin:0;">
-          Here's to the next thousand — thanks for being the one to get us there. 🚀
+          Here's to the next milestone — thanks for being the one to get us there. 🚀
         </p>
         <p style="font-size:14px;line-height:1.6;color:#3a3f47;margin:14px 0 0;">— The ResiWalk Team</p>
       </td></tr>
 
       <tr><td style="padding:16px 24px;background:#faf7f8;text-align:center;font-size:11px;color:#8a8f98;border-top:1px solid #eee;">
-        Sent from ResiWalk · Celebrating 1,000 completed inspections
+        Sent from ResiWalk · Celebrating ${count} completed inspections
       </td></tr>
     </table>
   </td></tr></table>
@@ -91,25 +92,24 @@ export function buildMilestone1kEmail(opts: { recipientName?: string; count?: nu
     '',
     name ? `Congratulations, ${name}!` : 'Congratulations!',
     '',
-    "You just completed ResiWalk's 1,000th inspection — the walk that pushed the whole team past a thousand. Out of every inspection logged in ResiWalk, the milestone landed on yours. 👏",
+    `You just completed ResiWalk's ${count}th inspection — the walk that pushed the whole team past ${count}. Out of every inspection logged in ResiWalk, the milestone landed on yours. 👏`,
     '',
-    "🎁 Being the one to hit #1,000 comes with an extra prize. Email Hayden & Eric to claim what's waiting for you.",
-    `   Email: ${PRIZE_TO}${/@/.test(PRIZE_CC) ? `, ${PRIZE_CC}` : ' (and Eric)'}`,
+    `🎁 Being the one to hit #${count} comes with an extra prize. Email Hayden & Eric to claim what's waiting for you.`,
+    `   Email: ${PRIZE_RECIPIENTS.join(', ')}`,
     '',
-    "Here's to the next thousand — thanks for being the one to get us there. 🚀",
+    "Here's to the next milestone — thanks for being the one to get us there. 🚀",
     '— The ResiWalk Team',
   ].join('\n');
 
   return { subject, html, text };
 }
 
-/** Send the milestone email from the system mailbox to a single address (preview).
- *  Never throws. */
-export async function sendMilestone1kPreview(to: string, recipientName?: string): Promise<{ sent: boolean; error?: string }> {
+/** Send the milestone email from the system mailbox to one recipient. Never throws. */
+export async function sendMilestoneEmail(to: string, opts: { count?: number; recipientName?: string } = {}): Promise<{ sent: boolean; error?: string }> {
   const refreshToken = process.env.SYSTEM_GMAIL_REFRESH_TOKEN || '';
   const fromEmail = process.env.SYSTEM_GMAIL_FROM || '';
   if (!refreshToken || !fromEmail) return { sent: false, error: 'SYSTEM_GMAIL_* not configured' };
-  const { subject, html, text } = buildMilestone1kEmail({ recipientName });
+  const { subject, html, text } = buildMilestoneEmail(opts);
   try {
     return await sendReplyEmailWithToken({
       refreshToken, fromEmail, fromName: process.env.SYSTEM_GMAIL_FROM_NAME || 'ResiWalk',

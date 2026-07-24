@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields, readInspectionProps, stampRrqcResultOnProperty, fetchPropertyCommunityRrqcWalkEmail } from '@/lib/hubspot';
+import { celebrateInspectionMilestoneIfHit } from '@/lib/inspectionMilestones';
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { createComplianceTicketsOnSubmit } from '@/lib/complianceTickets';
 import { postListingPriceAlertOnSubmit } from '@/lib/listingPriceAlert';
@@ -170,6 +171,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!isRateCard) {
       await stampFirstCompleted(id, nowIso);
       await stampPropertyStatusAtCompletion(id);
+      // Inspection-count milestone (1k/2.5k/5k/10k) → celebrate the inspector.
+      // Awaited so it runs before the function freezes; never throws.
+      await celebrateInspectionMilestoneIfHit(id);
       // Freeze the listing snapshot (status/price/listed/MIR/move-in) too, so the
       // completed report shows the listing as it was at the time of inspection.
       await stampListingSnapshotAtCompletion(id);
