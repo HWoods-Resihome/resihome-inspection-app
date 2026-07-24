@@ -52,6 +52,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
   if (!authorized) return res.status(401).json({ error: 'Unauthorized' });
   const dryRun = req.query.dryRun === '1' || req.query.dry === '1';
+  // ?all=1 — manual catch-up mode: process the WHOLE candidate list in this one
+  // request instead of the cron's gentle 5-per-pass pace (used to clear the
+  // missed-ticket backlog after the API key restore). Ticket creates are a few
+  // seconds each, so 25-50 fit comfortably inside maxDuration; the PDF cap
+  // stays small because each regenerate can take ~60s.
+  const all = req.query.all === '1';
+  const ticketCap = all ? 50 : TICKET_FIXES_PER_RUN;
   const base = appBaseUrl();
 
   try {
@@ -84,7 +91,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const ticketResults: { id: string; outcome: string }[] = [];
     if (!dryRun) {
-      for (const c of ticketCandidates.slice(0, TICKET_FIXES_PER_RUN)) {
+      for (const c of ticketCandidates.slice(0, ticketCap)) {
         try {
           // Dedup: a finalize (or a previous sweep) may have created it since the search.
           const fresh = await readInspectionProps(c.id, ['hbmm_ticket_id']).catch(() => null);
