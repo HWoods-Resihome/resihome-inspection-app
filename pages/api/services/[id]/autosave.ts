@@ -21,6 +21,7 @@ import { serviceVisibleTo } from '@/lib/services/scope';
 import type { ServiceRecord } from '@/lib/services/model';
 import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
 import { isAllowedPhotoHost } from '@/lib/safeProxyFetch';
+import { sanitizeAnswerPhotos } from '@/lib/services/answerPhotos';
 
 const EDITABLE = new Set(['', 'estimated', 'assigned']);
 // Only ever store https URLs on an allowed photo host (a blob: draft is dead after
@@ -58,7 +59,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const answers = b.answers && typeof b.answers === 'object' ? b.answers : {};
     const props: Record<string, any> = {
       // NOTE: status is intentionally NOT set — a draft stays estimated/assigned.
-      answers_json: JSON.stringify(answers),
+      answers_json: JSON.stringify(sanitizeAnswerPhotos(answers)),
       before_photo_urls: cleanUrls(b.before).join('\n'),
       after_photo_urls: cleanUrls(b.after).join('\n'),
       pet_before_photo_urls: cleanUrls(b.petBefore).join('\n'),

@@ -114,7 +114,19 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         },
         aiVerdict: p.ai_verdict || '', aiNotes: p.ai_notes || '',
         reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: await reviewerDisplayName(p.reviewed_by),
-        answers: (() => { try { return JSON.parse(p.answers_json || '{}'); } catch { return {}; } })(),
+        // Parse answers, and defensively drop any non-hosted URL from per-question
+        // `<qid>__photos` arrays so a legacy blob:/ref: draft (from before the save
+        // was hardened) never renders as a broken image. New saves are already
+        // hosted-only server-side.
+        answers: (() => {
+          try {
+            const a = JSON.parse(p.answers_json || '{}');
+            for (const k of Object.keys(a)) {
+              if (k.endsWith('__photos') && Array.isArray(a[k])) a[k] = a[k].filter((u: any) => typeof u === 'string' && /^https?:\/\//i.test(u));
+            }
+            return a;
+          } catch { return {}; }
+        })(),
         before: splitUrls(p.before_photo_urls), after: splitUrls(p.after_photo_urls),
         petBefore: splitUrls(p.pet_before_photo_urls), petAfter: splitUrls(p.pet_after_photo_urls),
         isMaster: p.scope === 'community' && p.worktype === 'landscaping' && p.subtype === 'cut' && !String(p.master_service_id || '').trim() && !!String(p.covered_property_ids || '').trim(),
@@ -837,11 +849,26 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     initServiceSync();
     let alive = true;
     hasPendingSubmit(svc.id).then((p) => { if (alive) setPendingQueued(p); }).catch(() => {});
-    // When a queued photo finishes uploading, swap its draft blob: URL for the hosted URL.
+    // When a queued photo finishes uploading, swap its draft blob: URL for the
+    // hosted URL EVERYWHERE it can live — before/after/pet, bid photos, AND the
+    // per-question `<qid>__photos` arrays inside answers. Missing the answers case
+    // left a question photo (e.g. Grass height at arrival) stuck on a dead draft
+    // URL that then got submitted and rendered broken.
     const off = onServiceSync(({ url, draftUrl }) => {
       if (!draftUrl) return;
       const swap = (arr: string[]) => arr.map((u) => (u === draftUrl ? url : u));
-      setBefore(swap); setAfter(swap); setPetBefore(swap); setPetAfter(swap);
+      setBefore(swap); setAfter(swap); setPetBefore(swap); setPetAfter(swap); setBidPhotos(swap);
+      setAnswers((a) => {
+        let changed = false;
+        const next: Record<string, any> = { ...a };
+        for (const k of Object.keys(next)) {
+          if (k.endsWith('__photos') && Array.isArray(next[k]) && next[k].includes(draftUrl)) {
+            next[k] = next[k].map((u: string) => (u === draftUrl ? url : u));
+            changed = true;
+          }
+        }
+        return changed ? next : a;
+      });
     });
     return () => { alive = false; off(); };
   }, [svc.id]);

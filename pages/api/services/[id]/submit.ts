@@ -22,6 +22,7 @@ import { easternTodayISO } from '@/lib/services/time';
 import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
 import { DEFAULT_SERVICE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { isAllowedPhotoHost } from '@/lib/safeProxyFetch';
+import { sanitizeAnswerPhotos } from '@/lib/services/answerPhotos';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
 // the review runs inline the moment the work order is submitted.
@@ -72,7 +73,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const after = cleanUrls(b.after);
   const petBefore = cleanUrls(b.petBefore);
   const petAfter = cleanUrls(b.petAfter);
-  const answers = b.answers && typeof b.answers === 'object' ? b.answers : {};
+  // Per-question `<qid>__photos` arrays kept hosted-only — a blob:/ref: draft that
+  // never finished uploading must never be stored (it renders as a broken image,
+  // e.g. the "Grass height at arrival" shot).
+  const answers = sanitizeAnswerPhotos(b.answers && typeof b.answers === 'object' ? b.answers : {});
   // submittedAt comes from the client (server clock is fine too); ISO 8601.
   const submittedAt = typeof b.submittedAt === 'string' && b.submittedAt ? b.submittedAt : new Date().toISOString();
 
