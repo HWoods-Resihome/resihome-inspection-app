@@ -29,6 +29,7 @@ import { notifyServiceCompleted } from '@/lib/notifications/triggers';
 import { notifyServiceRejectedSlack } from '@/lib/services/serviceSlack';
 import { appBaseUrl } from '@/lib/notifications/send';
 import { easternTodayISO, addDaysISO } from '@/lib/services/time';
+import { waitUntil } from '@vercel/functions';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -130,12 +131,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Notify the vendor of the review outcome — EVERY decision (approve, modify,
     // reject), each with the vendor PDF attached. reject reads as "not approved /
     // no payment"; the reviewer's note is included so the vendor knows why.
-    await notifyServiceCompleted({
-      serviceId: id, vendorEmail: p.vendor_email, vendorName: p.vendor_name,
-      address: p.address_snapshot || p.service_name || 'your service', locality: p.locality_snapshot,
-      worktypeLabel: worktypeLabel(String(p.worktype || '')), subtypeLabel: subtypeLabel(String(p.worktype || ''), String(p.subtype || '')),
-      baseUrl: appBaseUrl(req), decision, reviewerNote: notes,
-    });
+    //
+    // DEFERRED via waitUntil: this renders the service PDF (fetch + downscale every
+    // photo, then react-pdf) and sends the email — seconds of work that the
+    // reviewer's screen transition should NOT wait on. The order is already patched
+    // to Completed above and the response below doesn't depend on the email, so we
+    // return immediately and let the platform finish the notification in the
+    // background (it re-reads the now-completed record, so the PDF is up to date).
+    waitUntil(
+      notifyServiceCompleted({
+        serviceId: id, vendorEmail: p.vendor_email, vendorName: p.vendor_name,
+        address: p.address_snapshot || p.service_name || 'your service', locality: p.locality_snapshot,
+        worktypeLabel: worktypeLabel(String(p.worktype || '')), subtypeLabel: subtypeLabel(String(p.worktype || ''), String(p.subtype || '')),
+        baseUrl: appBaseUrl(req), decision, reviewerNote: notes,
+      }).catch((e) => console.warn('[services/review-decision] vendor notify failed:', e?.message || e)),
+    );
 
     // Re-Issue: the reviewer wants the work redone. Spin up a fresh service with
     // the SAME requirements (worktype/subtype/description), property/community,
