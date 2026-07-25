@@ -22,69 +22,15 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import {
-  fetchInspectionById,
-  fetchQuestionsForTemplate,
-  fetchAnswersForInspection,
-  searchInspectionsPage,
-} from '@/lib/hubspot';
+import { fetchInspectionById, searchInspectionsPage } from '@/lib/hubspot';
 import type { Question } from '@/lib/types';
+import { questionMapForTemplate, photoGapsForInspection, type PhotoGap } from '@/lib/photoGaps';
 
 export const config = { maxDuration: 300 };
 
-// N/A detection — kept server-local (mirrors QuestionItem.isNA) so this route
-// doesn't pull a client component into an API bundle.
-function isNA(opt: string): boolean {
-  return /^(n\/?a|n\.a\.?|not applicable)\b/.test((opt || '').trim().toLowerCase());
-}
-
-interface Gap {
-  questionIdExternal: string;
-  questionText: string;
-  section: string;
-  location: string;
-  answerValue: string;
-}
-
-// Per-template question map (only ~6 templates; cached across one request so a
-// scan doesn't re-fetch the same template's questions per inspection).
-async function questionMapFor(
-  templateType: string,
-  cache: Map<string, Map<string, Question>>,
-): Promise<Map<string, Question>> {
-  const hit = cache.get(templateType);
-  if (hit) return hit;
-  const { questions } = await fetchQuestionsForTemplate(templateType, { includeDisabled: true })
-    .catch(() => ({ questions: [] as Question[] }));
-  const map = new Map<string, Question>();
-  for (const q of questions) map.set(q.questionIdExternal, q);
-  cache.set(templateType, map);
-  return map;
-}
-
-async function gapsFor(inspectionId: string, qMap: Map<string, Question>): Promise<Gap[]> {
-  const answers = await fetchAnswersForInspection(inspectionId).catch(() => []);
-  const gaps: Gap[] = [];
-  for (const a of answers) {
-    const q = qMap.get(a.questionIdExternal);
-    if (!q) continue;
-    if ((a.photoUrls?.length || 0) > 0) continue; // has a photo → not a gap
-    // Mirror the submit gate: a required photo_only question with no photo, OR a
-    // requires-photo question that's answered (non-N/A) with no photo.
-    const photoOnlyGap = q.isRequired && q.responseType === 'photo_only';
-    const requiresPhotoGap = q.requiresPhoto && !!a.answerValue && !isNA(a.answerValue);
-    if (photoOnlyGap || requiresPhotoGap) {
-      gaps.push({
-        questionIdExternal: a.questionIdExternal,
-        questionText: q.questionText,
-        section: a.section || q.section || '',
-        location: a.location || '',
-        answerValue: a.answerValue || '',
-      });
-    }
-  }
-  return gaps;
-}
+type Gap = PhotoGap;
+const questionMapFor = questionMapForTemplate;
+const gapsFor = photoGapsForInspection;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Auth: admin session, or the CRON bearer for scheduled/automated scans.

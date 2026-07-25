@@ -3513,10 +3513,17 @@ export function RateCardForm(props: RateCardFormProps) {
         );
         return;
       }
+      // The photos are SAVED on the device and durably queued — background sync
+      // attaches them to the report automatically once they upload, even after the
+      // inspection is completed. Don't frame it as "lost": the only real loss is if
+      // the inspector never reopens the app on signal, so tell them to keep it open.
+      const it = pendingPhotos === 1 ? 'it' : 'them';
+      const isAre = pendingPhotos === 1 ? 'is' : 'are';
       const proceed = await dialog.confirm(
-        `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} keep${pendingPhotos === 1 ? 's' : ''} failing to upload (check your signal). ` +
-        `If you submit now ${pendingPhotos === 1 ? 'it' : 'they'} will NOT be attached to the report. Submit without ${pendingPhotos === 1 ? 'it' : 'them'}?`,
-        { confirmLabel: 'Submit without photos', cancelLabel: 'Keep trying' }
+        `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} ${isAre} still uploading and your signal is weak. ` +
+        `You can submit now — ${it === 'it' ? 'it’s' : 'they’re'} saved on your device and will attach to the report automatically once ${it} finish uploading. ` +
+        `IMPORTANT: keep this app OPEN (or reopen it on wifi/signal soon) until the “Syncing…” bar clears — if you never reopen the app, ${it} won’t reach the report.`,
+        { confirmLabel: 'Submit & keep uploading', cancelLabel: 'Keep trying' }
       );
       if (!proceed) return;
     }

@@ -68,6 +68,9 @@
     },
     "pages/api/cron/finalize-backstop.ts": {
       "maxDuration": 300
+    },
+    "pages/api/cron/photo-gap-sweep.ts": {
+      "maxDuration": 300
     }
   },
   "crons": [
@@ -134,6 +137,10 @@
     {
       "path": "/api/cron/finalize-backstop",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/photo-gap-sweep",
+      "schedule": "0 14 * * *"
     }
   ]
 }
