@@ -201,7 +201,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
   const [community, setCommunity] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [pastDueOnly, setPastDueOnly] = useState(false);
-  const [sortField, setSortField] = useState<SortField>(isVendor ? 'status' : 'due');
+  const [sortField, setSortField] = useState<SortField>('due');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
@@ -444,8 +444,10 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
         if (Array.isArray(s.community)) setCommunity(s.community);
         if (typeof s.search === 'string') setSearch(s.search);
         if (typeof s.pastDueOnly === 'boolean') setPastDueOnly(s.pastDueOnly);
-        if (typeof s.sortField === 'string') setSortField(s.sortField);
-        if (s.sortDir === 'asc' || s.sortDir === 'desc') setSortDir(s.sortDir);
+        // Vendors always land sorted by due date ascending — don't restore a
+        // prior sort for them (mirrors the All Open / collapsed-panel default).
+        if (!isVendor && typeof s.sortField === 'string') setSortField(s.sortField);
+        if (!isVendor && (s.sortDir === 'asc' || s.sortDir === 'desc')) setSortDir(s.sortDir);
         if (typeof s.pageSize === 'number') setPageSize(s.pageSize);
         if (!isVendor && typeof s.filtersOpen === 'boolean') setFiltersOpen(s.filtersOpen);
       }
