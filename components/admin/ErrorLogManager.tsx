@@ -219,6 +219,34 @@ export function ErrorLogManager() {
                         <td className="py-2 pr-3 text-gray-700 whitespace-nowrap">{tmpl || <span className="text-gray-400">—</span>}</td>
                         <td className="py-2 pr-3 text-gray-800">
                           <div>{e.message}</div>
+                          {/* Raw upstream detail — the actual HubSpot rejection (which
+                              property/value failed) behind a sanitized "Upstream request
+                              failed (400)". Captured server-side; surfaced here so a 400
+                              is diagnosable at a glance instead of opaque. */}
+                          {e.meta && typeof (e.meta as any).detail === 'string' && (e.meta as any).detail && (
+                            <div className="mt-0.5 text-[11px] text-rose-700 break-all font-mono whitespace-pre-wrap">{String((e.meta as any).detail)}</div>
+                          )}
+                          {/* Other diagnostic meta (property/status the action was on).
+                              stack is rendered separately (below) — it's long. */}
+                          {e.meta && (() => {
+                            const skip = new Set(['detail', 'stack', 'storedInspectorEmail']);
+                            const bits = Object.entries(e.meta as Record<string, unknown>)
+                              .filter(([k, v]) => !skip.has(k) && v != null && v !== '')
+                              .map(([k, v]) => `${k}: ${String(v)}`);
+                            return bits.length > 0 ? (
+                              <div className="mt-0.5 text-[11px] text-gray-500 break-all">{bits.join(' · ')}</div>
+                            ) : null;
+                          })()}
+                          {/* The route the crash happened on — narrows a client error to a screen. */}
+                          {e.url && <div className="mt-0.5 text-[11px] text-gray-400 break-all">{e.url}</div>}
+                          {/* Full client stack (collapsed) — with source maps the top frame
+                              maps straight to the file/line of a minified crash. */}
+                          {e.meta && typeof (e.meta as any).stack === 'string' && (e.meta as any).stack && (
+                            <details className="mt-0.5">
+                              <summary className="text-[11px] text-gray-500 cursor-pointer select-none">stack</summary>
+                              <pre className="mt-1 text-[10.5px] text-gray-600 bg-gray-50 border border-gray-200 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">{String((e.meta as any).stack)}</pre>
+                            </details>
+                          )}
                           {(e.inspectionId || stored) && (
                             <div className="mt-0.5 text-[11px] text-gray-500">
                               {e.inspectionId && <a href={`/inspection/${e.inspectionId}`} className="text-brand underline break-all" target="_blank" rel="noreferrer">{e.inspectionId}</a>}
