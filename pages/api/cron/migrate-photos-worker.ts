@@ -5,6 +5,7 @@
  * Vercel attaches Authorization: Bearer $CRON_SECRET; we require it.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { reqOriginOf } from '@/lib/appUrl';
 import { readPhotoMigrationState, writePhotoMigrationState } from '@/lib/hubspot';
 import { kickWorker, type PhotoMigrationState } from '@/lib/photoMigrationJob';
 
@@ -39,9 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // the in-process self-kick is flaky. 120s > max batch time avoids double-runners.
   if (!stale) return res.status(200).json({ resumed: false, reason: 'worker active' });
 
-  const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
-  const origin = host ? `${proto}://${host}` : '';
+  const origin = reqOriginOf(req);
   await kickWorker(origin, secret);
   return res.status(200).json({ resumed: true });
 }

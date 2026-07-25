@@ -15,6 +15,7 @@ import { recordAuditEvent } from '@/lib/auditLog';
 import { templateLabel } from '@/lib/templateLabels';
 import { notifyInspectionCompleted } from '@/lib/notifications/triggers';
 import { appBaseUrl } from '@/lib/notifications/send';
+import { reqOriginOf } from '@/lib/appUrl';
 
 /**
  * Finalize an existing inspection. All answers should already be saved via
@@ -211,9 +212,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // "Evaluate Listing Price", post the property + active-listing price +
         // RentCast comps to Slack. Best-effort; gated per inspection.
         try {
-          const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
-          const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-          const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
+          const baseUrl = reqOriginOf(req) || undefined;
           const alert = await postListingPriceAlertOnSubmit(
             {
               recordId: id,
@@ -236,9 +235,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // PPW-dispatch channel so a cut can be scheduled. Best-effort; gated per
         // inspection (admin table key 'ppw_grass_fail').
         try {
-          const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
-          const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-          const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
+          const baseUrl = reqOriginOf(req) || undefined;
           const grass = await postGrassFailAlertOnSubmit(
             {
               recordId: id,
@@ -265,9 +262,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // re-submit). Best-effort — never blocks submission.
     try {
       const cAnswers = await fetchAnswersForInspection(id);
-      const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
-      const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-      const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
+      const baseUrl = reqOriginOf(req) || undefined;
       const summary = await createComplianceTicketsOnSubmit(
         {
           recordId: id,
@@ -306,9 +301,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // Own try so a Slack hiccup never masks the stamp result. Gated per
         // inspection (admin table key 'ppw_pool_fail').
         try {
-          const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
-          const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-          const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
+          const baseUrl = reqOriginOf(req) || undefined;
           const poolAlert = await postPoolFailAlertOnSubmit(
             {
               recordId: id,
@@ -380,9 +373,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // a pending-approval scope. Best-effort: a failure never blocks the submit
       // (the PDFs can still be regenerated at finalize or via Admin Flows).
       try {
-        const host = req.headers['x-forwarded-host'] || req.headers.host;
-        const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-        if (host) {
+        const origin = reqOriginOf(req);
+        if (origin) {
           // BOUND this self-call so it can never starve the Slack post below. It's
           // an awaited fetch to finalize (which downloads + embeds + downscales
           // photos and is capped at 60s); with no timeout a hung/slow finalize
@@ -393,7 +385,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const ctrl = new AbortController();
           const to = setTimeout(() => ctrl.abort(), 75000);
           try {
-            const r = await fetch(`${proto}://${host}/api/inspections/${id}/finalize`, {
+            const r = await fetch(`${origin}/api/inspections/${id}/finalize`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', cookie: req.headers.cookie || '' },
               body: JSON.stringify({ regenerateOnly: true }),

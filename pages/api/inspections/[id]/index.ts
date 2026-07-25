@@ -16,6 +16,7 @@ import {
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { buildShortLink } from '@/lib/shortLinks';
+import { reqOriginOf } from '@/lib/appUrl';
 import { externalAccessDenial, isExternalEmail } from '@/lib/userAccess';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { recordErrorEvent } from '@/lib/errorLog';
@@ -116,9 +117,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // PDFs this inspection has — works for ALL templates: Rate Card
       // (master/chargeback/xlsx/vendors) and the single report PDF used by
       // question templates + QC reinspect. The client uses these for downloads.
-      const shareHost = req.headers['x-forwarded-host'] || req.headers.host || '';
-      const shareProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-      const shareBase = shareHost ? `${shareProto}://${shareHost}` : '';
+      const shareBase = reqOriginOf(req);
       const insp = data.inspection;
       const vendors: Record<string, string> = {};
       if (insp.pdfVendorUrlsJson) {

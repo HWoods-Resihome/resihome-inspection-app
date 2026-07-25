@@ -37,6 +37,7 @@ import { bustInspectionsCache } from '@/pages/api/inspections';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
 import { buildShortLink } from '@/lib/shortLinks';
+import { reqOriginOf } from '@/lib/appUrl';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
 
 export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
@@ -328,9 +329,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Photos in the QC PDF link to the browsable in-app gallery too.
     {
-      const ghost = req.headers['x-forwarded-host'] || req.headers.host || '';
-      const gproto = (req.headers['x-forwarded-proto'] as string) || 'https';
-      const gorigin = ghost ? `${gproto}://${ghost}` : '';
+      const gorigin = reqOriginOf(req);
       if (gorigin) (ctx as any).photoGalleryBase = buildShortLink(gorigin, id, 'photos');
     }
     const pdfBuf = await renderQcPdf(ctx);
@@ -424,10 +423,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // best-effort write so a missing link_* property never disturbs the QC
     // update/fallback above. Run scripts/short_links to create the properties.
     try {
-      const qcHost = req.headers['x-forwarded-host'] || req.headers.host || '';
-      const qcProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-      if (qcHost) {
-        const qcBase = `${qcProto}://${qcHost}`;
+      const qcBase = reqOriginOf(req);
+      if (qcBase) {
         await updateInspection(id, {
           link_report: buildShortLink(qcBase, id, 'report'),
           link_master: buildShortLink(qcBase, id, 'master'),
@@ -454,9 +451,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // completion. The terminal-state guard above means this only fires on a first
     // completion (a reopen → re-finalize legitimately re-sends, like the others).
     try {
-      const emHost = req.headers['x-forwarded-host'] || req.headers.host || '';
-      const emProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-      if (emHost) {
+      const emBase = reqOriginOf(req);
+      if (emBase) {
         await notifyInspectionCompleted({
           inspectionId: id,
           inspectorEmail: inspection.inspectorEmail,
@@ -464,7 +460,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           address: ctx.propertyName,
           pdfUrl,
           attachmentBuffer: pdfBuf,
-          baseUrl: `${emProto}://${emHost}`,
+          baseUrl: emBase,
         });
       }
     } catch (e) {

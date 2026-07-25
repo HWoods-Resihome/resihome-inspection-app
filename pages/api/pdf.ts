@@ -5,6 +5,7 @@ import React from 'react';
 import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
 import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection, readInspectionProps, fetchInspectionById, fetchPropertyCommunityRrqcWalkEmail } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
+import { reqOriginOf } from '@/lib/appUrl';
 import { externalOwnedWriteDenial } from '@/lib/inspectionGuard';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
 import { getPosterUrl } from '@/lib/media';
@@ -181,9 +182,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       triggeredValues,
       embeddedByUrl,
       photoGalleryBase: (() => {
-        const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-        const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-        return host ? buildShortLink(`${proto}://${host}`, body.inspectionRecordId, 'photos') : undefined;
+        const origin = reqOriginOf(req);
+        return origin ? buildShortLink(origin, body.inspectionRecordId, 'photos') : undefined;
       })(),
     };
 
@@ -220,11 +220,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Store the clean short link (resolves to this PDF) so the record + UI show
     // a tidy URL. Best-effort: skip silently if the property doesn't exist yet.
     try {
-      const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-      const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-      if (host) {
+      const origin = reqOriginOf(req);
+      if (origin) {
         await updateInspection(body.inspectionRecordId, {
-          link_report: buildShortLink(`${proto}://${host}`, body.inspectionRecordId, 'report'),
+          link_report: buildShortLink(origin, body.inspectionRecordId, 'report'),
         });
       }
     } catch (e) {

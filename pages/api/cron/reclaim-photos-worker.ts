@@ -5,6 +5,7 @@
  * Authorization: Bearer $CRON_SECRET. Mirrors migrate-photos-worker.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { reqOriginOf } from '@/lib/appUrl';
 import { readPhotoReclaimState, writePhotoReclaimState } from '@/lib/hubspot';
 import { kickReclaimWorker, type PhotoReclaimState } from '@/lib/photoReclaimJob';
 
@@ -30,9 +31,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
   if (!stale) return res.status(200).json({ resumed: false, reason: 'worker active' });
 
-  const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
-  const origin = host ? `${proto}://${host}` : '';
+  const origin = reqOriginOf(req);
   await kickReclaimWorker(origin, secret);
   return res.status(200).json({ resumed: true });
 }

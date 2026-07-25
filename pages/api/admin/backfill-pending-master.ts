@@ -12,6 +12,7 @@
  * `resume` URL when more remain. Idempotent.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { reqOriginOf } from '@/lib/appUrl';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { fetchInspections, readInspectionProps } from '@/lib/hubspot';
@@ -29,10 +30,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
-  const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-  if (!host) return res.status(500).json({ error: 'Could not resolve request host.' });
-  const origin = `${proto}://${host}`;
+  const origin = reqOriginOf(req);
+  if (!origin) return res.status(500).json({ error: 'Could not resolve request host.' });
 
   const startIdx = Math.max(0, Number(req.query.after) || 0);
   const deadline = Date.now() + 250_000;

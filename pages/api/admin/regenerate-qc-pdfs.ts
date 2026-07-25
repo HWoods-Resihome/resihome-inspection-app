@@ -37,6 +37,7 @@ import { resolveSections } from '@/lib/sections';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
 import { buildShortLink } from '@/lib/shortLinks';
+import { reqOriginOf } from '@/lib/appUrl';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
 
 const QC_TEMPLATE = 'pm_turn_reinspect_qc';
@@ -241,9 +242,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
   if (!(await isAppAdmin(session.email))) return res.status(403).json({ error: 'Admin only.' });
 
-  const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-  const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-  const origin = host ? `${proto}://${host}` : undefined;
+  const origin = reqOriginOf(req) || undefined;
 
   try {
     const id = typeof req.query.id === 'string' ? req.query.id : '';

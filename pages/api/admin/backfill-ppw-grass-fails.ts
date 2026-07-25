@@ -17,6 +17,7 @@
  * 200), ?after=<n> to resume. Only leasing_agent_1099_property_inspection.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { reqOriginOf } from '@/lib/appUrl';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { fetchInspections, fetchAnswersForInspection } from '@/lib/hubspot';
@@ -51,9 +52,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 200));
   const deadline = Date.now() + 250_000;
 
-  const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
-  const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-  const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
+  const baseUrl = reqOriginOf(req) || undefined;
 
   try {
     const all = await fetchInspections();

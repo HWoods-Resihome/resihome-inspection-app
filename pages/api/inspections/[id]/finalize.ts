@@ -61,6 +61,7 @@ import { enqueueTicketEnforcement } from '@/lib/ticketEnforceQueue';
 import { vendorTicketKind } from '@/lib/vendors';
 import { sendNotificationEmail, appBaseUrl } from '@/lib/notifications/send';
 import { buildShortLink } from '@/lib/shortLinks';
+import { reqOriginOf } from '@/lib/appUrl';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
 import { summarizeFinalChecklist, finalChecklistPhotos, finalChecklistAnswerRecords, fcMissingLineCodes, fcSmartHomeStamps, fcPoolStamps, type FcAnswers, type FcCompletionCtx, type FcSummaryGroup } from '@/lib/finalChecklist';
@@ -599,9 +600,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Signed gallery base so every PDF's photos link to a browsable in-app
     // gallery (left/right across all the inspection's photos). Computed from the
     // request origin here (the later shareBase is built after rendering).
-    const galleryHost = req.headers['x-forwarded-host'] || req.headers.host || '';
-    const galleryProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-    const galleryOrigin = galleryHost ? `${galleryProto}://${galleryHost}` : '';
+    const galleryOrigin = reqOriginOf(req);
     const photoGalleryBase = galleryOrigin ? buildShortLink(galleryOrigin, id, 'photos') : undefined;
 
     // Listing line for the header (status · price · listed · Move-In). Prefer the

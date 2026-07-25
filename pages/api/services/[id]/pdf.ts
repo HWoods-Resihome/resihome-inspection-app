@@ -8,6 +8,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { renderServicePdfBuffer } from '@/lib/servicePdfRender';
+import { reqOriginOf } from '@/lib/appUrl';
 
 export const config = { maxDuration: 60 };
 
@@ -22,7 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // (shows Client Cost) is internal-only — vendors never see client pricing.
   const internal = isInternalEmail(session?.email);
   const variant: 'vendor' | 'client' = req.query.variant === 'client' && internal ? 'client' : 'vendor';
-  const baseUrl = `${(req.headers['x-forwarded-proto'] as string) || 'https'}://${req.headers.host || ''}`;
+  const baseUrl = reqOriginOf(req);
 
   try {
     const buffer = await renderServicePdfBuffer(id, { variant, baseUrl, internal });

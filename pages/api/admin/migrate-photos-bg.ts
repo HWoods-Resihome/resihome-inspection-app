@@ -11,18 +11,13 @@
  * the next, and an hourly cron watchdog resumes it if a link dies.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { reqOriginOf as originOf } from '@/lib/appUrl';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { readPhotoMigrationState, writePhotoMigrationState } from '@/lib/hubspot';
 import { freshState, kickWorker, runMigrationWorker, type PhotoMigrationState } from '@/lib/photoMigrationJob';
 
 export const config = { maxDuration: 300 };
-
-function originOf(req: NextApiRequest): string {
-  const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
-  return host ? `${proto}://${host}` : '';
-}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const action = String(req.query.action || (req.method === 'GET' ? 'status' : '')).toLowerCase();
