@@ -55,7 +55,10 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'region', label: 'Region' }, { value: 'community', label: 'Community' },
   { value: 'status', label: 'Status' },
 ];
-const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'pending', 'assigned', 'submitted', 'review'];
+// "All Open" / Total Open EXCLUDE pending — a pending order is held (not yet
+// actionable), surfaced only under its own Pending chip. (Server-side dup-
+// prevention / stop-cancel still treat pending as open; that's separate.)
+const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'review'];
 
 // Service card with press-and-hold to cancel (internal only, live records) —
 // mirrors the inspection card's long-press. A ~500ms hold prompts to cancel; a
@@ -182,23 +185,9 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
   // keeps its fixed reference date). Strict "<" so a service due TODAY is still
   // on-time — it only goes red once at least a day past due.
   const todayISO = useMemo(() => easternTodayISO(), []);
-  // Region filter options derived from the live services (was SAMPLE_REGIONS).
-  const regionOptions = useMemo(() => Array.from(new Set(services.map((s) => s.region).filter(Boolean))).sort(), [services]);
-  // Community filter options — the distinct community names present in the list.
-  const communityOptions = useMemo(() => Array.from(new Set(services.map((s) => s.community || '').filter(Boolean))).sort(), [services]);
-  // Type + Vendor options are ALSO derived from the loaded services (like Region /
-  // Community) — so each dropdown only offers values that actually appear in the
-  // list, not the full worktype catalog or the entire approved-vendor roster.
-  const worktypeOptions = useMemo(() => {
-    const present = new Set(services.map((s) => s.worktype).filter(Boolean));
-    return WORKTYPES.filter((w) => present.has(w.id)).map((w) => ({ value: w.id, label: w.label }));
-  }, [services]);
-  const vendorFilterOptions = useMemo(() => {
-    const names = Array.from(new Set(services.map((s) => s.vendor).filter(Boolean) as string[])).sort();
-    const opts = names.map((n) => ({ value: n, label: n }));
-    if (services.some((s) => !s.vendor)) opts.push({ value: '—', label: 'Unassigned' });
-    return opts;
-  }, [services]);
+  // Filter dropdown options are computed below (see facetOptions) — faceted, so
+  // each dropdown offers only values present under the current status chip + the
+  // OTHER active filters.
   // 'all' = everything (incl. completed); 'all_open' = everything except completed.
   // Tapping the All chip cycles between the two.
   // Vendors land on all OPEN services sorted by status (Assigned first); everyone
@@ -336,18 +325,29 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
     finally { setActionBusy(false); }
   };
 
-  // Scope (type/vendor/region/search) drives the summary bubbles; the status chip
-  // + Past-Due toggle then drill the list within that scope.
-  const scoped = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return servicesView.filter((s) =>
-      (worktype.length === 0 || worktype.includes(s.worktype)) &&
-      (vendor.length === 0 || vendor.includes(s.vendor || '—')) &&
-      (region.length === 0 || region.includes(s.region)) &&
-      (community.length === 0 || community.includes(s.community || '')) &&
-      (!q || `${s.address} ${s.locality} ${s.community || ''} ${s.vendor || ''} ${worktypeLabel(s.worktype)} ${subtypeLabel(s.worktype, s.subtype)} ${s.portfolio} ${s.id}`.toLowerCase().includes(q))
-    );
-  }, [worktype, vendor, region, community, search, servicesView]);
+  // Shared filter predicates — reused by the list, the counts, AND the faceted
+  // filter dropdowns (each dropdown offers only values present under the OTHER
+  // active filters + the current status chip).
+  const q = search.trim().toLowerCase();
+  const mWork = (s: ServiceRecord) => worktype.length === 0 || worktype.includes(s.worktype);
+  const mVendor = (s: ServiceRecord) => vendor.length === 0 || vendor.includes(s.vendor || '—');
+  const mRegion = (s: ServiceRecord) => region.length === 0 || region.includes(s.region);
+  const mComm = (s: ServiceRecord) => community.length === 0 || community.includes(s.community || '');
+  const mSearch = (s: ServiceRecord) => !q || `${s.address} ${s.locality} ${s.community || ''} ${s.vendor || ''} ${worktypeLabel(s.worktype)} ${subtypeLabel(s.worktype, s.subtype)} ${s.portfolio} ${s.id}`.toLowerCase().includes(q);
+  // Status chip + Past-Due toggle (canceled always excluded).
+  const mStatus = (s: ServiceRecord) => {
+    if (s.status === 'canceled') return false;
+    if (pastDueOnly) return OPEN_STATUSES.includes(s.status) && !!s.dueDate && s.dueDate < todayISO;
+    if (status === 'all_open') return OPEN_STATUSES.includes(s.status);
+    if (status === 'all') return true;
+    return s.status === status;
+  };
+
+  // Scope (type/vendor/region/community/search) drives the summary bubbles; the
+  // status chip + Past-Due toggle then drill the list within that scope.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const scoped = useMemo(() => servicesView.filter((s) => mWork(s) && mVendor(s) && mRegion(s) && mComm(s) && mSearch(s)),
+    [worktype, vendor, region, community, search, servicesView]);
 
   const summary = useMemo(() => {
     const open = scoped.filter((s) => OPEN_STATUSES.includes(s.status));
@@ -369,11 +369,34 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
     return c;
   }, [scoped]);
 
+  // Faceted filter options: each dropdown lists only the values present among the
+  // services matching the CURRENT status chip + the OTHER active filters (search
+  // applies to all). So picking "Assigned" then opening Region shows only regions
+  // that have assigned services — and likewise for every filter.
+  const facetOptions = useMemo(() => {
+    const regions = new Set<string>(); const comms = new Set<string>(); const works = new Set<string>(); const vendors = new Set<string>();
+    let hasUnassigned = false;
+    for (const s of servicesView) {
+      if (!mSearch(s) || !mStatus(s)) continue;
+      if (mWork(s) && mVendor(s) && mComm(s) && s.region) regions.add(s.region);
+      if (mWork(s) && mVendor(s) && mRegion(s) && s.community) comms.add(s.community);
+      if (mVendor(s) && mRegion(s) && mComm(s) && s.worktype) works.add(s.worktype);
+      if (mWork(s) && mRegion(s) && mComm(s)) { if (s.vendor) vendors.add(s.vendor); else hasUnassigned = true; }
+    }
+    const vendorOpts = Array.from(vendors).sort().map((n) => ({ value: n, label: n }));
+    if (hasUnassigned) vendorOpts.push({ value: '—', label: 'Unassigned' });
+    return {
+      regionOptions: Array.from(regions).sort(),
+      communityOptions: Array.from(comms).sort(),
+      worktypeOptions: WORKTYPES.filter((w) => works.has(w.id)).map((w) => ({ value: w.id, label: w.label })),
+      vendorFilterOptions: vendorOpts,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [servicesView, status, pastDueOnly, todayISO, worktype, vendor, region, community, search]);
+  const { regionOptions, communityOptions, worktypeOptions, vendorFilterOptions } = facetOptions;
+
   const rows = useMemo(() => {
-    let list = scoped.filter((s) => s.status !== 'canceled');
-    if (pastDueOnly) list = list.filter((s) => OPEN_STATUSES.includes(s.status) && !!s.dueDate && s.dueDate < todayISO);
-    else if (status === 'all_open') list = list.filter((s) => OPEN_STATUSES.includes(s.status));
-    else if (status !== 'all') list = list.filter((s) => s.status === status);
+    const list = scoped.filter(mStatus);
     const dir = sortDir === 'asc' ? 1 : -1;
     const key = (s: typeof list[number]) => ({
       due: s.dueDate, updated: s.updatedAt || s.completedAt || s.estimatedAt || '',
@@ -382,6 +405,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
       region: s.region.toLowerCase(), community: (s.community || '~').toLowerCase(),
     }[sortField]);
     return [...list].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * dir);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scoped, status, pastDueOnly, sortField, sortDir]);
 
   const visibleRows = useMemo(() => rows.filter((s) => !cancelledIds.has(s.id)), [rows, cancelledIds]);
@@ -411,7 +435,9 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
       const raw = sessionStorage.getItem(LIST_KEY);
       if (raw) {
         const s = JSON.parse(raw);
-        if (typeof s.status === 'string') setStatus(s.status);
+        // Vendors ALWAYS land on All Open with the filters collapsed — never
+        // restore a prior status chip or an expanded filter panel for them.
+        if (!isVendor && typeof s.status === 'string') setStatus(s.status);
         if (Array.isArray(s.worktype)) setWorktype(s.worktype);
         if (Array.isArray(s.vendor)) setVendor(s.vendor);
         if (Array.isArray(s.region)) setRegion(s.region);
@@ -421,7 +447,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
         if (typeof s.sortField === 'string') setSortField(s.sortField);
         if (s.sortDir === 'asc' || s.sortDir === 'desc') setSortDir(s.sortDir);
         if (typeof s.pageSize === 'number') setPageSize(s.pageSize);
-        if (typeof s.filtersOpen === 'boolean') setFiltersOpen(s.filtersOpen);
+        if (!isVendor && typeof s.filtersOpen === 'boolean') setFiltersOpen(s.filtersOpen);
       }
     } catch { /* ignore corrupt state */ }
     listHydrated.current = true;
