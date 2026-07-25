@@ -55,7 +55,7 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'region', label: 'Region' }, { value: 'community', label: 'Community' },
   { value: 'status', label: 'Status' },
 ];
-const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'review'];
+const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'pending', 'assigned', 'submitted', 'review'];
 
 // Service card with press-and-hold to cancel (internal only, live records) —
 // mirrors the inspection card's long-press. A ~500ms hold prompts to cancel; a
@@ -546,13 +546,17 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
         {/* Collapsible: status chips + one-line Type/Vendor/Region + Sort (no h-scroll). */}
         {filtersOpen && (
           <div className="space-y-1.5 mb-3">
-            <div className="grid grid-cols-3 gap-1.5">
+            {/* Status chips kept to 2 lines: internal has 7 (incl. Pending) → 4
+                cols (4+3); vendors have 6 (Pending hidden) → 3 cols (3+3). */}
+            <div className={`grid gap-1.5 ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'}`}>
               <button type="button" onClick={() => { setPastDueOnly(false); setStatus((s) => (s === 'all' ? 'all_open' : 'all')); }}
                 title="Tap again to toggle All ↔ All Open (hide completed)"
                 className={`w-full text-center text-[11px] font-heading font-semibold px-2 py-1.5 rounded-full border transition whitespace-nowrap ${
                   (status === 'all' || status === 'all_open') && !pastDueOnly ? 'bg-brand text-white border-brand' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
                 {status === 'all_open' ? `All Open (${counts.all_open})` : `All (${counts.all})`}
               </button>
+              {/* Pending is internal-only — vendors never see the chip or the orders. */}
+              {isAdmin && chip('pending', 'Pending')}
               {chip('estimated', 'Estimate')}{chip('assigned', 'Assigned')}{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}
             </div>
             <div className="flex items-center gap-2 pt-1">

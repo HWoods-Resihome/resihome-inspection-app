@@ -129,7 +129,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   // only open a service assigned to them — a direct URL to someone else's service
   // bounces back to the list. Internal admins (canSeeAll) are unrestricted.
   const viewer = await resolveServiceViewerAsync(session, ctx.req);
-  if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: svc.vendor, vendorEmail: svcVendorEmail } as ServiceRecord, viewer)) {
+  if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: svc.vendor, vendorEmail: svcVendorEmail, status: svc.status } as ServiceRecord, viewer)) {
     return { redirect: { destination: '/services', permanent: false } };
   }
   // Internal-only data must never reach a vendor's client — the UI already hides
@@ -401,7 +401,7 @@ const byAddr = (x: CoveredProp, y: CoveredProp): number => (houseNum(x.address) 
 function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boolean }) {
   const router = useRouter();
   const split = svc.forBilling === 'false' || !!svc.splitAt;
-  const canEdit = isInternal && svc.live && !split && ['assigned', 'submitted', 'review'].includes(svc.status);
+  const canEdit = isInternal && svc.live && !split && ['pending', 'assigned', 'submitted', 'review'].includes(svc.status);
   const [covered, setCovered] = useState<CoveredProp[]>([]);
   const [available, setAvailable] = useState<CoveredProp[]>([]);
   const [loading, setLoading] = useState(svc.live);
@@ -1151,7 +1151,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   // Internal users can push a service's due date out (vendor feedback, etc.), but
   // only BEFORE the vendor submits — once it's submitted/review/completed the due
   // window is settled.
-  const canEditDue = isInternal && svc.live && ['estimated', 'assigned'].includes(svc.status);
+  const canEditDue = isInternal && svc.live && ['estimated', 'pending', 'assigned'].includes(svc.status);
   const [dueOpen, setDueOpen] = useState(false);
   const [newDue, setNewDue] = useState(svc.dueDate || '');
   const [dueReason, setDueReason] = useState('');

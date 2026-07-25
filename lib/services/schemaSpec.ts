@@ -31,7 +31,7 @@ const SUB_OPTS = [
   ...[...new Map(WORKTYPES.flatMap((w) => w.subtypes.map((s) => [s.id, s.label] as const))).entries()].map(([value, label]) => ({ label, value })),
   { label: 'Bid Item', value: 'bid_item' },   // vendor-requested additional work
 ];
-const STATUS_OPTS = opt([['Estimated', 'estimated'], ['Assigned', 'assigned'], ['Submitted', 'submitted'], ['Review', 'review'], ['Completed', 'completed'], ['Canceled', 'canceled']]);
+const STATUS_OPTS = opt([['Estimated', 'estimated'], ['Pending', 'pending'], ['Assigned', 'assigned'], ['Submitted', 'submitted'], ['Review', 'review'], ['Completed', 'completed'], ['Canceled', 'canceled']]);
 const SCOPE_OPTS = opt([['Property', 'property'], ['Community', 'community']]);
 const OPERATOR_OPTS = opt([['is', 'is'], ['is any of', 'is any of'], ['is not', 'is not'], ['changes to', 'changes to'], ['is known', 'is known']]);
 

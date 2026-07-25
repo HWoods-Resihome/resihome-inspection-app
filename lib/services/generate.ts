@@ -21,7 +21,7 @@
  * follow the active cadence (else First Order Due, else +5); vendors are assigned by
  * equal-volume rotation with sticky-per-address (see ./rotation).
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, patchServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchCommunityRegionPortfolio, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool, readGenEnrollSeen, writeGenEnrollSeen, fetchPropertyMoveInDate } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, patchServiceWorkOrder, searchPropertiesForCoverage, listServiceCommunities, fetchCommunityProperties, fetchCommunityRegionPortfolio, fetchApprovedVendorCompanies, fetchPropertyLeasingDealStages, isTenantServicedPool, readGenEnrollSeen, writeGenEnrollSeen, fetchPropertyMoveInDate, searchServiceWorkOrdersByStatus } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { DEFAULT_GRASS_TIERS } from './grassPricing';
@@ -38,7 +38,20 @@ const parseVals = (s: any): string[] => {
   if (raw.startsWith('[')) { try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(String) : [raw]; } catch { return [raw]; } }
   return [raw];
 };
-const OPEN_STATUSES = new Set(['estimated', 'assigned', 'submitted', 'review']);
+// 'pending' is an OPEN order (work still owed) — include it so dup-prevention and
+// rotation treat a pending order as an existing open order for its rule+target.
+const OPEN_STATUSES = new Set(['estimated', 'pending', 'assigned', 'submitted', 'review']);
+
+// New orders due more than this many days out are held in 'pending' (internal-only)
+// so a vendor can't work them too far ahead; ≤ this → 'assigned' immediately.
+export const ASSIGN_WINDOW_DAYS = 7;
+/** Whole days from today (ISO YYYY-MM-DD) until a due date (ISO). Negative = past. */
+export function daysUntilDue(dueISO: string, todayISO: string): number {
+  const due = Date.parse(`${String(dueISO).slice(0, 10)}T00:00:00Z`);
+  const today = Date.parse(`${String(todayISO).slice(0, 10)}T00:00:00Z`);
+  if (isNaN(due) || isNaN(today)) return Number.POSITIVE_INFINITY;   // unknown due → treat as far out (pending)
+  return Math.round((due - today) / 86400000);
+}
 
 const wtLabel = (id: string) => WORKTYPES.find((w) => w.id === id)?.label || id;
 const subLabel = (wt: string, id: string) =>
@@ -604,9 +617,16 @@ export async function runServiceGeneration(
 
       if (!apply) { result.wouldCreate++; result.items.push({ ...base, action: 'CREATE' }); return; }
 
+      // Hold orders due >7 days out in 'pending' (internal-only) so the vendor
+      // can't work them too far ahead; the daily job flips them to 'assigned' —
+      // and alerts the vendor — once the due date is within the window. Orders
+      // already inside the window are assigned immediately (and alert now).
+      const initialStatus: 'pending' | 'assigned' =
+        dueDate && daysUntilDue(dueDate, todayISO) > ASSIGN_WINDOW_DAYS ? 'pending' : 'assigned';
+
       const orderProps: Record<string, any> = {
         service_name: `${wtLabel(worktype)} · ${subLabel(worktype, subtype)} — ${t.address}`,
-        worktype, subtype, status: 'assigned', is_bid_item: 'false',
+        worktype, subtype, status: initialStatus, is_bid_item: 'false',
         scope: t.scope, service_description: p.service_description || '',
         due_date: dueDate, region_snapshot: commGeo.region || t.region, address_snapshot: t.address,
         locality_snapshot: t.locality, pet_stations: p.pet_stations === 'true' ? 'true' : 'false',
@@ -672,7 +692,9 @@ export async function runServiceGeneration(
         result.created++;
         result.items.push({ ...base, action: 'created', recordId: recordId || undefined });
         // Email the assigned vendor (best-effort, throttled + awaited at the end).
-        if (recordId && vendor) {
+        // Pending orders are NOT announced — the daily promotion job alerts the
+        // vendor when the order flips to Assigned.
+        if (recordId && vendor && initialStatus === 'assigned') {
           const vEmail = await resolveVendorEmail(vendor);
           const rid = recordId; const vName = vendor; const addr = t.address; const loc = t.locality;
           notifyThunks.push(() => notifyServiceAssigned({
@@ -862,4 +884,79 @@ export async function runServiceGeneration(
     await Promise.allSettled(notifyThunks.slice(i, i + EMAIL_CONCURRENCY).map((fn) => fn()));
   }
   return result;
+}
+
+const normDueDate = (v: any): string => {
+  const t = String(v ?? '').trim(); if (!t) return '';
+  if (/^\d{10,}$/.test(t)) return new Date(Number(t)).toISOString().slice(0, 10);
+  return t.slice(0, 10);
+};
+
+/**
+ * DAILY promotion: flip every 'pending' order whose due date is now within the
+ * assign window (≤7 days out, including past-due) to 'assigned' and alert the
+ * vendor — the moment the work becomes near-term. One-way (never demotes). Runs
+ * in the nightly services-generate cron. Returns a small report; dry-run writes
+ * nothing. null when the Service object isn't configured.
+ */
+export async function promotePendingServices(
+  apply: boolean, todayISO: string,
+): Promise<{ scanned: number; promoted: number; notified: number; items: { id: string; address: string; dueDate: string; vendor: string }[] } | null> {
+  const pending = await searchServiceWorkOrdersByStatus('pending', 5000);
+  if (pending === null) return null;
+  const due = pending.filter((s) => daysUntilDue(normDueDate(s.props.due_date), todayISO) <= ASSIGN_WINDOW_DAYS);
+  const baseUrl = appBaseUrl();
+  let promoted = 0; let notified = 0;
+  const items: { id: string; address: string; dueDate: string; vendor: string }[] = [];
+  for (const s of due) {
+    const p = s.props;
+    const address = String(p.address_snapshot || p.service_name || '').trim();
+    const dueDate = normDueDate(p.due_date);
+    const vendor = String(p.vendor_name || '').trim();
+    items.push({ id: s.id, address, dueDate, vendor });
+    if (!apply) continue;
+    await patchServiceWorkOrder(s.id, { status: 'assigned' });
+    promoted++;
+    // Now that it's assigned + near-term, tell the vendor (best-effort).
+    const vendorEmail = String(p.vendor_email || '').trim();
+    if (vendorEmail) {
+      const r = await notifyServiceAssigned({
+        serviceId: s.id, vendorEmail, vendorName: vendor,
+        address, locality: String(p.locality_snapshot || ''),
+        worktypeLabel: wtLabel(String(p.worktype || '')), subtypeLabel: subLabel(String(p.worktype || ''), String(p.subtype || '')),
+        dueDate, baseUrl,
+      }).then(() => true).catch(() => false);
+      if (r) notified++;
+    }
+  }
+  return { scanned: pending.length, promoted: apply ? promoted : due.length, notified, items };
+}
+
+/**
+ * ONE-TIME backfill: hold currently-'assigned' orders whose due date is still >7
+ * days out back into 'pending' (the new far-in-advance guard). Only touches
+ * assigned orders — estimates (bids) and submitted/review (already worked) are
+ * left alone. The daily promotion job will release them to 'assigned' as their
+ * due dates come within the window. Dry-run writes nothing. null when the object
+ * isn't configured.
+ */
+export async function backfillAssignedToPending(
+  apply: boolean, todayISO: string,
+): Promise<{ scanned: number; moved: number; items: { id: string; address: string; dueDate: string; vendor: string; daysOut: number }[] } | null> {
+  const assigned = await searchServiceWorkOrdersByStatus('assigned', 5000);
+  if (assigned === null) return null;
+  // Only demote orders that carry a real due date genuinely >7 days out — never
+  // hide an assigned order that simply has no due date set.
+  const far = assigned.filter((s) => { const d = normDueDate(s.props.due_date); return !!d && daysUntilDue(d, todayISO) > ASSIGN_WINDOW_DAYS; });
+  let moved = 0;
+  const items: { id: string; address: string; dueDate: string; vendor: string; daysOut: number }[] = [];
+  for (const s of far) {
+    const p = s.props;
+    const dueDate = normDueDate(p.due_date);
+    items.push({ id: s.id, address: String(p.address_snapshot || p.service_name || '').trim(), dueDate, vendor: String(p.vendor_name || '').trim(), daysOut: daysUntilDue(dueDate, todayISO) });
+    if (!apply) continue;
+    await patchServiceWorkOrder(s.id, { status: 'pending' });
+    moved++;
+  }
+  return { scanned: assigned.length, moved: apply ? moved : far.length, items };
 }

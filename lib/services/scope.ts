@@ -21,6 +21,10 @@ export interface ServiceViewer {
 /** True if this service is visible to the viewer. */
 export function serviceVisibleTo(s: ServiceRecord, viewer: ServiceViewer): boolean {
   if (viewer.canSeeAll) return true;
+  // Pending is internal-only: it's a not-yet-releasable order (due date still >7
+  // days out). A vendor must never see it — it only surfaces to them once the
+  // daily job flips it to Assigned.
+  if (s.status === 'pending') return false;
   const e = (viewer.vendorEmail || '').toLowerCase();
   const se = (s.vendorEmail || '').toLowerCase();
   if (e && se && se === e) return true;

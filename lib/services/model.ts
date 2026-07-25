@@ -17,11 +17,15 @@ export const PROOF_URL_KEY = 'proof_of_service_url';
 // Companion key holding the original uploaded filename (for display only).
 export const PROOF_NAME_KEY = 'proof_of_service_name';
 
-// Pipeline: Estimated → Assigned → Submitted → (Completed | Review).
-// On submit the service STAYS in Submitted with an "AI Processing" tag while the AI
-// reviews; the AI then either auto-completes it or routes it to Review for a human.
-// AI Processing is a tag, not its own status. Canceled is terminal (hidden).
-export type ServiceStatus = 'estimated' | 'assigned' | 'submitted' | 'review' | 'completed' | 'canceled';
+// Pipeline: Estimated → (Pending →) Assigned → Submitted → (Completed | Review).
+// Pending holds an order whose due date is still >7 days out so a vendor can't
+// work it too far in advance; a daily job flips it to Assigned once the due date
+// is ≤7 days away (and only then alerts the vendor). Pending is INTERNAL-ONLY —
+// vendors never see pending orders. On submit the service STAYS in Submitted with
+// an "AI Processing" tag while the AI reviews; the AI then either auto-completes it
+// or routes it to Review for a human. AI Processing is a tag, not its own status.
+// Canceled is terminal (hidden).
+export type ServiceStatus = 'estimated' | 'pending' | 'assigned' | 'submitted' | 'review' | 'completed' | 'canceled';
 
 /** A Service Work Order as consumed by the UI (mapped from the HubSpot object). */
 export interface ServiceRecord {
@@ -54,16 +58,17 @@ export interface ServiceRecord {
 }
 
 export const SERVICE_STATUS_ORDER: ServiceStatus[] =
-  ['estimated', 'assigned', 'submitted', 'review', 'completed', 'canceled'];
+  ['estimated', 'pending', 'assigned', 'submitted', 'review', 'completed', 'canceled'];
 
 // Shared status chip label + color (used on the home list AND the service record
 // header so a status reads identically everywhere).
 export const SERVICE_STATUS_LABEL: Record<ServiceStatus, string> = {
-  estimated: 'Estimate', assigned: 'Assigned', submitted: 'Submitted',
+  estimated: 'Estimate', pending: 'Pending', assigned: 'Assigned', submitted: 'Submitted',
   review: 'Review', completed: 'Completed', canceled: 'Canceled',
 };
 export const SERVICE_STATUS_STYLE: Record<ServiceStatus, string> = {
   estimated: 'bg-rose-100 text-rose-700 border-rose-200',
+  pending: 'bg-slate-100 text-slate-700 border-slate-300',
   assigned: 'bg-sky-100 text-sky-800 border-sky-300',
   submitted: 'bg-amber-100 text-amber-800 border-amber-300',
   review: 'bg-purple-100 text-purple-800 border-purple-300',

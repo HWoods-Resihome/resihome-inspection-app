@@ -10,6 +10,8 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { createServiceWorkOrder } from '@/lib/hubspot';
 import { fetchApprovedVendorCompanies } from '@/lib/hubspot';
 import { resolveCoords } from '@/lib/geocodeResolve';
+import { ASSIGN_WINDOW_DAYS, daysUntilDue } from '@/lib/services/generate';
+import { easternTodayISO } from '@/lib/services/time';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -35,11 +37,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     vendorEmailResolved = companies.find((v) => v.name.trim().toLowerCase() === vendorNameIn.toLowerCase())?.email || '';
   }
 
+  // Hold far-out orders (>7 days) in 'pending' (internal-only) so the vendor
+  // can't work them too far ahead; within the window → 'assigned' immediately.
+  // A blank due date is treated as far-out (pending) until one is set.
+  const dueDate = String(b.dueDate || '');
+  const initialStatus = dueDate && daysUntilDue(dueDate, easternTodayISO()) > ASSIGN_WINDOW_DAYS ? 'pending' : 'assigned';
+
   const props: Record<string, any> = {
     service_name: address,
-    worktype: b.worktype || '', subtype: b.subtype || '', status: 'assigned', is_bid_item: 'false', scope,
+    worktype: b.worktype || '', subtype: b.subtype || '', status: initialStatus, is_bid_item: 'false', scope,
     service_description: b.description || '',
-    due_date: b.dueDate || '',
+    due_date: dueDate,
     region_snapshot: String(b.region || ''),
     address_snapshot: address, locality_snapshot: locality,
     community_name: communityName,

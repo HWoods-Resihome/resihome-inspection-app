@@ -54,7 +54,7 @@ interface CoverageProp { id: string; address: string; locality: string; region: 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // Open service statuses — the basis for the equal-volume rotation count shown next
 // to each company in the vendor picker (computed from real orders in gSSP).
-const OPEN_SERVICE_STATUSES = ['estimated', 'assigned', 'submitted', 'review'];
+const OPEN_SERVICE_STATUSES = ['estimated', 'pending', 'assigned', 'submitted', 'review'];
 const DEFAULT_MARKUP = '20';   // default markup % on all services
 const baseRate = (wt: Worktype, sub: string): string => { const r = defaultRateFor(wt, sub); return r != null ? String(r) : ''; };
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];

@@ -9,7 +9,7 @@
  * CRON_SECRET isn't set.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runServiceGeneration } from '@/lib/services/generate';
+import { runServiceGeneration, promotePendingServices } from '@/lib/services/generate';
 import { easternTodayISO } from '@/lib/services/time';
 import { recordErrorEvent } from '@/lib/errorLog';
 
@@ -52,7 +52,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         meta: { created: report.created, skippedExisting: report.skippedExisting, errors: report.errors, today },
       });
     }
-    return res.status(200).json({ ok: true, created: report.created, skippedExisting: report.skippedExisting, canceled: report.canceled, errors: report.errors });
+    // Promote pending orders whose due date is now within the assign window
+    // (≤7 days) → assigned, and alert the vendor. Best-effort — a promotion
+    // failure must not fail the generation run.
+    let promoted: { promoted: number; notified: number } | null = null;
+    try {
+      const pr = await promotePendingServices(true, today);
+      if (pr) { promoted = { promoted: pr.promoted, notified: pr.notified }; console.log('[cron/services-generate] promote pending →', JSON.stringify(promoted)); }
+    } catch (e) { console.warn('[cron/services-generate] promote pending failed:', e); }
+    return res.status(200).json({ ok: true, created: report.created, skippedExisting: report.skippedExisting, canceled: report.canceled, errors: report.errors, promoted });
   } catch (e: any) {
     console.error('[cron/services-generate] failed:', e);
     // A hard failure of the whole run → Admin ▸ Error Log (best-effort).

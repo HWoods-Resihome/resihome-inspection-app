@@ -30,7 +30,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const status = String(rec.props.status || '');
     // Only editable before submission — once submitted/review/completed/canceled
     // the due window is settled.
-    if (!['estimated', 'assigned'].includes(status)) return res.status(409).json({ error: `This service is ${status} — its due date can’t be changed.` });
+    if (!['estimated', 'pending', 'assigned'].includes(status)) return res.status(409).json({ error: `This service is ${status} — its due date can’t be changed.` });
     const from = String(rec.props.due_date || '').slice(0, 10);
     if (from === dueDate) return res.status(200).json({ ok: true, id, dueDate, unchanged: true });
 
