@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useAppUpdate } from '@/lib/useAppUpdate';
+import { loadMe } from '@/lib/me';
 import { SESSION_EXPIRED_EVENT } from '@/lib/sessionGuard';
 
 /**
  * App-wide field-reliability overlays, mounted once in _app:
- *   - A slim banner when a newer build has been deployed (one-tap reload).
+ *   - A slim "new version" banner — ADMINS ONLY. The team found the banner
+ *     disruptive, so regular users never see it; they pick up new builds SILENTLY
+ *     (auto-apply on reopen after being backgrounded, and on a home screen), which
+ *     is the minimal-disruption path. Admins keep the banner as a manual control.
  *   - A modal when the session has expired, reassuring the inspector that
  *     queued work is safe and prompting a re-login.
  */
@@ -13,6 +17,7 @@ export function FieldStatusOverlays() {
   const router = useRouter();
   const { updateReady, reload } = useAppUpdate();
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   // On the login screen the "session expired" prompt is meaningless and traps
   // the user (it covers the sign-in form, and "Sign in again" just reloads
   // /login where the guard re-fires). Suppress it there.
@@ -28,25 +33,35 @@ export function FieldStatusOverlays() {
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
   }, []);
 
+  // Who sees the reload banner: admins only. Everyone else updates silently.
+  useEffect(() => {
+    let alive = true;
+    loadMe().then((me) => { if (alive) setIsAdmin(!!me.isAdmin); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
   // AUTO-APPLY a pending update while on the HOME screen — a safe reload point
   // (no open form). ONLINE-ONLY: applying unregisters the SW + clears caches +
   // reloads, which offline would blank the app (no shell to serve). Re-check
   // online at fire time AND fire only on the online event, so a device that went
   // offline mid-inspection and returned home never auto-reloads into a blank
   // page. Other routes show the manual banner. reload() also self-guards offline.
+  // Safe reload points: the two HOME list screens (no open form). Applying here
+  // is how the team gets new builds with no banner — silently, at a natural break.
+  const onHome = router.pathname === '/app' || router.pathname === '/services';
   useEffect(() => {
-    if (!(updateReady && router.pathname === '/app' && !sessionExpired)) return;
+    if (!(updateReady && onHome && !sessionExpired)) return;
     const tryApply = () => { if (typeof navigator === 'undefined' || navigator.onLine !== false) reload(); };
     const t = setTimeout(tryApply, 1200);
     window.addEventListener('online', tryApply);
     return () => { clearTimeout(t); window.removeEventListener('online', tryApply); };
-  }, [updateReady, router.pathname, sessionExpired, reload]);
+  }, [updateReady, onHome, sessionExpired, reload]);
 
   if (onMarketingPage) return null;
 
   return (
     <>
-      {updateReady && !sessionExpired && (
+      {isAdmin && updateReady && !sessionExpired && (
         <div className="fixed top-0 inset-x-0 z-[60] bg-brand text-white text-sm px-4 py-2 flex items-center justify-center gap-3 shadow">
           <span className="font-heading font-semibold">A new version of ResiWalk is available.</span>
           <button
