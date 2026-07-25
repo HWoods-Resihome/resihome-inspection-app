@@ -3,6 +3,10 @@ import { jwtVerify } from 'jose';
 
 const PUBLIC_PATHS = new Set<string>([
   '/login',
+  // Alternative marketing homepage under review (promote to / when approved).
+  // Public so the owner can review it without a session and it isn't caught by
+  // the signed-in typed-arrival → /app redirect that only applies to '/'.
+  '/preview',
   // SEO plumbing for the public marketing homepage — crawlers carry no cookies.
   '/robots.txt',
   '/sitemap.xml',
