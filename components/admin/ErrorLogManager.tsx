@@ -67,6 +67,7 @@ export function ErrorLogManager() {
   const [kindFilter, setKindFilter] = useState('');
   const [q, setQ] = useState('');
   const [lastLoadedAt, setLastLoadedAt] = useState<string>('');
+  const [triageMsg, setTriageMsg] = useState<string>('');
   // Per-row repair state: inspectionId -> 'busy' | 'done' | error string.
   const [repair, setRepair] = useState<Record<string, string>>({});
   const qRef = useRef(q);
@@ -110,6 +111,21 @@ export function ErrorLogManager() {
       setRepair((s) => ({ ...s, [inspectionId]: String(e?.message || e) }));
     }
   }, [load]);
+
+  // Copy a ranked, deduped triage summary to the clipboard — the handoff for the
+  // on-demand "diagnose + fix + ship" loop: paste it to Claude Code and it triages
+  // the top issues, fixes, and ships (auto-merge when tsc + tests + build pass).
+  const copyTriage = useCallback(async () => {
+    setTriageMsg('Building…');
+    try {
+      const r = await fetch('/api/admin/error-triage?format=text&scan=1500&top=25', { cache: 'no-store' });
+      const text = await r.text();
+      if (!r.ok) { setTriageMsg('Failed to build triage.'); return; }
+      try { await navigator.clipboard.writeText(text); setTriageMsg('Copied — paste to Claude to fix.'); }
+      catch { setTriageMsg('Clipboard blocked — opening in a new tab.'); window.open('/api/admin/error-triage?format=text&scan=1500&top=25', '_blank'); }
+    } catch { setTriageMsg('Failed to build triage.'); }
+    finally { setTimeout(() => setTriageMsg(''), 6000); }
+  }, []);
 
   // Initial load on open + when the kind filter changes.
   useEffect(() => { if (sectionOpen) void load(); }, [sectionOpen, load]);
@@ -161,6 +177,12 @@ export function ErrorLogManager() {
               className="h-8 px-3 rounded-lg bg-brand text-white font-heading font-semibold text-[12px] hover:opacity-90 disabled:bg-gray-300">
               {loading ? 'Loading…' : 'Refresh'}
             </button>
+            <button type="button" onClick={() => void copyTriage()}
+              title="Copy a ranked, deduped triage summary to paste to Claude for diagnosis + fix"
+              className="h-8 px-3 rounded-lg bg-ink text-white font-heading font-semibold text-[12px] hover:opacity-90">
+              Copy triage
+            </button>
+            {triageMsg && <span className="text-[11px] text-gray-500">{triageMsg}</span>}
           </div>
 
           {error && <div className="mb-3 p-3 bg-rose-50 border border-rose-300 rounded text-sm text-rose-800">{error}</div>}

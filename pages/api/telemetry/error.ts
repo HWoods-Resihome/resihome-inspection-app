@@ -48,6 +48,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       online: typeof body.online === 'boolean' ? body.online : undefined,
       userAgent: typeof body.userAgent === 'string' ? body.userAgent : undefined,
       source: 'client',
+      // Persist the stack + error name (and the window.onerror/unhandledrejection
+      // sub-kind) so triage has a trace to diagnose from — not just the message.
+      meta: {
+        ...(typeof body.stack === 'string' ? { stack: body.stack.slice(0, 2000) } : {}),
+        ...(typeof body.name === 'string' ? { name: body.name } : {}),
+        ...(typeof body.kind === 'string' ? { reporter: body.kind } : {}),
+      },
     });
 
     const webhook = process.env.ERROR_WEBHOOK_URL;
