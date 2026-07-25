@@ -11,6 +11,7 @@
  */
 import { put, head } from '@vercel/blob';
 import { readReportSchedulesRaw, mutateReportSchedulesRaw } from '@/lib/hubspot';
+import { addDaysISO } from '@/lib/services/time';
 import { fetchBillingRows } from '@/lib/insightsBilling';
 import { buildBillingXlsx, billingFilename } from '@/lib/insightsBillingXlsx';
 import { sendNotificationEmail, appBaseUrl } from '@/lib/notifications/send';
@@ -68,11 +69,9 @@ export function etParts(date: Date): { y: number; m: number; d: number; hour: nu
   };
 }
 const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-/** Shift a YYYY-MM-DD by n days (UTC-safe date math on the calendar date). */
-export function addDaysISO(day: string, n: number): string {
-  const dt = new Date(`${day}T00:00:00Z`); dt.setUTCDate(dt.getUTCDate() + n);
-  return dt.toISOString().slice(0, 10);
-}
+// addDaysISO is the canonical helper in lib/services/time.ts (identical impl) —
+// imported above and re-exported here so this module's existing surface is kept.
+export { addDaysISO };
 
 /** Resolve a relative range to { from, to } (inclusive YYYY-MM-DD, ET-anchored). */
 export function resolveRange(range: RelativeRange, now: Date = new Date(), includeToday = true): { from?: string; to?: string } {

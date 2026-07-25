@@ -219,3 +219,29 @@ Don't read these whole — jump to the symbol.
   `HUBSPOT_*` (object type IDs + tuning), `HBMM_*` (HoneyBadger maintenance),
   `GMAIL_*` / `GOOGLE_EXTERNAL_*` (system email + OAuth), `CRON_SECRET`,
   `BLOB_READ_WRITE_TOKEN`, `SESSION_SECRET` (≥32 chars).
+
+---
+
+## 10. Canonical helpers & consolidation backlog
+
+Prefer the canonical helper below over re-inlining. These are the parallel
+implementations a dedup audit found — consolidate **opportunistically and per
+call-site** (several have subtle behavioral drift; a blind swap can change output
+in ways build/tests won't catch), and **don't add new copies**.
+
+| Concern | Canonical | Drift / notes when consolidating |
+|---|---|---|
+| **M-D-YY date** (`fmtMDY`) | `lib/services/model.ts` (handles ISO + epoch-ms + Date) | Copies differ in the **fallback**: `notifications/triggers.ts` returns `—` on empty; `insightsBilling.ts` passes the original string through. Preserve each caller's intended empty-state before swapping. |
+| **add days to YYYY-MM-DD** (`addDaysISO`) | `lib/services/time.ts` | ✅ Consolidated (was duplicated byte-for-byte in `reportSchedules.ts`). |
+| **USD money** | `lib/photoUpload.ts` `formatMoney` (client) / `lib/pdfShared.tsx` `formatMoneyPdf` (PDF) | Re-declared ~12× (`email.ts`, `servicePdfRender.ts`, slack, ai-review, admin…). **Signatures differ**: some add `$`, `formatMoneyPdf` does not; some take `any` + guard NaN, others take `number`. Not a blind swap. `InspectionCard`/`insightsMetrics` use a 0-decimal currency variant — genuinely different, leave alone. |
+| **request origin / baseUrl** | `lib/appUrl.ts` `reqOriginOf(req)` (also `appBaseUrl` in `lib/notifications/send.ts`) | The `x-forwarded-proto/host → origin` pattern is hand-rolled in 20+ handlers (`pdf.ts`, `finalize.ts`, `submit.ts`, `qc-finalize.ts`, admin/cron workers…). Mostly a mechanical replace. |
+| **split URL list** (`splitUrls`) | (pick one → `lib/dates.ts`/`lib/format.ts` when created) | 5 copies with **drifting delimiters/validation** (`[\n,]+` + http-check vs no check vs `[,;]` in `hubspot.ts`). Real bug risk — some let non-URLs through. |
+| **titleCase** | `lib/titleCase.ts` (minor-word + acronym aware) | `reportSchedules.ts` + `AiReviewModal.tsx` use weaker variants that mangle acronyms; `sections.ts titleCaseSectionName` is its own rule. |
+| **photo downscale to JPEG** | `lib/pdfImages.ts` `embedPhotoDataUri` / `buildEmbeddedPhotoMap` | The AI-review + proof-extract paths (`services/aiReview.ts`, `inspections/[id]/ai-review.ts`, `services/proofExtract.ts`) re-roll `sharp().rotate().resize().jpeg()` (quality 60 vs 70). A shared `downscaleToJpeg(buf,{edge,quality})` would unify them. |
+| **rekey temp→real inspection id** | 3 stores by design (`offlinePhotoStore`, `offlineOutbox`, `photoAttachOutbox`) | Same name/signature across 3 durable queues — a caller can update one and forget the others. Consider one orchestrator that fans out. |
+| **templateType classification** | (centralize `isRateCard()`/`isQc()`/`FC_TEMPLATES` in `lib/templateLabels.ts`) | `=== 'pm_scope_rate_card'` / `=== 'pm_turn_reinspect_qc'` recur inline across routes; `FC_TEMPLATES` is an ad-hoc local `Set` in `submit.ts`. |
+
+Deliberately **not** duplicates (don't chase): `CameraCapture{,Legacy,Modern}`
+(platform fork), server/client halves (`*Reporter`, `aiFeedback*`), `servicePdf.tsx`
+(component) vs `servicePdfRender.ts` (renderer), `pushSender`/`fcmSender`/`pushClient`
+(distinct transports), `aiReview.ts` vs `services/aiReview.ts` (different domains).
