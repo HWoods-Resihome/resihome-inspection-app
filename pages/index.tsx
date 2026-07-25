@@ -517,7 +517,7 @@ export default function SitePreview() {
         <section className="section section--tight section--mist" id="showcase">
           <div className="wrap">
             <div className="section-head center reveal"><Eyebrow icon="play" className="eyebrow eyebrow--center">See it in action</Eyebrow><h2 className="h2">Watch ResiWalk Work</h2></div>
-            <div className="video-wrap reveal"><video controls playsInline preload="metadata" poster="/sitepreview/intro-poster.jpg"><source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" /></video></div>
+            <div className="video-wrap reveal"><video controls playsInline preload="metadata" poster="/og-image.png"><source src="/sitepreview/resiwalk-intro.mp4" type="video/mp4" /></video></div>
           </div>
         </section>
 
