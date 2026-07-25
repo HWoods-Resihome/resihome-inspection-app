@@ -129,8 +129,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // its already-queued answer/photo keys match), else mint one. IDEMPOTENCY:
     // if a record with this external id already exists, a retried deferred create
     // would otherwise duplicate it — return the existing record instead.
-    const externalId = (typeof body.externalId === 'string' && /^INSP-/.test(body.externalId))
-      ? body.externalId
+    const clientSuppliedExternalId = typeof body.externalId === 'string' && /^INSP-/.test(body.externalId);
+    let externalId = clientSuppliedExternalId
+      ? body.externalId!
       : `INSP-${nowIso().slice(0, 10)}-${shortId().slice(0, 8)}`;
     if (typeof body.externalId === 'string' && body.externalId) {
       const existingId = await findInspectionIdByExternalId(externalId);
@@ -276,12 +277,49 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    const { inspectionId } = await createScheduledInspection({
-      inspectionProps,
-      // No property for a community inspection — the property association is
-      // simply skipped (fail-open); the Community association is created below.
-      propertyRecordId: body.propertyRecordId || '',
-    });
+    // Create the record — with idempotent recovery from a unique-id race. HubSpot's
+    // `inspection_id_external` is a UNIQUE property; its constraint is strongly
+    // consistent, but the dedup SEARCH above (findInspectionIdByExternalId) is
+    // eventually consistent and lags a few seconds behind a just-created twin. So a
+    // retried / double-submitted / offline-re-synced create with the SAME
+    // client-supplied external id can slip past the dedup check and get rejected
+    // here with "… already has that value" (a 400 that surfaced as an opaque
+    // "Upstream request failed (400)" and a failed Start — even though the
+    // inspection actually exists). Recover the way the dedup short-circuit would:
+    // return the record that already owns the id. For a SERVER-minted id, a
+    // collision is astronomically rare and NOT the same logical inspection, so
+    // re-mint a fresh id and retry once instead.
+    let inspectionId: string;
+    try {
+      ({ inspectionId } = await createScheduledInspection({
+        inspectionProps,
+        // No property for a community inspection — the property association is
+        // simply skipped (fail-open); the Community association is created below.
+        propertyRecordId: body.propertyRecordId || '',
+      }));
+    } catch (e: any) {
+      const detail = String(e?.detail || e?.message || '');
+      const dupExternalId = e?.status === 400
+        && /inspection_id_external/.test(detail)
+        && /already has that value/i.test(detail);
+      if (!dupExternalId) throw e;
+      if (clientSuppliedExternalId) {
+        // Same logical inspection, retried — return the existing twin (idempotent).
+        // Prefer a fresh lookup (the search index may have caught up by now); fall
+        // back to the winning record id embedded in HubSpot's error message.
+        let existing = await findInspectionIdByExternalId(externalId).catch(() => null);
+        if (!existing) { const m = /\b(\d{6,})\s+already has that value/i.exec(detail); existing = m ? m[1] : null; }
+        if (!existing) throw e;
+        return res.status(200).json({ success: true, inspectionId: existing, externalId, deduped: true });
+      }
+      // Server-minted id collided — re-mint and retry once.
+      externalId = `INSP-${nowIso().slice(0, 10)}-${shortId().slice(0, 8)}`;
+      inspectionProps.inspection_id_external = externalId;
+      ({ inspectionId } = await createScheduledInspection({
+        inspectionProps,
+        propertyRecordId: body.propertyRecordId || '',
+      }));
+    }
 
     // Community / Visit: associate the chosen Community object to this inspection
     // (best-effort — the inspection is already created).
