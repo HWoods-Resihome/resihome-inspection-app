@@ -533,9 +533,11 @@ export async function runServiceGeneration(
       }
     }
   };
-  // Assigned, cancel-eligible orders under a key prefix (a rule, or one target).
-  const assignedUnder = (prefix: string) => existing.filter((e) =>
-    e.id && e.status === 'assigned' && (e.key === prefix || e.key.startsWith(`${prefix}:`)) && shouldCancelDue(e.dueDate));
+  // Open, cancel-eligible orders under a key prefix (a rule, or one target).
+  // Includes 'pending' (held, not-yet-released) as well as 'assigned' — a stop
+  // condition must clear a not-yet-due pending order the same as an assigned one.
+  const cancelableUnder = (prefix: string) => existing.filter((e) =>
+    e.id && (e.status === 'assigned' || e.status === 'pending') && (e.key === prefix || e.key.startsWith(`${prefix}:`)) && shouldCancelDue(e.dueDate));
 
   for (const { id: ruleId, props: p } of rules) {
     if (p.active !== 'true') { result.rulesSkipped++; continue; }
@@ -551,7 +553,7 @@ export async function runServiceGeneration(
       if (sd && todayISO >= sd) {
         // The rule has ended — also cancel its still-untouched assigned orders
         // (this is what the stop-date helper text always promised).
-        await autoCancel(ruleId, p.rule_name || 'Rule', assignedUnder(`gen:${ruleId}`), `rule stop date ${sd} reached`);
+        await autoCancel(ruleId, p.rule_name || 'Rule', cancelableUnder(`gen:${ruleId}`), `rule stop date ${sd} reached`);
         result.rulesSkipped++; continue;
       }
     }
@@ -717,7 +719,7 @@ export async function runServiceGeneration(
     // Properties that now MEET the stop condition: no new orders (they're already
     // excluded from targets) — and their untouched assigned orders get cancelled.
     for (const sp of stopped) {
-      const orders = assignedUnder(`gen:${ruleId}:${sp.id}`);
+      const orders = cancelableUnder(`gen:${ruleId}:${sp.id}`);
       if (orders.length) await autoCancel(ruleId, p.rule_name || 'Rule', orders, 'property meets the rule’s stop criteria', sp.address);
     }
 
