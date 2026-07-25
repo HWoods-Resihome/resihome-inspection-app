@@ -36,14 +36,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Persist for the Admin ▸ ResiWalk Insights Error Log (fire-and-forget; never
     // blocks the 204). Email is server-attributed (reporterEmail), not trusted
     // from the client.
-    // Persist the client stack (+ error name) into meta so a minified crash like
-    // "Cannot access 'x' before initialization" is LOCATABLE from the Admin Error
-    // Log — with source maps the stack's top frame maps straight to the offending
-    // file/line. Previously the stack was only in the raw console line, so the
-    // dashboard row was an unactionable one-liner. Clipped so a long stack can't
-    // bloat the log blob.
-    const stack = typeof body.stack === 'string' && body.stack ? body.stack.slice(0, 2500) : undefined;
-    const errorName = typeof body.name === 'string' && body.name ? body.name.slice(0, 80) : undefined;
     void recordErrorEvent({
       kind: typeof body.kind === 'string' ? body.kind : 'client',
       message: String(body.message || body.reason || 'Client error'),
@@ -56,7 +48,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       online: typeof body.online === 'boolean' ? body.online : undefined,
       userAgent: typeof body.userAgent === 'string' ? body.userAgent : undefined,
       source: 'client',
-<<<<<<< Updated upstream
       // Persist the stack + error name (and the window.onerror/unhandledrejection
       // sub-kind) so triage has a trace to diagnose from — not just the message.
       meta: {
@@ -64,9 +55,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ...(typeof body.name === 'string' ? { name: body.name } : {}),
         ...(typeof body.kind === 'string' ? { reporter: body.kind } : {}),
       },
-=======
-      meta: (stack || errorName) ? { ...(stack ? { stack } : {}), ...(errorName ? { errorName } : {}) } : undefined,
->>>>>>> Stashed changes
     });
 
     const webhook = process.env.ERROR_WEBHOOK_URL;
