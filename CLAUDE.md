@@ -3,6 +3,19 @@
 Read this before making changes. **Every change must consider BOTH the web app
 and the native mobile shell.** They ship together; keep them in lockstep.
 
+> **Orientation map: [`ARCHITECTURE.md`](./ARCHITECTURE.md)** — the domain model,
+> the `templateType → completion-route → email` matrix, the notification-trigger
+> table, the PDF render/embed pipeline, the cron list, and a "big files & where to
+> look" index. Read it before diving into inspection lifecycle, PDF, or
+> notification work so you don't re-derive these maps from 10k-line files. Keep it
+> current when you change those flows.
+>
+> **Naming rule (avoid parallel-helper drift):** a module's job is named ONCE.
+> Never add a file that differs from an existing one only by case or
+> hyphen/camelCase (`fooBar.ts` vs `foo-bar.ts`), and never add a second helper
+> that does an existing one's job — extend the canonical one. (This trap caused a
+> real prod incident: a stale `pdf-images.ts` shadowing `pdfImages.ts`.)
+
 ## What this project is
 - **Web app** (this repo root: `pages/`, `lib/`, `components/`, `styles/`,
   `middleware.ts`): the live ResiHome inspection app, deployed to Vercel
