@@ -103,7 +103,7 @@ Every trigger is **best-effort** (swallows errors), checks the recipient's toggl
 |---|---|---|---|---|
 | `notifyInspectionCompleted` | inspection completed (QC + QuestionForm types; see §3) | inspector (+ RRQC community email) | report PDF | `inspection_completed` |
 | `notifyServiceAssigned` | service assigned/reassigned to a vendor | vendor | — | `service_assigned` |
-| `notifyServiceCompleted` | service review decision (approve/modify/reject) | vendor | vendor service PDF | `service_completed` |
+| `notifyServiceCompleted` | service review decision (approve/modify/reject), OR a bid approved/modified with **finalize=complete** | vendor | vendor service PDF | `service_completed` |
 | `notifyServicePastDue` | a service is past due | vendor | — | `service_past_due` |
 | `notifyServicesInboxStatus` | service hits **Estimated** or **Review** | `services@resihome.com` (env `SERVICES_ALERTS_INBOX`) | — | (inbox) |
 | `notifyVendorPastDueDigest` | daily digest (cron `services-due`) | vendor | — | `service_past_due` |
@@ -123,6 +123,12 @@ Separate object + flow from inspections. Status enum (`lib/services/model.ts`):
   (`vendor` shows vendor cost; `client` is internal-only). Served by
   `pages/api/services/[id]/pdf.ts` and attached to the `notifyServiceCompleted` email.
 - Review decision route: `pages/api/services/[id]/review-decision.ts`.
+- Bid items (`is_bid_item=true`, `subtype=bid_item`): vendor-flagged extra work spawned
+  at submit (`enrollment_key=bid:<originalId>`, also `generated_by_rule_id=<originalId>`).
+  Reviewed via `pages/api/services/[id]/bid-decision.ts` — approve/modify take a
+  `finalize`: `assign` → Assigned (+ due date) or `complete` → straight to Completed +
+  vendor email (work already done). The service record page shows a **Visit summary**
+  (original order + this bid + total; client column internal-only) linking to the original.
 - Crons drive generation/review/due (see §7).
 
 ---

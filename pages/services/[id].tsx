@@ -52,6 +52,21 @@ interface ServiceView {
   // + per-property rate; a child points back to its master via masterServiceId.
   isMaster: boolean; coveredCount: number | null; perRate: number | null; commonAreaCost: number | null;
   forBilling: string; masterServiceId: string; splitAt: string;
+  // Bid items only: the original service order this bid was spawned from (the
+  // vendor flagged the extra work while completing it), so a reviewer can compare
+  // the bid against what was already paid — real added work vs. a trip fee on the
+  // original — and see the holistic visit total. clientCost is internal-only.
+  originalOrder?: OriginalOrderView | null;
+}
+
+interface OriginalOrderView {
+  id: string;
+  address: string;
+  worktypeLabel: string;
+  status: string;
+  vendorCost: number | null;
+  clientCost: number | null;   // internal-only (stripped for vendors)
+  date: string;                // completed / service-completed / due date (M-D-YY-ready ISO)
 }
 
 const EDITABLE = new Set(['', 'estimated', 'assigned']);
@@ -90,6 +105,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 
   let svc: ServiceView | null = null;
   let svcVendorEmail: string | null = null;  // for the vendor-ownership guard below
+  let parentOrderId: string | null = null;   // bid items: the order that spawned this bid
   if (/^\d+$/.test(id)) {
     const rec = await fetchServiceWorkOrder(id).catch(() => null);
     if (rec) {
@@ -133,6 +149,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         coveredCount: num(p.covered_property_count), perRate: num(p.per_property_rate), commonAreaCost: num(p.common_area_cost),
         forBilling: p.for_billing || '', masterServiceId: String(p.master_service_id || '').trim(), splitAt: normDate(p.split_at),
       };
+      // A bid item records its originating order in enrollment_key (`bid:<id>`),
+      // with generated_by_rule_id as a fallback (submit sets both).
+      if (p.is_bid_item === 'true') {
+        const ek = String(p.enrollment_key || '');
+        parentOrderId = ek.startsWith('bid:') ? ek.slice(4).trim() : (String(p.generated_by_rule_id || '').trim() || null);
+      }
     }
   }
   // A non-numeric (or unknown) id has no real Service Work Order → back to the list.
@@ -144,6 +166,27 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   if (!viewer.canSeeAll && !serviceVisibleTo({ vendor: svc.vendor, vendorEmail: svcVendorEmail, status: svc.status } as ServiceRecord, viewer)) {
     return { redirect: { destination: '/services', permanent: false } };
   }
+  // Bid item: load the original order it was spawned from so the record can show
+  // the visit comparison (original vs. bid, and the holistic total). Vendors see
+  // the vendor-cost side; the client-cost side is added only for internal viewers
+  // (stripped below with the rest of the margin data).
+  if (svc.isBidItem && parentOrderId && /^\d+$/.test(parentOrderId)) {
+    const prec = await fetchServiceWorkOrder(parentOrderId).catch(() => null);
+    if (prec) {
+      const pp = prec.props;
+      const pnum = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+      svc.originalOrder = {
+        id: prec.id,
+        address: pp.address_snapshot || pp.service_name || '(Order)',
+        worktypeLabel: worktypeLabel((pp.worktype || '') as Worktype),
+        status: pp.status || '',
+        vendorCost: pnum(pp.vendor_cost),
+        clientCost: pnum(pp.client_cost),
+        date: normDate(pp.completed_at || pp.service_completed_date || pp.due_date),
+      };
+    }
+  }
+
   // Internal-only data must never reach a vendor's client — the UI already hides
   // it, but the props are serialized into the page (visible in source), so strip
   // it server-side: the AI QC review (verdict + notes) and our margin/client price.
@@ -151,6 +194,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   if (!isInternal) {
     svc.aiVerdict = ''; svc.aiNotes = '';
     svc.markupPct = null; svc.clientCost = null;
+    if (svc.originalOrder) svc.originalOrder.clientCost = null;   // margin stays internal
   }
   const savedForms = await readServiceForms().catch(() => null);
   const formSet: Record<string, any[]> = { ...DEFAULT_SERVICE_FORMS, ...(savedForms || {}) };
@@ -543,7 +587,7 @@ function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boo
   );
 }
 
-interface DecisionPayload { decision: 'approve' | 'modify' | 'reject'; vendorCost: number; markupPct: number; dueDays: number; notes: string; reissue: boolean; reissueDays: number; reissueNote: string; }
+interface DecisionPayload { decision: 'approve' | 'modify' | 'reject'; vendorCost: number; markupPct: number; dueDays: number; notes: string; reissue: boolean; reissueDays: number; reissueNote: string; finalize: 'assign' | 'complete'; }
 
 // Shared reviewer decision panel — used for BOTH the completion review (kind
 // 'review' → Completed) and the estimated bid review (kind 'bid' → Assigned, with
@@ -562,6 +606,10 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
   const [mk, setMk] = useState(String(orig.markup || 0));
   const [days, setDays] = useState('5');
   const [notes, setNotes] = useState('');
+  // Bid review only: after Approve/Modify, does the vendor still have to DO the
+  // work ('assign' → Assigned, with a due date) or did they ALREADY do it on the
+  // same visit ('complete' → close straight to Completed)?
+  const [finalize, setFinalize] = useState<'assign' | 'complete'>('assign');
   // Re-Issue (review only): spin up a fresh service with the same requirements,
   // property/community, and vendor — due in N days — with an optional note for
   // the vendor. The original still closes out per the decision above.
@@ -574,13 +622,15 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
   const fmt2 = (v: string) => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) ? n.toFixed(2) : v; };
   const inputCls = 'w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand';
 
-  const needsDays = kind === 'bid' && (decision === 'approve' || decision === 'modify');
+  // Complete-now (bid): the vendor already did the work → no due date needed.
+  const completeNow = kind === 'bid' && finalize === 'complete' && (decision === 'approve' || decision === 'modify');
+  const needsDays = kind === 'bid' && (decision === 'approve' || decision === 'modify') && !completeNow;
   const newVendor = decision === 'modify' ? Number(vc || '0') : orig.vendor;
   const newMarkup = decision === 'modify' ? Number(mk || '0') : orig.markup;
   const newClient = (kind === 'review' && decision === 'reject') ? 0 : Math.round(newVendor * (1 + newMarkup / 100) * 100) / 100;
-  const target = kind === 'bid' ? 'Assigned' : 'Completed';
+  const target = kind === 'bid' ? (completeNow ? 'Completed' : 'Assigned') : 'Completed';
   const hints = kind === 'bid'
-    ? { approve: 'Assign as-is', modify: 'Edit pricing', reject: 'Cancel bid' }
+    ? { approve: 'Keep bid price', modify: 'Edit pricing', reject: 'Cancel bid' }
     : { approve: 'Complete as-is', modify: 'Edit pricing', reject: 'Deny — $0' };
   const reissueOk = !reissue || Number(reissueDays) > 0;
   // Note is required for Modify and Reject (the reason lands on the record and
@@ -667,6 +717,31 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
         </div>
       )}
 
+      {/* Bid: is there still work to do, or did the vendor already do it? */}
+      {kind === 'bid' && (decision === 'approve' || decision === 'modify') && (
+        <div className="border-t border-gray-100 pt-3">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-2">Then</div>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              ['assign', 'Assign to vendor', 'Work still to be done'],
+              ['complete', 'Mark complete', 'Vendor already did it'],
+            ] as const).map(([val, label, hint]) => {
+              const on = finalize === val;
+              return (
+                <button key={val} type="button" onClick={() => setFinalize(val)}
+                  className={`rounded-xl py-2 px-2 border text-center transition ${on ? 'bg-ink text-white border-ink' : 'bg-white text-gray-700 border-gray-300 hover:border-brand/50'}`}>
+                  <div className="font-heading font-bold text-[13px]">{label}</div>
+                  <div className={`text-[10px] leading-tight mt-0.5 ${on ? 'text-white/85' : 'text-gray-400'}`}>{hint}</div>
+                </button>
+              );
+            })}
+          </div>
+          {completeNow && (
+            <p className="text-[12px] text-gray-500 mt-2">Closes straight to <b>Completed</b> — it flows to billing now and the vendor is emailed a completion confirmation with the PDF.</p>
+          )}
+        </div>
+      )}
+
       {needsDays && (
         <div className="flex items-center gap-2">
           <span className="text-[13px] text-gray-500">Days to Complete <span className="text-brand">*</span></span>
@@ -731,7 +806,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
             return;
           }
           setBlockMsg('');
-          onSubmit({ decision: decision as DecisionPayload['decision'], vendorCost: Number(vc || '0'), markupPct: Number(mk || '0'), dueDays: Number(days || '0'), notes, reissue: kind === 'review' && allowReissue && reissue, reissueDays: Number(reissueDays || '0'), reissueNote });
+          onSubmit({ decision: decision as DecisionPayload['decision'], vendorCost: Number(vc || '0'), markupPct: Number(mk || '0'), dueDays: Number(days || '0'), notes, reissue: kind === 'review' && allowReissue && reissue, reissueDays: Number(reissueDays || '0'), reissueNote, finalize: kind === 'bid' ? finalize : 'assign' });
         }}
         className={`w-full rounded-xl py-3 font-heading font-bold text-sm ${
           !canSubmit ? 'bg-gray-200 text-gray-400'
@@ -746,6 +821,58 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
       {kind === 'review' && reissue && !reissueOk && <div className="text-[12px] font-semibold text-amber-600 text-center -mt-1">Enter the days to complete the re-issued service.</div>}
       {error && <div className="text-center text-xs text-red-600">{error}</div>}
       </>)}
+    </section>
+  );
+}
+
+// Visit summary for a bid item — the original order it was spawned from, this
+// bid, and the holistic visit total. Vendors see the vendor-cost (payout) side;
+// internal reviewers also get the client-cost (billed) column + this bid's markup,
+// so they can tell real added work from a trip fee on the original. The two orders
+// stay SEPARATE records/billing lines — this is a read-only roll-up.
+function OriginalVisitCard({ oo, bidVendor, bidClient, bidMarkup, isInternal }: {
+  oo: OriginalOrderView;
+  bidVendor: number; bidClient: number | null; bidMarkup: number | null; isInternal: boolean;
+}) {
+  const ov = oo.vendorCost ?? 0;
+  const oc = oo.clientCost ?? 0;
+  const totalVendor = ov + bidVendor;
+  const totalClient = oc + (bidClient ?? 0);
+  const showClient = isInternal && oo.clientCost != null;
+  const cols = showClient ? 'grid-cols-[1fr_auto_auto]' : 'grid-cols-[1fr_auto]';
+  const cell = 'text-[13px] tabular-nums text-right';
+  return (
+    <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-heading font-bold text-[14px] text-ink">Visit summary</div>
+        <Link href={`/services/${encodeURIComponent(oo.id)}`} className="text-[12px] text-brand font-heading font-semibold underline shrink-0">View original order →</Link>
+      </div>
+      <div className={`grid ${cols} gap-x-4 gap-y-1.5 items-baseline`}>
+        <div />
+        <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 text-right">Vendor</div>
+        {showClient && <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 text-right">Client</div>}
+
+        <div className="text-[13px] text-gray-500">
+          Original visit
+          <span className="block text-[11px] text-gray-400">{oo.worktypeLabel}{oo.date ? ` · ${fmtMDY(oo.date)}` : ''}</span>
+        </div>
+        <div className={`${cell} text-gray-700`}>{money(oo.vendorCost)}</div>
+        {showClient && <div className={`${cell} text-gray-700`}>{money(oo.clientCost)}</div>}
+
+        <div className="text-[13px] text-gray-500">
+          This bid
+          {isInternal && bidMarkup != null && <span className="block text-[11px] text-gray-400">{bidMarkup}% markup</span>}
+        </div>
+        <div className={`${cell} text-gray-700`}>{money(bidVendor)}</div>
+        {showClient && <div className={`${cell} text-gray-700`}>{money(bidClient)}</div>}
+
+        <div className="text-[13px] font-heading font-bold text-ink border-t border-gray-100 pt-1.5">Total visit</div>
+        <div className={`${cell} font-bold text-ink border-t border-gray-100 pt-1.5`}>{money(totalVendor)}</div>
+        {showClient && <div className={`${cell} font-bold text-ink border-t border-gray-100 pt-1.5`}>{money(totalClient)}</div>}
+      </div>
+      <p className="text-[12px] text-gray-500">
+        The original order already paid the vendor {money(oo.vendorCost)}. Compare it against this bid to tell real added work from a trip fee — the two stay separate orders.
+      </p>
     </section>
   );
 }
@@ -1107,13 +1234,19 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     setDeciding(true); setError('');
     try {
       const body: any = { decision: p.decision, notes: p.notes };
-      if (p.decision !== 'reject') { body.vendorCost = p.vendorCost; body.markupPct = p.markupPct; body.dueDays = p.dueDays; }
+      if (p.decision !== 'reject') {
+        body.vendorCost = p.vendorCost; body.markupPct = p.markupPct;
+        body.finalize = p.finalize;
+        if (p.finalize !== 'complete') body.dueDays = p.dueDays;   // due date only when assigning
+      }
       const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/bid-decision`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || 'Could not save decision.'); return; }
-      setDoneStatus('decided');
+      // A completed bid gets the "closed out" screen; an assigned/canceled one the
+      // "decision recorded" screen.
+      setDoneStatus(d.status === 'completed' ? 'completed' : 'decided');
     } catch { setError('Couldn’t reach the server. Try again.'); }
     finally { setDeciding(false); }
   };
@@ -1393,7 +1526,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
           <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center mt-6">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
             <div className="font-heading font-extrabold text-lg text-ink">Decision recorded</div>
-            <p className="text-sm text-gray-500 mt-1">The bid decision was saved. Approved bids move to <b>Assigned</b> and follow the normal cadence; rejected bids are <b>Canceled</b>.</p>
+            <p className="text-sm text-gray-500 mt-1">The bid decision was saved. Approved bids move to <b>Assigned</b> and follow the normal cadence (or straight to <b>Completed</b> when the work was already done); rejected bids are <b>Canceled</b>.</p>
             <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
           </div>
         ) : doneStatus === 'completed' ? (
@@ -1642,6 +1775,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                     <p className="text-[13px] text-gray-700 whitespace-pre-line">{svc.description}</p>
                     <p className="text-[12px] text-gray-400 mt-1.5">Submitted by {svc.vendor || 'the vendor'} while completing a {worktypeLabel(svc.worktype)} service.</p>
                   </CollapsibleSection>
+                )}
+                {svc.isBidItem && svc.originalOrder && (
+                  <OriginalVisitCard oo={svc.originalOrder} bidVendor={svc.vendorCost ?? 0} bidClient={svc.clientCost} bidMarkup={svc.markupPct} isInternal={isInternal} />
                 )}
                 {isInternal && (svc.aiVerdict || svc.aiNotes) && (
                   <CollapsibleSection title="AI review" bodyClass=""
