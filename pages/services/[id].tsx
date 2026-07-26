@@ -723,8 +723,8 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
           <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-2">Then</div>
           <div className="grid grid-cols-2 gap-2">
             {([
-              ['assign', 'Assign to vendor', 'Work still to be done'],
-              ['complete', 'Mark complete', 'Vendor already did it'],
+              ['assign', 'Move into Assigned', 'Work still to be done'],
+              ['complete', 'Mark as Completed', 'Vendor already did it'],
             ] as const).map(([val, label, hint]) => {
               const on = finalize === val;
               return (
