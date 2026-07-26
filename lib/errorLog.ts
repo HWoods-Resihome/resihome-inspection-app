@@ -79,6 +79,23 @@ function clip(s: unknown, n = 500): string | undefined {
   return String(s).slice(0, n);
 }
 
+// Known NON-ACTIONABLE noise (browser-extension / Outlook-injected rejections,
+// opaque cross-origin "Script error.", GPU resets, benign Next hard-nav). The
+// client reporter drops these before sending, but entries recorded BEFORE that
+// filter shipped still sit in the blob log — so we also drop them on READ, which
+// keeps the Admin Error Log and triage clean without a purge. Message-based.
+const NOISE_PATTERNS: RegExp[] = [
+  /Object Not Found Matching Id.*MethodName/i,
+  /^\s*script error\.?\s*$/i,
+  /GPU process (was )?(terminated|lost|crashed)|WebGL context/i,
+  /attempted to hard navigate to the same URL/i,
+  /ResizeObserver loop/i,
+];
+export function isNoiseErrorMessage(message?: string | null): boolean {
+  const m = String(message || '');
+  return NOISE_PATTERNS.some((re) => re.test(m));
+}
+
 /**
  * Record one error event. Best-effort; never throws. Safe to call from any API
  * route or telemetry sink. No-op (log line only) when blob storage isn't
@@ -145,7 +162,7 @@ export async function readErrorLog(limit = 200): Promise<ErrorEvent[]> {
     seen.sort((a, b) => (a.pathname < b.pathname ? 1 : a.pathname > b.pathname ? -1 : 0)); // newest first
     const top = seen.slice(0, limit);
     const events = await Promise.all(top.map((b) => fetch(b.url).then((r) => r.json()).catch(() => null)));
-    for (const ev of events) if (ev) out.push(ev as ErrorEvent);
+    for (const ev of events) if (ev && !isNoiseErrorMessage((ev as ErrorEvent).message)) out.push(ev as ErrorEvent);
   } catch (e: any) {
     console.warn('[error-log] read failed:', String(e?.message || e).slice(0, 120));
   }
