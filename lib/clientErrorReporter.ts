@@ -49,11 +49,18 @@ function shouldSend(signature: string): boolean {
  *    back to a hard nav, then refuses to reload the identical URL. Harmless (the
  *    user stays put with slightly stale data) and escapes the caller's .catch()
  *    because Next throws it at the window level, not through the returned promise.
+ *  - "Object Not Found Matching Id:N, MethodName:update, ParamCount:4" — NOT our
+ *    code. It's injected by Microsoft Outlook's Safe Links / email link-preview
+ *    scanner (and some browser extensions), which run a helper script in the page
+ *    when a resiwalk.com link is opened from Outlook. It references an internal
+ *    "communicator" object that isn't there and rejects. Nothing we can fix; it
+ *    only buries real crashes.
  */
 function isNoise(message: string, context?: ErrorContext): boolean {
   if (/^\s*script error\.?\s*$/i.test(message)) return true;
   if (/GPU process (was )?(terminated|lost|crashed)|WebGL context/i.test(message)) return true;
   if (/attempted to hard navigate to the same URL/i.test(message)) return true;
+  if (/Object Not Found Matching Id:\d+,\s*MethodName:/i.test(message)) return true;
   if (context && String((context as any).inspectionId || '') === '_precache_shell_') return true;
   return false;
 }

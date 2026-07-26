@@ -564,7 +564,7 @@ export default function ExistingInspection() {
           {pdfUrl && (
             <a
               href={pdfUrl}
-              onClick={(e) => { e.preventDefault(); openPdf(pdfUrl, `${templateLabel} Report`); }}
+              onClick={(e) => { e.preventDefault(); openPdf(pdfUrl, `${templateLabelFor(inspection?.templateType || '') || inspection?.templateType || 'Inspection'} Report`); }}
               className="text-brand underline block cursor-pointer"
             >
               View PDF Report
