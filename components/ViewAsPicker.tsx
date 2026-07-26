@@ -15,9 +15,6 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  // When the search input is focused the on-screen keyboard covers the lower
-  // half, so pin the modal to the TOP for max list room; re-center on blur.
-  const [kbOpen, setKbOpen] = useState(false);
 
   useEffect(() => {
     const usersP = fetch('/api/admin/impersonate-users')
@@ -61,8 +58,12 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
     window.location.href = '/app'; // reload as the impersonated user (into the app, not marketing)
   };
 
+  // Top-anchored (not centered): the modal opens short while the list loads, then
+  // grows DOWNWARD as users arrive — so the header + search bar never move under
+  // your finger. Centering made the search bar jump up on load, so a tap meant for
+  // it landed on a just-loaded name.
   return (
-    <div className={`fixed inset-0 z-[2500] bg-black/50 flex justify-center p-4 ${kbOpen ? 'items-start' : 'items-center'}`} onClick={onClose}>
+    <div className="fixed inset-0 z-[2500] bg-black/50 flex justify-center items-start p-4 pt-[max(1rem,7vh)]" onClick={onClose}>
       <div
         className="bg-white w-full max-w-md rounded-2xl max-h-[85vh] flex flex-col overflow-hidden shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -79,11 +80,6 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            onFocus={() => setKbOpen(true)}
-            // Defer the re-center so a tap on a result row registers its click
-            // BEFORE the layout shifts (otherwise the row moves out from under
-            // the finger and the tap is lost).
-            onBlur={() => window.setTimeout(() => setKbOpen(false), 250)}
             placeholder="Search users or vendors…"
             className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2 text-base bg-white text-ink placeholder-gray-400"
           />
