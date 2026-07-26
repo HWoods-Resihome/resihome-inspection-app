@@ -788,9 +788,6 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit, allowReissue = false
               );
             })}
           </div>
-          {completeNow && (
-            <p className="text-[12px] text-gray-500 mt-2">Closes straight to <b>Completed</b> — it flows to billing now and the vendor is emailed a completion confirmation with the PDF.</p>
-          )}
         </div>
       )}
 
