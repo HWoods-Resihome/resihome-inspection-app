@@ -70,7 +70,12 @@ interface OriginalOrderView {
   vendorCost: number | null;
   clientCost: number | null;   // internal-only (stripped for vendors)
   date: string;                // completed / service-completed / due date (M-D-YY-ready ISO)
+  // The original visit's photos (before/after/pet/job), grouped, so the bid's
+  // Photos section can show the full scope the estimate was written against.
+  photos: OrigPhotoGroup[];
 }
+
+interface OrigPhotoGroup { id: string; label: string; urls: string[]; }
 
 interface SubmittedBidView {
   id: string;
@@ -186,6 +191,23 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     if (prec) {
       const pp = prec.props;
       const pnum = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+      // Original visit photos, grouped. Filter to hosted (http) URLs so a legacy
+      // blob:/ref: draft never renders as a broken image.
+      const hosted = (v: any): string[] => splitUrls(v).filter((u) => /^https?:\/\//i.test(u));
+      const photoGroups: OrigPhotoGroup[] = [];
+      const pushG = (gid: string, label: string, urls: string[]) => { if (urls.length) photoGroups.push({ id: gid, label, urls }); };
+      pushG('orig:before', 'Original visit — before', hosted(pp.before_photo_urls));
+      pushG('orig:after', 'Original visit — after', hosted(pp.after_photo_urls));
+      pushG('orig:petBefore', 'Original visit — pet station before', hosted(pp.pet_before_photo_urls));
+      pushG('orig:petAfter', 'Original visit — pet station after', hosted(pp.pet_after_photo_urls));
+      try {
+        const oa = JSON.parse(pp.answers_json || '{}');
+        const extra: string[] = [];
+        for (const k of Object.keys(oa)) {
+          if (k.endsWith('__photos') && Array.isArray(oa[k])) extra.push(...oa[k].filter((u: any) => typeof u === 'string' && /^https?:\/\//i.test(u)));
+        }
+        pushG('orig:job', 'Original visit — job photos', extra);
+      } catch { /* no answer photos */ }
       svc.originalOrder = {
         id: prec.id,
         address: pp.address_snapshot || pp.service_name || '(Order)',
@@ -194,6 +216,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         vendorCost: pnum(pp.vendor_cost),
         clientCost: pnum(pp.client_cost),
         date: normDate(pp.completed_at || pp.service_completed_date || pp.due_date),
+        photos: photoGroups,
       };
     }
   }
@@ -1328,6 +1351,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       const ph = (svc.answers as any)?.[`${q.id}__photos`];
       if (Array.isArray(ph) && ph.length) add(`q:${q.id}`, q.label, ph);
     }
+    // Bid item: the original visit's photos, so tapping one opens the same viewer.
+    for (const g of (svc.originalOrder?.photos || [])) add(g.id, g.label, g.urls);
     return { groups, map };
   }, [svc, form]);
   const [lightbox, setLightbox] = useState<{ groupId: string; index: number } | null>(null);
@@ -1879,6 +1904,19 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                     return gq && ph.length ? <PhotoGrid key="grass_height" label={gq.label} urls={ph} onOpen={(i) => setLightbox({ groupId: 'q:grass_height', index: i })} /> : null;
                   })()}
                   <PhotoGrid label={svc.isBidItem ? 'Bid photos' : 'Before photos'} urls={svc.before} onOpen={(i) => setLightbox({ groupId: 'before', index: i })} />
+                  {/* Bid item: the original visit's photos, so the estimate can be
+                      judged against the full scope that was on-site. */}
+                  {svc.isBidItem && svc.originalOrder && svc.originalOrder.photos.length > 0 && (
+                    <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-gray-500">From the original visit</div>
+                        <Link href={`/services/${encodeURIComponent(svc.originalOrder.id)}`} className="text-[12px] text-brand font-heading font-semibold underline shrink-0">Open order →</Link>
+                      </div>
+                      {svc.originalOrder.photos.map((g) => (
+                        <PhotoGrid key={g.id} label={g.label} urls={g.urls} onOpen={(i) => setLightbox({ groupId: g.id, index: i })} />
+                      ))}
+                    </div>
+                  )}
                   {!svc.isBidItem && <PhotoGrid label="After photos" urls={svc.after} onOpen={(i) => setLightbox({ groupId: 'after', index: i })} />}
                   {!svc.isBidItem && <PhotoGrid label="Pet station — before" urls={svc.petBefore} onOpen={(i) => setLightbox({ groupId: 'petBefore', index: i })} />}
                   {!svc.isBidItem && <PhotoGrid label="Pet station — after" urls={svc.petAfter} onOpen={(i) => setLightbox({ groupId: 'petAfter', index: i })} />}
