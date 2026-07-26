@@ -48,6 +48,32 @@ export interface ErrorEvent {
 
 const PREFIX = 'errorlog/';
 
+// Per-instance dedup for the BLOB write only. Field reality floods the log with
+// identical events: a background sync retrying a write the guard denies (a
+// completed/foreign inspection) re-fires a `write_denied` every tick; a burst of
+// 429 backpressure surfaces the same "too many requests" over and over. Dozens of
+// byte-identical rows bury the real crashes the triage is meant to surface. So we
+// collapse an identical signature (kind + email + inspectionId + message) to at
+// most one blob per window. The authoritative structured console line is STILL
+// emitted every time (nothing is hidden from Vercel/grep) — only the Admin Error
+// Log's durable copy is deduped. Per-instance (like every other limiter here); a
+// flood hits a warm instance, which is exactly when dedup matters most.
+const DEDUPE_WINDOW_MS = Math.max(60_000, Number(process.env.ERROR_LOG_DEDUPE_MS) || 10 * 60_000);
+const lastLoggedAt = new Map<string, number>();
+
+function shouldPersist(signature: string): boolean {
+  const now = Date.now();
+  const prev = lastLoggedAt.get(signature);
+  if (prev != null && now - prev < DEDUPE_WINDOW_MS) return false;
+  lastLoggedAt.set(signature, now);
+  // Bound the map so a long-lived instance seeing many distinct signatures can't
+  // grow it without limit — evict entries already past the window.
+  if (lastLoggedAt.size > 5000) {
+    for (const [k, t] of lastLoggedAt) if (now - t >= DEDUPE_WINDOW_MS) lastLoggedAt.delete(k);
+  }
+  return true;
+}
+
 function clip(s: unknown, n = 500): string | undefined {
   if (s == null || s === '') return undefined;
   return String(s).slice(0, n);
@@ -75,11 +101,16 @@ export async function recordErrorEvent(e: Partial<ErrorEvent> & { kind: ErrorKin
     meta: e.meta,
   };
 
-  // 1) Structured log — authoritative, greppable in Vercel logs.
+  // 1) Structured log — authoritative, greppable in Vercel logs. ALWAYS emitted,
+  //    even for a deduped repeat, so nothing is ever hidden from the Vercel logs.
   try { console.error(`[error-log] ${JSON.stringify(ev)}`); } catch { /* noop */ }
 
   // 2) Best-effort blob (append-only; ms-prefixed name sorts chronologically).
+  //    Deduped: an identical signature within the window is already on record, so
+  //    skip the write instead of flooding the Admin Error Log with copies.
   if (!process.env.BLOB_READ_WRITE_TOKEN) return;
+  const signature = `${ev.kind}|${ev.email || ''}|${ev.inspectionId || ''}|${ev.message}`;
+  if (!shouldPersist(signature)) return;
   const name = `${Date.now().toString().padStart(15, '0')}-${Math.random().toString(36).slice(2, 7)}`;
   try {
     await put(`${PREFIX}${name}.json`, JSON.stringify(ev),
