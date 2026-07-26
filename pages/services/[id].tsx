@@ -1907,7 +1907,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                     <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 space-y-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="text-[11px] font-bold uppercase tracking-wide text-gray-500">From the original visit</div>
-                        <Link href={`/services/${encodeURIComponent(svc.originalOrder.id)}`} className="text-[12px] text-brand font-heading font-semibold underline shrink-0">Open order →</Link>
+                        <Link href={`/services/${encodeURIComponent(svc.originalOrder.id)}`} className="text-[12px] text-brand font-heading font-semibold underline shrink-0">View original order →</Link>
                       </div>
                       {svc.originalOrder.photos.map((g) => (
                         <PhotoGrid key={g.id} label={g.label} urls={g.urls} onOpen={(i) => setLightbox({ groupId: g.id, index: i })} />
