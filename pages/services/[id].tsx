@@ -11,7 +11,7 @@ import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricin
 import { DEFAULT_SERVICE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SERVICE_STATUS_STYLE, serviceStatusText, easternTodayISO, PROOF_URL_KEY, PROOF_NAME_KEY, type ServiceStatus, type ServiceRecord } from '@/lib/services/model';
 import { serviceVisibleTo } from '@/lib/services/scope';
-import { fetchServiceWorkOrder, fetchPropertyLockInfo, fetchPropertyMoveInDate, readServiceForms } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, findServiceBidChildren, fetchPropertyLockInfo, fetchPropertyMoveInDate, readServiceForms } from '@/lib/hubspot';
 import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
 import { reviewerDisplayName } from '@/lib/reviewerName';
 import type { AuditEvent } from '@/lib/auditLog';
@@ -57,6 +57,9 @@ interface ServiceView {
   // the bid against what was already paid — real added work vs. a trip fee on the
   // original — and see the holistic visit total. clientCost is internal-only.
   originalOrder?: OriginalOrderView | null;
+  // The reverse link: on a normal order, the bid(s) the vendor submitted while
+  // completing it (extra work they flagged). clientCost is internal-only.
+  bids?: SubmittedBidView[];
 }
 
 interface OriginalOrderView {
@@ -67,6 +70,14 @@ interface OriginalOrderView {
   vendorCost: number | null;
   clientCost: number | null;   // internal-only (stripped for vendors)
   date: string;                // completed / service-completed / due date (M-D-YY-ready ISO)
+}
+
+interface SubmittedBidView {
+  id: string;
+  description: string;
+  vendorCost: number | null;
+  clientCost: number | null;   // internal-only (stripped for vendors)
+  status: string;
 }
 
 const EDITABLE = new Set(['', 'estimated', 'assigned']);
@@ -187,6 +198,23 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     }
   }
 
+  // The reverse: on a NORMAL order, surface any bid(s) the vendor submitted while
+  // completing it — the flagged extra work — so the office knows a bid exists and
+  // can open it. (One search; skipped for bid items themselves.)
+  if (!svc.isBidItem && /^\d+$/.test(id)) {
+    const children = await findServiceBidChildren(id).catch(() => []);
+    if (children.length) {
+      const pnum = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+      svc.bids = children.map((c) => ({
+        id: c.id,
+        description: String(c.props.service_description || ''),
+        vendorCost: pnum(c.props.vendor_cost),
+        clientCost: pnum(c.props.client_cost),
+        status: String(c.props.status || ''),
+      }));
+    }
+  }
+
   // Internal-only data must never reach a vendor's client — the UI already hides
   // it, but the props are serialized into the page (visible in source), so strip
   // it server-side: the AI QC review (verdict + notes) and our margin/client price.
@@ -195,6 +223,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     svc.aiVerdict = ''; svc.aiNotes = '';
     svc.markupPct = null; svc.clientCost = null;
     if (svc.originalOrder) svc.originalOrder.clientCost = null;   // margin stays internal
+    if (svc.bids) svc.bids = svc.bids.map((b) => ({ ...b, clientCost: null }));
   }
   const savedForms = await readServiceForms().catch(() => null);
   const formSet: Record<string, any[]> = { ...DEFAULT_SERVICE_FORMS, ...(savedForms || {}) };
@@ -873,6 +902,36 @@ function OriginalVisitCard({ oo, bidVendor, bidClient, bidMarkup, isInternal }: 
       <p className="text-[12px] text-gray-500">
         The original order already paid the vendor {money(oo.vendorCost)}. Compare it against this bid to tell real added work from a trip fee — the two stay separate orders.
       </p>
+    </section>
+  );
+}
+
+// Bids submitted against a normal order — the extra work the vendor flagged while
+// completing it. Shows each bid's description + vendor cost (client cost internal-
+// only) with a short link to the bid's own service record. The bid is a SEPARATE
+// order; this is just the pointer from the visit it came off of.
+function SubmittedBidsCard({ bids, isInternal }: { bids: SubmittedBidView[]; isInternal: boolean }) {
+  return (
+    <section className="bg-white border border-rose-200 rounded-2xl p-4 space-y-3">
+      <div className="font-heading font-bold text-[14px] text-ink">{bids.length === 1 ? 'Bid submitted' : `Bids submitted (${bids.length})`}</div>
+      <div className="space-y-2.5">
+        {bids.map((bd) => {
+          const style = SERVICE_STATUS_STYLE[(bd.status || 'estimated') as ServiceStatus] || SERVICE_STATUS_STYLE.estimated;
+          return (
+            <div key={bd.id} className="rounded-xl border border-gray-200 p-3">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${style}`}>{serviceStatusText((bd.status || 'estimated') as ServiceStatus, isInternal)}</span>
+                <Link href={`/services/${encodeURIComponent(bd.id)}`} className="text-[12px] text-brand font-heading font-semibold underline shrink-0">Open bid →</Link>
+              </div>
+              {bd.description && <p className="text-[13px] text-gray-700 whitespace-pre-line">{bd.description}</p>}
+              <div className="flex items-baseline gap-4 mt-1.5 text-[13px] tabular-nums">
+                <span className="text-gray-500">Vendor <b className="text-ink">{money(bd.vendorCost)}</b></span>
+                {isInternal && bd.clientCost != null && <span className="text-gray-500">Client <b className="text-ink">{money(bd.clientCost)}</b></span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -1770,6 +1829,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             ) : (
               /* ── Read-only view (submitted / review / completed / bid) ── */
               <>
+                {!svc.isBidItem && svc.bids && svc.bids.length > 0 && (
+                  <SubmittedBidsCard bids={svc.bids} isInternal={isInternal} />
+                )}
                 {svc.isBidItem && svc.description && (
                   <CollapsibleSection title="Bid request" bodyClass="">
                     <p className="text-[13px] text-gray-700 whitespace-pre-line">{svc.description}</p>
