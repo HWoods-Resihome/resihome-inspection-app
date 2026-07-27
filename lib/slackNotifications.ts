@@ -23,6 +23,11 @@ export const DEFAULT_SANDBOX_CHANNEL = 'C06CW2VMJNR';
 export const SLACK_NOTIFICATIONS: { key: string; name: string; defaultSandbox?: boolean; defaultChannel?: string }[] = [
   { key: 'scope_pending', name: 'Scope Review — Pending Approval' },
   { key: 'scope_approved', name: 'Scope Review — Approved' },
+  // Turn Re-Inspect / New Construction RRQC result cards. Live channels are
+  // DYNAMIC (per-region PASS/FAIL POD channels), so no defaultChannel override.
+  // Ship DARK (defaultSandbox) until the HubSpot workflows are turned off.
+  { key: 'reinspect_result', name: 'Turn Re-Inspect — Pass/Fail', defaultSandbox: true },
+  { key: 'rrqc_result', name: 'New Construction RRQC — Pass/Fail', defaultSandbox: true },
   { key: 'listing_price', name: '1099 Listing Price Recommendation', defaultSandbox: true, defaultChannel: 'C04K24M3UH5' },
   { key: 'ppw_grass_fail', name: '1099 Grass Fail — PPW Dispatch', defaultChannel: '#1099-agent-ppw-fails' },
   { key: 'ppw_pool_fail', name: '1099 Pool Fail — PPW Dispatch', defaultChannel: 'C0BBHHQSRQT' },

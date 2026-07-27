@@ -16,6 +16,8 @@ import { templateLabel } from '@/lib/templateLabels';
 import { notifyInspectionCompleted } from '@/lib/notifications/triggers';
 import { appBaseUrl } from '@/lib/notifications/send';
 import { reqOriginOf } from '@/lib/appUrl';
+import { postReinspectResultAlert } from '@/lib/reinspectAlerts';
+import { waitUntil } from '@vercel/functions';
 
 /**
  * Finalize an existing inspection. All answers should already be saved via
@@ -338,6 +340,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         } catch (e) {
           console.warn('[submit] RRQC property stamp skipped (continuing):', e);
         }
+        // New Construction RRQC result alert → leasing POD Slack channel (pass/
+        // fail), on EVERY completion. Deferred; gated + region-routed inside;
+        // ships dark until enabled.
+        waitUntil(
+          postReinspectResultAlert({ inspectionId: id, templateType: 'qc_new_construction_rrqc', baseUrl: reqOriginOf(req) })
+            .catch((e) => console.warn('[submit] RRQC alert failed:', e?.message || e)),
+        );
       }
     }
     // Record WHO submitted for approval and WHEN — used to lock the submitter out

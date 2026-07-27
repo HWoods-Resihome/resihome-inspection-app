@@ -8413,6 +8413,94 @@ export async function writeInspectionSlackLink(inspectionRecordId: string, perma
   }
 }
 
+// ── Turn Re-Inspect / New Construction RRQC result alerts — property + leasing
+// context. Region + Move-In Ready Date live on the Property; active leasing deals
+// drive the "lease in motion / prioritize" flags and the per-deal note logging. ──
+export interface ReinspectPropertyContext { region: string | null; mird: string | null }
+export async function fetchPropertyReinspectContext(propertyRecordId: string): Promise<ReinspectPropertyContext> {
+  if (!propertyRecordId) return { region: null, mird: null };
+  const { property } = typeIds();
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${property}/${propertyRecordId}?properties=region,move_in_ready_date`);
+    const p = resp?.properties || {};
+    return {
+      region: (p.region || '').toString().trim() || null,
+      mird: (p.move_in_ready_date || '').toString().trim() || null,
+    };
+  } catch (e) {
+    console.warn('[reinspect] property region/MIRD read failed:', e);
+    return { region: null, mird: null };
+  }
+}
+
+export interface LeaseDeal { id: string; name: string; stageId: string; leaseStartRaw: string | null }
+/**
+ * Active leasing-pipeline deals on a property, restricted to the watched stages,
+ * soonest lease-start first (deals with no start date sort last). Fail-open → []
+ * so a result alert never breaks on a deals lookup error.
+ */
+export async function fetchActiveLeaseDeals(
+  propertyRecordId: string,
+  opts: { pipelineId: string; stageIds: string[] },
+): Promise<LeaseDeal[]> {
+  if (!propertyRecordId) return [];
+  const { property } = typeIds();
+  const DEALS = (process.env.HUBSPOT_DEALS_TYPE_ID || '0-3').trim();
+  const watched = new Set((opts.stageIds || []).map(String));
+  let dealIds: string[] = [];
+  try {
+    const a = await hubspotFetch(`/crm/v4/objects/${property}/${propertyRecordId}/associations/${DEALS}?limit=100`);
+    dealIds = (a?.results || []).map((r: any) => String(r.toObjectId)).filter(Boolean);
+  } catch (e) { console.warn('[reinspect] property→deals association failed:', e); return []; }
+  if (!dealIds.length) return [];
+  let deals: any[] = [];
+  try {
+    const b = await hubspotFetch(`/crm/v3/objects/deals/batch/read`, {
+      method: 'POST',
+      body: JSON.stringify({ properties: ['dealname', 'pipeline', 'dealstage', 'lease_start_date'], inputs: dealIds.map((id) => ({ id })) }),
+    });
+    deals = b?.results || [];
+  } catch (e) { console.warn('[reinspect] deals batch read failed:', e); return []; }
+  const ms = (raw: string | null): number => {
+    if (!raw) return Infinity;
+    const d = /^\d+$/.test(String(raw)) ? new Date(Number(raw)) : new Date(String(raw));
+    return isNaN(+d) ? Infinity : +d;
+  };
+  const out: LeaseDeal[] = deals
+    .filter((d) => { const p = d.properties || {}; return p.pipeline === opts.pipelineId && watched.has(String(p.dealstage)); })
+    .map((d) => { const p = d.properties || {}; return { id: String(d.id), name: p.dealname || 'Deal', stageId: String(p.dealstage), leaseStartRaw: p.lease_start_date || null }; });
+  out.sort((x, y) => ms(x.leaseStartRaw) - ms(y.leaseStartRaw));
+  return out;
+}
+
+/** Create a note on a deal (HTML body), associated Note→Deal. Best-effort → note id or null. */
+export async function logDealNote(dealId: string, htmlBody: string): Promise<string | null> {
+  if (!dealId) return null;
+  const NOTE_TO_DEAL = 214; // HubSpot default Note→Deal association type
+  try {
+    const created = await hubspotFetch(`/crm/v3/objects/notes`, {
+      method: 'POST',
+      body: JSON.stringify({
+        properties: { hs_timestamp: new Date().toISOString(), hs_note_body: String(htmlBody || '').slice(0, 65000) },
+        associations: [{ to: { id: String(dealId) }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: NOTE_TO_DEAL }] }],
+      }),
+    });
+    return created?.id ? String(created.id) : null;
+  } catch (e) { console.warn(`[reinspect] deal note failed for ${dealId}:`, e); return null; }
+}
+
+/** Set a property's Move-In Ready Date (from the Slack "Update MIRD" modal). */
+export async function updatePropertyMoveInReadyDate(propertyRecordId: string, isoDate: string): Promise<void> {
+  const { property } = typeIds();
+  // HubSpot date properties take midnight-UTC epoch ms; accept a YYYY-MM-DD input.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoDate || ''));
+  const value = m ? String(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) : String(isoDate);
+  await hubspotFetch(`/crm/v3/objects/${property}/${propertyRecordId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: { move_in_ready_date: value } }),
+  });
+}
+
 // ── Slack-notification admin config (on/off + sandbox), JSON on the Agent record ──
 const APP_SLACK_NOTIFS_PROP = 'app_slack_notifications_json';
 export type SlackNotifConfigMap = Record<string, { enabled?: boolean; sandbox?: boolean; sandboxChannel?: string; channel?: string }>;

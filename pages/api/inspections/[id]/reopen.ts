@@ -38,10 +38,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // deliberate action, not an implicit resurrection).
       return res.status(409).json({ error: `This inspection can't be reopened from its current state (${existing.status || 'unknown'}).` });
     }
-    // Reopen → in_progress and CLEAR completed_at (it's no longer complete). The
-    // first-completion stamp is preserved separately, and re-completing re-stamps
-    // completed_at, so the historical record stays intact.
-    await updateInspection(id, { status: 'in_progress', completed_at: '' });
+    // Reopen → in_progress and CLEAR completed_at (it's no longer complete). Also
+    // clear completion_emailed_at so the NEXT completion (after the edit) sends a
+    // fresh completion email with the regenerated report — an edited Overall
+    // Result must not be suppressed by the prior cycle's "already emailed" stamp.
+    // The first-completion stamp is preserved separately, and re-completing
+    // re-stamps completed_at, so the historical record stays intact.
+    await updateInspection(id, { status: 'in_progress', completed_at: '', completion_emailed_at: '' });
     void recordAuditEvent({ inspectionId: id, action: 'reopen', actorEmail: session.email, actorName: session.name, detail: 'Reopened for editing' });
     return res.status(200).json({ success: true });
   } catch (e: any) {

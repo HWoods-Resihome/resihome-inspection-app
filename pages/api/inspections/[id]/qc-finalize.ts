@@ -39,6 +39,8 @@ import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } fro
 import { buildShortLink } from '@/lib/shortLinks';
 import { reqOriginOf } from '@/lib/appUrl';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
+import { postReinspectResultAlert } from '@/lib/reinspectAlerts';
+import { waitUntil } from '@vercel/functions';
 
 export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
 
@@ -466,6 +468,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     } catch (e) {
       console.warn('[qc-finalize] completion email skipped (continuing):', e);
     }
+
+    // Turn Re-Inspect result alert → leasing POD Slack channel (pass/fail), on
+    // EVERY completion (incl. a reopen → re-finalize). Deferred so the reviewer's
+    // screen never waits; gated + region-routed inside; ships dark until enabled.
+    waitUntil(
+      postReinspectResultAlert({ inspectionId: id, templateType: 'pm_turn_reinspect_qc', baseUrl: reqOriginOf(req) })
+        .catch((e) => console.warn('[qc-finalize] reinspect alert failed:', e?.message || e)),
+    );
 
     res.status(200).json({
       success: true,
