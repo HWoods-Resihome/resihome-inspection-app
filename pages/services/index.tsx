@@ -6,6 +6,7 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isInternalEmail } from '@/lib/userAccess';
+import { isAppAdmin } from '@/lib/adminAccess';
 import { MultiFilter } from '@/components/MultiFilter';
 import { ListPicker } from '@/components/ListPicker';
 import { SettingsMenu } from '@/components/SettingsMenu';
@@ -42,6 +43,9 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       // Vendors granted Inspections access get the app switcher too.
       canSwitchApps: !session?.vendor || !!session?.vendorInspections,
       asVendor,
+      // TRUE app-admin (not the derived "internal creator" flag) — gates the
+      // admin-only Properties item in the app switcher.
+      appAdmin: session?.email ? await isAppAdmin(session.email).catch(() => false) : false,
     },
   };
 };
@@ -151,7 +155,7 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
   );
 }
 
-export default function ServicesHome({ userName, canCreate, asVendor, isVendor, canSwitchApps }: { userName: string; canCreate: boolean; asVendor: boolean; isVendor: boolean; canSwitchApps?: boolean }) {
+export default function ServicesHome({ userName, canCreate, asVendor, isVendor, canSwitchApps, appAdmin }: { userName: string; canCreate: boolean; asVendor: boolean; isVendor: boolean; canSwitchApps?: boolean; appAdmin?: boolean }) {
   const router = useRouter();
   // Deferred list load: gSSP ships NO rows (so tapping "Services" switches
   // screens instantly) — the list arrives from /api/services/list right after
@@ -512,6 +516,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
                     <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
                       <Link href="/app" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Inspections</Link>
                       <div className="px-4 py-2.5 text-sm font-semibold text-brand bg-brand/5">Services ✓</div>
+                      {appAdmin && <Link href="/properties" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Properties</Link>}
                     </div></>)}
                 </div>
               )}

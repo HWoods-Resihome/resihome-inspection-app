@@ -57,6 +57,14 @@ export interface Property {
   bathrooms?: number | null;
 }
 
+// A property row for the admin Properties list — Property plus the (best-effort)
+// community / subdivision grouping values, when the object carries them, so the
+// list can offer faceted Community/Subdivision filters alongside Region.
+export interface AdminPropertyRow extends Property {
+  community?: string;
+  subdivision?: string;
+}
+
 // Summary of an Inspection record for the list view (Round A).
 // Distinct from the SubmitPayload because we're reading rather than writing,
 // and we only need a subset of fields for the card display.

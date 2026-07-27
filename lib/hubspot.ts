@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { put } from '@vercel/blob';
-import type { Question, Property, HubSpotUser, InspectionSummary } from './types';
+import type { Question, Property, AdminPropertyRow, HubSpotUser, InspectionSummary } from './types';
 import type { ServiceRecord, ServiceStatus } from './services/model';
 import type { Worktype } from './services/worktypes';
 import { isInternalResolution } from './vendors';
@@ -777,6 +777,90 @@ export async function fetchPropertiesPage(
       bedrooms, bathrooms,
     });
   }
+  return { properties: out, after: resp.paging?.next?.after };
+}
+
+// ── Admin Properties list — search + optional region filter, cursor-paginated ──
+// Projection lists community/subdivision variants; HubSpot ignores unknown
+// projection names, so whichever the object actually carries populates the facet.
+const ADMIN_PROP_PROJECTION = [
+  'hs_object_id', 'name', 'address', 'city', 'state', 'state_code', 'zip', 'zip_code',
+  'region', 'bedrooms', 'bathrooms', PROPERTY_STATUS_PROPERTY,
+  'community', 'community_name', 'sub_division', 'neighborhood_name',
+];
+
+function mapAdminPropRow(r: any): AdminPropertyRow | null {
+  const p = r.properties || {};
+  const status = (p[PROPERTY_STATUS_PROPERTY] || '').toString().trim();
+  const address = p.address || '';
+  if (isHiddenProperty(status, address)) return null; // never list inactive/sold or test
+  const city = p.city || '';
+  const state = p.state_code || p.state || '';
+  const zip = (p.zip_code || p.zip || '').toString().trim();
+  let name = p.name || '';
+  if (!name) name = [address, city, state, zip].filter(Boolean).join(', ');
+  if (!name) name = `(Property ${r.id})`;
+  const { bedrooms, bathrooms } = pickBedBathFromProps(p);
+  return {
+    recordId: r.id, name,
+    address: address || undefined, city: city || undefined, state: state || undefined, zip: zip || undefined,
+    region: (p.region || '').toString().trim() || undefined,
+    status: status || undefined,
+    bedrooms, bathrooms,
+    community: (p.community || p.community_name || '').toString().trim() || undefined,
+    subdivision: (p.sub_division || p.neighborhood_name || '').toString().trim() || undefined,
+  };
+}
+
+/**
+ * The admin Properties list. Two modes, both returning a page + an opaque `after`
+ * cursor the caller passes back verbatim to load more:
+ *   • BROWSE (no search, no region) → the cursor-paginated LIST endpoint, because
+ *     search caps at 10k results and there are 15k+ properties. Powers the initial
+ *     page shown on open + "load more".
+ *   • SEARCH/FILTER (a search term and/or a region set) → the Search endpoint with
+ *     status-exclude + region IN AND-ed into every group and the term tokenized
+ *     exactly like fetchProperties (trailing-wildcard CONTAINS_TOKEN, ZIP EQ).
+ */
+export async function searchPropertiesAdmin(
+  opts: { search?: string; regions?: string[]; after?: string; limit?: number } = {},
+): Promise<{ properties: AdminPropertyRow[]; after?: string }> {
+  const { property: typeId } = typeIds();
+  const term = (opts.search || '').trim();
+  const regions = (opts.regions || []).map((r) => r.trim()).filter(Boolean);
+  const limit = Math.min(Math.max(opts.limit || 30, 1), 100);
+
+  // Browse mode: LIST endpoint (cursor), no 10k cap.
+  if (!term && regions.length === 0) {
+    const qs = new URLSearchParams({ limit: String(limit), properties: ADMIN_PROP_PROJECTION.join(','), archived: 'false' });
+    if (opts.after) qs.set('after', opts.after);
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}?${qs.toString()}`);
+    const out: AdminPropertyRow[] = [];
+    for (const r of resp.results || []) { const row = mapAdminPropRow(r); if (row) out.push(row); }
+    return { properties: out, after: resp.paging?.next?.after };
+  }
+
+  // Search/filter mode.
+  const base: any[] = [];
+  if (PROPERTY_EXCLUDE_STATUSES.length) base.push({ propertyName: PROPERTY_STATUS_PROPERTY, operator: 'NOT_IN', values: PROPERTY_EXCLUDE_STATUSES });
+  if (regions.length) base.push({ propertyName: 'region', operator: 'IN', values: regions });
+  const tokens = term ? term.split(/\s+/).filter(Boolean).slice(0, 5) : [];
+  let filterGroups: any[];
+  if (term) {
+    filterGroups = ['address', 'city'].map((f) => ({
+      filters: [...base, ...tokens.map((t) => ({ propertyName: f, operator: 'CONTAINS_TOKEN', value: `${t}*` }))],
+    }));
+    const zip = term.replace(/\s+/g, '');
+    if (/^\d{5}$/.test(zip)) filterGroups.push({ filters: [...base, { propertyName: 'zip_code', operator: 'EQ', value: zip }] });
+  } else {
+    filterGroups = [{ filters: base }];
+  }
+  const body: any = { filterGroups, properties: ADMIN_PROP_PROJECTION, limit };
+  if (opts.after) body.after = opts.after;
+  if (!term) body.sorts = [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }];
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, { method: 'POST', body: JSON.stringify(body) });
+  const out: AdminPropertyRow[] = [];
+  for (const r of resp.results || []) { const row = mapAdminPropRow(r); if (row) out.push(row); }
   return { properties: out, after: resp.paging?.next?.after };
 }
 
@@ -1801,6 +1885,27 @@ function mapServiceRow(r: any): ServiceRecord {
   const ref = String(p.property_id_ref || p.community_id_ref || '').trim();
   if (ref) rec.propertyId = ref;
   return rec;
+}
+
+/**
+ * ALL service work orders for a property (any worktype/status), newest-updated
+ * first, for the admin Properties page. Filters on property_id_ref EQ. Returns []
+ * when the services object isn't configured or on any search error (never throws).
+ */
+export async function fetchServicesForProperty(propertyRecordId: string, limit = 50): Promise<ServiceRecord[]> {
+  if (!propertyRecordId) return [];
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return [];
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+    method: 'POST',
+    body: JSON.stringify({
+      filterGroups: [{ filters: [{ propertyName: 'property_id_ref', operator: 'EQ', value: propertyRecordId }] }],
+      properties: SERVICE_LIST_PROPS,
+      sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }],
+      limit: Math.min(Math.max(limit, 1), 100),
+    }),
+  }).catch((e: any) => { console.warn('[fetchServicesForProperty]', e?.message || e); return { results: [] }; });
+  return (resp.results || []).map(mapServiceRow);
 }
 
 /** All Service Work Orders (up to `limit`). Returns null when the object type id
@@ -3668,6 +3773,27 @@ export async function fetchSourceRateCardInspections(
   };
   out.sort((a, b) => ts(b.submittedAt) - ts(a.submittedAt));
   return out;
+}
+
+/**
+ * ALL inspections for a property (any template/status), newest-created first, for
+ * the admin Properties page. Filters on property_id_ref EQ — the same linkage the
+ * inspection list uses. Best-effort: a search error yields an empty list, never
+ * throws, so one property can't break the page.
+ */
+export async function fetchInspectionsForProperty(propertyRecordId: string, limit = 50): Promise<InspectionSummary[]> {
+  if (!propertyRecordId) return [];
+  const { inspection: typeId } = typeIds();
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+    method: 'POST',
+    body: JSON.stringify({
+      filterGroups: [{ filters: [{ propertyName: 'property_id_ref', operator: 'EQ', value: propertyRecordId }] }],
+      properties: INSPECTION_LIST_PROPERTIES,
+      sorts: [{ propertyName: 'hs_createdate', direction: 'DESCENDING' }],
+      limit: Math.min(Math.max(limit, 1), 100),
+    }),
+  }).catch((e: any) => { console.warn('[fetchInspectionsForProperty]', e?.message || e); return { results: [] }; });
+  return (resp.results || []).map(mapInspectionRow);
 }
 
 /**

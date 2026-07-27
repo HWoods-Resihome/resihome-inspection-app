@@ -204,6 +204,7 @@ Don't read these whole — jump to the symbol.
 | `lib/email.ts` / `lib/gmail.ts` | — | Scope damages email compose + send |
 | `lib/notifications/*` | — | all toggle-gated notifications (`triggers.ts`, `send.ts`, `prefs.ts`) |
 | `middleware.ts` | — | auth, marketing-vs-app routing, CRON passthrough |
+| `pages/properties.tsx` | — | **Admin-only Properties browser** (app switcher → Properties). Search/region-driven list of the 15k+ properties; each card lazily loads recent inspections + services. Backed by `searchPropertiesAdmin` / `fetchInspectionsForProperty` / `fetchServicesForProperty` (hubspot.ts) via `/api/properties/list` + `/api/properties/[id]/activity` (both `isAppAdmin`-gated) |
 
 ---
 
