@@ -98,7 +98,16 @@ export default function PdfViewer({ url, title, onClose }: Props) {
       try {
         const pdfjs: any = await import('pdfjs-dist');
         pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
-        const pdf = await pdfjs.getDocument({ url }).promise;
+        // Fetch the bytes OURSELVES with no-store and hand pdf.js the raw data,
+        // instead of letting pdf.js fetch the url. pdf.js does its own (range-
+        // request) fetching with its own caching, which could keep serving a
+        // previously-loaded document under the stable /d/<id>/report url even
+        // after a regenerate. A no-store byte fetch is always the fresh file.
+        const resp = await fetch(url, { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`PDF fetch ${resp.status}`);
+        const data = await resp.arrayBuffer();
+        if (cancelled) return;
+        const pdf = await pdfjs.getDocument({ data }).promise;
         const pagesEl = pagesRef.current;
         if (cancelled || !pagesEl) return;
         pagesEl.innerHTML = '';
