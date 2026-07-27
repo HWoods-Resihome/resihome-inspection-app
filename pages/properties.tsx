@@ -19,6 +19,7 @@ import { searchPropertiesAdmin, fetchRegionEnumOptions } from '@/lib/hubspot';
 import type { AdminPropertyRow } from '@/lib/types';
 import { getAllCachedProperties, syncAllProperties, dropPropertyMemCache } from '@/lib/propertyCache';
 import { MultiFilter } from '@/components/MultiFilter';
+import { ListPicker } from '@/components/ListPicker';
 import { SettingsMenu } from '@/components/SettingsMenu';
 import { SERVICE_STATUS_STYLE, serviceStatusText, type ServiceStatus } from '@/lib/services/model';
 
@@ -114,6 +115,8 @@ const fmtDate = (v: string | null): string => {
 };
 const sortByDateDesc = <T extends { date: string | null }>(rows: T[]): T[] =>
   [...rows].sort((a, b) => toMs(b.date) - toMs(a.date));
+// Cancelled inspections/services don't count as a "last" date and aren't listed.
+const isCancelled = (status: string): boolean => /cancel/i.test(status || '');
 
 const addrKey = (p: AdminPropertyRow): string => (p.address || p.name || '').toLowerCase();
 const sortByAddress = (rows: AdminPropertyRow[]): AdminPropertyRow[] =>
@@ -130,9 +133,11 @@ const INSP_CHIP = 'bg-slate-100 text-slate-700 border-slate-300';
 
 function ActivitySummaryChips({ activity }: { activity: Activity | null }) {
   if (!activity) return <span className="text-[11px] text-gray-300">loading…</span>;
-  const lastInsp = maxDate(activity.inspections.map((i) => i.date));
-  const lastSvc = maxDate(activity.services.filter((s) => s.completedAt).map((s) => s.completedAt));
-  const lastGc = maxDate(activity.services.filter((s) => s.isGrassCut && s.completedAt).map((s) => s.completedAt));
+  const insp = activity.inspections.filter((i) => !isCancelled(i.status));
+  const svc = activity.services.filter((s) => !isCancelled(s.status));
+  const lastInsp = maxDate(insp.map((i) => i.date));
+  const lastSvc = maxDate(svc.filter((s) => s.completedAt).map((s) => s.completedAt));
+  const lastGc = maxDate(svc.filter((s) => s.isGrassCut && s.completedAt).map((s) => s.completedAt));
   const chip = (label: string, v: string | null) => (
     <span className="text-[11px] text-gray-500 whitespace-nowrap">{label} <b className="text-ink tabular-nums">{fmtDate(v)}</b></span>
   );
@@ -163,8 +168,10 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
     return () => io.disconnect();
   }, [p.recordId, activity, expanded]);
 
-  const inspections = useMemo(() => sortByDateDesc(activity?.inspections || []), [activity]);
-  const services = useMemo(() => sortByDateDesc(activity?.services || []), [activity]);
+  // Cancelled inspections/services are excluded from both the "last" dates and
+  // the expanded lists.
+  const inspections = useMemo(() => sortByDateDesc((activity?.inspections || []).filter((i) => !isCancelled(i.status))), [activity]);
+  const services = useMemo(() => sortByDateDesc((activity?.services || []).filter((s) => !isCancelled(s.status))), [activity]);
   const lastInsp = maxDate(inspections.map((i) => i.date));
   const lastSvc = maxDate(services.filter((s) => s.completedAt).map((s) => s.completedAt));
   const lastGc = maxDate(services.filter((s) => s.isGrassCut && s.completedAt).map((s) => s.completedAt));
@@ -252,8 +259,6 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
   );
 }
 
-const PAGE_SIZE = 50;
-
 export default function PropertiesPage({ initialProperties, regionOptions, userName, canServices }: Props) {
   const [search, setSearch] = useState('');
   const [region, setRegion] = useState<string[]>([]);
@@ -263,7 +268,8 @@ export default function PropertiesPage({ initialProperties, regionOptions, userN
     Object.fromEntries(initialProperties.filter((p) => p.community).map((p) => [p.recordId, p.community as string])));
   const [fullLoaded, setFullLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [renderCount, setRenderCount] = useState(PAGE_SIZE);
+  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -308,10 +314,13 @@ export default function PropertiesPage({ initialProperties, regionOptions, userN
     return sortByAddress(rows);
   }, [allProps, region, community, communityMap, search]);
 
-  const visible = useMemo(() => filtered.slice(0, renderCount), [filtered, renderCount]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const visible = useMemo(() => filtered.slice(pageStart, pageStart + pageSize), [filtered, pageStart, pageSize]);
 
-  // Reset paging when the filter set changes so you always see the top matches.
-  useEffect(() => { setRenderCount(PAGE_SIZE); }, [search, region, community]);
+  // Reset to page 1 when the filter set (or page size) changes.
+  useEffect(() => { setPage(1); }, [search, region, community, pageSize]);
 
   // Enrich the visible rows' community names (batched) — community is an
   // association, not a field, so it's filled in lazily as rows come into view.
@@ -433,9 +442,9 @@ export default function PropertiesPage({ initialProperties, regionOptions, userN
           )}
 
           {/* Count + freshness hint */}
-          {fullLoaded && (
+          {fullLoaded && filtered.length > 0 && (
             <div className="text-[12px] text-gray-400">
-              Showing {Math.min(visible.length, filtered.length)} of {filtered.length}
+              Showing {pageStart + 1}–{Math.min(pageStart + pageSize, filtered.length)} of {filtered.length}
               {syncing ? ' · updating…' : ''}
             </div>
           )}
@@ -455,16 +464,39 @@ export default function PropertiesPage({ initialProperties, regionOptions, userN
             </div>
           )}
 
-          {/* Load more — reveal the next chunk of the (client-filtered) full list. */}
-          {renderCount < filtered.length && (
-            <div className="text-center pt-1">
-              <button type="button" onClick={() => setRenderCount((n) => n + PAGE_SIZE)}
-                className="text-sm font-heading font-bold rounded-xl px-5 py-2.5 bg-white border border-gray-300 text-ink hover:border-brand/50">
-                Load more ({filtered.length - renderCount} more)
-              </button>
-            </div>
-          )}
         </main>
+
+        {/* Pagination footer — Per page + Back/Next, mirroring the Inspections list. */}
+        {filtered.length > 0 && (
+          <div className="sticky bottom-0 z-20 bg-white border-t border-gray-200"
+            style={{ paddingBottom: 'min(env(safe-area-inset-bottom), 0.5rem)' }}>
+            <div className="max-w-3xl mx-auto px-4 py-1.5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs text-gray-500 font-heading whitespace-nowrap">Per page</span>
+                <ListPicker
+                  value={String(pageSize)}
+                  options={[{ value: '20', label: '20' }, { value: '50', label: '50' }, { value: '100', label: '100' }]}
+                  onChange={(v) => setPageSize(Number(v))}
+                  ariaLabel="Properties per page"
+                  className="text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border border-gray-300 rounded-md bg-white flex items-center gap-1 text-gray-700 hover:border-brand/50"
+                />
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}
+                  className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-3 py-1.5 border border-gray-300 rounded-md bg-white disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+                  Back
+                </button>
+                <span className="text-xs font-heading text-gray-600 whitespace-nowrap">Page {currentPage} of {totalPages}</span>
+                <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}
+                  className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-3 py-1.5 border border-gray-300 rounded-md bg-white disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+                  Next
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
