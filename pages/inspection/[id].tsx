@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
@@ -55,6 +55,11 @@ export default function ExistingInspection() {
   const inspectionId = typeof idParam === 'string' ? idParam : '';
 
   const [stage, setStage] = useState<Stage>('loading');
+  // Re-entrancy guard for submit: a double-tap (or the form firing onSubmit twice)
+  // otherwise runs two full submit → /api/pdf sequences. submit.ts's in-flight
+  // lock lets both "succeed", so BOTH reach /api/pdf → two PDF renders + two
+  // completion emails. This blocks the concurrent second run.
+  const submittingRef = useRef(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Logged-in user's email + admin flag — used to mirror the server's
@@ -357,6 +362,11 @@ export default function ExistingInspection() {
       void dialog.alert('This inspection is still finishing its first sync to the server. It’ll be ready to submit in a moment once you have a connection — your work is saved.');
       return;
     }
+    // Ignore a re-entrant submit (double-tap / duplicate onSubmit) — one completion
+    // = one submit + one /api/pdf + one email. Reset in `finally` so a real retry
+    // after an error still works.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setStage('submitting');
     try {
       // Finalize inspection: status -> Completed
@@ -455,6 +465,8 @@ export default function ExistingInspection() {
     } catch (e: any) {
       setErrorMsg(String(e.message || e));
       setStage('error');
+    } finally {
+      submittingRef.current = false;
     }
   }
 
