@@ -51,6 +51,9 @@ const TEMPLATES = new Set([
   'leasing_agent_1099_property_inspection',
   'pm_vacancy_occupancy_check',
   'pm_community_inspection',
+  // RRQC (new-construction) is question-driven and renders through the same
+  // lib/pdf pipeline (incl. Final Checklist + Lot #), so it regenerates here too.
+  'qc_new_construction_rrqc',
 ]);
 
 export const config = { maxDuration: 300 };

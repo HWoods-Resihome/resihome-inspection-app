@@ -19,7 +19,9 @@ import { fetchInspections } from '@/lib/hubspot';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 
 const SCOPE = 'pm_scope_rate_card';
-const QA = new Set(['leasing_agent_1099_property_inspection', 'pm_vacancy_occupancy_check', 'pm_community_inspection']);
+// RRQC is question-driven like the QA templates and regenerates via the same
+// /api/admin/regenerate-inspection-pdfs route.
+const QA = new Set(['leasing_agent_1099_property_inspection', 'pm_vacancy_occupancy_check', 'pm_community_inspection', 'qc_new_construction_rrqc']);
 const QC = 'pm_turn_reinspect_qc';
 const norm = (s: string) => (s || '').trim().toLowerCase().replace(/[ -]/g, '_');
 
