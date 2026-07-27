@@ -132,9 +132,11 @@ function StatusChip({ text, cls }: { text: string; cls: string }) {
 const INSP_CHIP = 'bg-slate-100 text-slate-700 border-slate-300';
 
 function ActivitySummaryChips({ activity }: { activity: Activity | null }) {
-  if (!activity) return <span className="text-[11px] text-gray-300">loading…</span>;
-  const insp = activity.inspections.filter((i) => !isCancelled(i.status));
-  const svc = activity.services.filter((s) => !isCancelled(s.status));
+  // ALWAYS render the INS / SVC / GC field so the card layout is stable — before
+  // activity lazy-loads each shows a — placeholder, then updates to the real date
+  // on load (no "loading…" swap that shifts the row).
+  const insp = (activity?.inspections || []).filter((i) => !isCancelled(i.status));
+  const svc = (activity?.services || []).filter((s) => !isCancelled(s.status));
   const lastInsp = maxDate(insp.map((i) => i.date));
   const lastSvc = maxDate(svc.filter((s) => s.completedAt).map((s) => s.completedAt));
   const lastGc = maxDate(svc.filter((s) => s.isGrassCut && s.completedAt).map((s) => s.completedAt));
@@ -143,8 +145,8 @@ function ActivitySummaryChips({ activity }: { activity: Activity | null }) {
   );
   return (
     <div className="flex flex-wrap gap-x-3 gap-y-0.5 justify-end">
-      {chip('Insp', lastInsp)}
-      {chip('Svc', lastSvc)}
+      {chip('INS', lastInsp)}
+      {chip('SVC', lastSvc)}
       {chip('GC', lastGc)}
     </div>
   );
