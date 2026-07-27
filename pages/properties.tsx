@@ -18,9 +18,11 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
+import { servicesEnabled } from '@/lib/servicesAccess';
 import { searchPropertiesAdmin, fetchRegionEnumOptions } from '@/lib/hubspot';
 import type { AdminPropertyRow } from '@/lib/types';
 import { MultiFilter } from '@/components/MultiFilter';
+import { SettingsMenu } from '@/components/SettingsMenu';
 import { SERVICE_STATUS_STYLE, serviceStatusText, type ServiceStatus } from '@/lib/services/model';
 
 interface InspRow { id: string; label: string; status: string; date: string | null; inspectorName: string }
@@ -31,6 +33,8 @@ interface Props {
   initialProperties: AdminPropertyRow[];
   initialAfter: string | null;
   regionOptions: string[];
+  userName: string;
+  canServices: boolean;
 }
 
 export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
@@ -38,9 +42,10 @@ export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
   if (!session?.email || !(await isAppAdmin(session.email).catch(() => false))) {
     return { redirect: { destination: '/app', permanent: false } };
   }
-  const [page, regions] = await Promise.all([
+  const [page, regions, canServices] = await Promise.all([
     searchPropertiesAdmin({ limit: 30 }).catch(() => ({ properties: [] as AdminPropertyRow[], after: undefined })),
     fetchRegionEnumOptions().catch(() => null),
+    servicesEnabled(session.email).catch(() => false),
   ]);
   return {
     props: {
@@ -48,6 +53,8 @@ export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
       initialProperties: JSON.parse(JSON.stringify(page.properties)),
       initialAfter: page.after || null,
       regionOptions: regions || [],
+      userName: session.name || '',
+      canServices,
     },
   };
 };
@@ -222,7 +229,7 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
   );
 }
 
-export default function PropertiesPage({ initialProperties, initialAfter, regionOptions }: Props) {
+export default function PropertiesPage({ initialProperties, initialAfter, regionOptions, userName, canServices }: Props) {
   const [search, setSearch] = useState('');
   const [region, setRegion] = useState<string[]>([]);
   const [community, setCommunity] = useState<string[]>([]);
@@ -232,6 +239,7 @@ export default function PropertiesPage({ initialProperties, initialAfter, region
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const firstRun = useRef(true);
 
   const runQuery = useCallback(async (opts: { search: string; regions: string[]; after?: string | null; append?: boolean }) => {
@@ -278,6 +286,7 @@ export default function PropertiesPage({ initialProperties, initialAfter, region
   ), [properties, community]);
 
   const anyFilter = !!search.trim() || region.length > 0 || community.length > 0;
+  const anyFacetActive = region.length > 0 || community.length > 0;
   const clearAll = () => { setSearch(''); setRegion([]); setCommunity([]); };
   const toggle = (id: string) => setExpanded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const pickerCls = (active: boolean) => `text-[13px] rounded-lg border px-3 py-2 ${active ? 'border-brand text-brand bg-brand/5' : 'border-gray-300 text-gray-700 bg-white'}`;
@@ -286,38 +295,80 @@ export default function PropertiesPage({ initialProperties, initialAfter, region
     <>
       <Head><title>Properties · ResiWALK</title></Head>
       <div className="min-h-screen bg-gray-50">
-        <header className="bg-ink text-white">
-          <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
-            <Link href="/app" aria-label="Back" className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/90 hover:text-white hover:bg-white/15">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
-            </Link>
-            <h1 className="font-heading font-extrabold text-lg">Properties</h1>
+        {/* Pink branded header — mirrors the Inspections masthead: logo + title on
+            the left, app switcher + settings gear on the right. */}
+        <header className="bg-brand text-white sticky top-0 z-30" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
+          <div className="max-w-3xl mx-auto px-4 pt-2 pb-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <Link href="/app" aria-label="Home" className="shrink-0">
+                  <img src="/app-icon.svg" alt="ResiWalk" className="h-11 w-11 object-cover"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }} />
+                </Link>
+                <div className="min-w-0">
+                  <h1 className="font-heading font-extrabold text-lg tracking-tight">Properties</h1>
+                  {userName && <div className="text-xs text-white/80 truncate">Welcome, {userName}</div>}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 whitespace-nowrap">
+                {/* App switcher — Inspections / Services / Properties (current). */}
+                <details className="relative group">
+                  <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors" aria-label="Switch app">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="16" x2="20" y2="16" /></svg>
+                  </summary>
+                  <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
+                    <Link href="/app" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Inspections</Link>
+                    {canServices && <Link href="/services" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Services</Link>}
+                    <div className="px-4 py-2.5 text-sm font-semibold text-brand bg-brand/5">Properties ✓</div>
+                  </div>
+                </details>
+                <SettingsMenu isAdmin />
+              </div>
+            </div>
           </div>
         </header>
 
         <main className="max-w-3xl mx-auto px-4 py-4 space-y-3">
-          {/* Search */}
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-            </span>
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search address or ZIP…"
-              className="w-full text-sm border border-gray-300 rounded-xl pl-10 pr-3 py-2.5 bg-white focus:outline-none focus:border-brand" />
+          {/* Search + a Filters toggle that collapses/expands the Region/Community
+              row (a pink dot flags active filters while it's hidden). */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 min-w-0">
+              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search address or ZIP…"
+                className={`w-full pl-3 ${search ? 'pr-14' : 'pr-9'} py-2.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:border-brand`} />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+              {search && (
+                <button type="button" onClick={() => setSearch('')} aria-label="Clear search"
+                  className="absolute right-9 top-1/2 -translate-y-1/2 text-gray-400 hover:text-brand p-0.5">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                </button>
+              )}
+            </div>
+            <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen}
+              aria-label={filtersOpen ? 'Hide filters' : 'Show filters'}
+              className="relative shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50 transition-colors">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+              {!filtersOpen && anyFacetActive && <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-brand ring-2 ring-white" />}
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`ml-0.5 transition-transform ${filtersOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
           </div>
 
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-2">
-            <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}
-              options={regionOpts.map((r) => ({ value: r, label: r }))} sheet selectAll />
-            {communityOptions.length > 0 && (
-              <MultiFilter label="Community" selected={community} onChange={setCommunity} className={pickerCls(community.length > 0)}
-                options={communityOptions.map((c) => ({ value: c, label: c }))} sheet selectAll />
-            )}
-            {anyFilter && (
-              <button type="button" onClick={clearAll} className="text-[13px] text-gray-500 underline px-2 py-2">Clear filters</button>
-            )}
-          </div>
+          {/* Region + Community on one row; Clear pushed to the right. */}
+          {filtersOpen && (
+            <div className="flex items-center gap-2">
+              <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}
+                options={regionOpts.map((r) => ({ value: r, label: r }))} sheet selectAll />
+              {communityOptions.length > 0 && (
+                <MultiFilter label="Community" selected={community} onChange={setCommunity} className={pickerCls(community.length > 0)}
+                  options={communityOptions.map((c) => ({ value: c, label: c }))} sheet selectAll />
+              )}
+              {anyFilter && (
+                <button type="button" onClick={clearAll} className="ml-auto shrink-0 text-[13px] text-gray-500 hover:text-brand underline px-1 py-2">Clear</button>
+              )}
+            </div>
+          )}
 
           {error && <div className="text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
 
