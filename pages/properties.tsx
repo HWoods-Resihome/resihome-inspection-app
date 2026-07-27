@@ -1,8 +1,9 @@
 /**
  * Admin Properties — a searchable/filterable list of every property. Admin-only
  * (gated in getServerSideProps + the backing API routes). Search by address/ZIP,
- * filter by Region (server-side) and Community/Subdivision (faceted from the
- * loaded rows). Each property card lazily loads its recent activity as it scrolls
+ * filter by Region (a field, server-side) and Community (the associated community
+ * object's name, enriched onto each row). Each property card lazily loads its
+ * recent activity as it scrolls
  * into view (last inspection / last service / last grass-cut chips), and expands
  * to show the full recent inspections + services, each linking to its record.
  *
@@ -225,7 +226,6 @@ export default function PropertiesPage({ initialProperties, initialAfter, region
   const [search, setSearch] = useState('');
   const [region, setRegion] = useState<string[]>([]);
   const [community, setCommunity] = useState<string[]>([]);
-  const [subdivision, setSubdivision] = useState<string[]>([]);
   const [properties, setProperties] = useState<AdminPropertyRow[]>(initialProperties);
   const [after, setAfter] = useState<string | null>(initialAfter);
   const [loading, setLoading] = useState(false);
@@ -261,29 +261,24 @@ export default function PropertiesPage({ initialProperties, initialAfter, region
   }, [search, region, runQuery]);
 
   // Region options: the property `region` enum when available, else faceted from
-  // whatever's loaded. Community/Subdivision are always faceted from loaded rows.
+  // whatever's loaded. Community options come from the loaded rows' enriched names.
   const regionOpts = useMemo(() => {
     if (regionOptions.length) return regionOptions;
     return Array.from(new Set(properties.map((p) => p.region).filter(Boolean) as string[])).sort();
   }, [regionOptions, properties]);
-  const facets = useMemo(() => {
-    const comm = new Set<string>(); const sub = new Set<string>();
-    for (const p of properties) {
-      if (p.community && (subdivision.length === 0 || subdivision.includes(p.subdivision || ''))) comm.add(p.community);
-      if (p.subdivision && (community.length === 0 || community.includes(p.community || ''))) sub.add(p.subdivision);
-    }
-    return { communityOptions: Array.from(comm).sort(), subdivisionOptions: Array.from(sub).sort() };
-  }, [properties, community, subdivision]);
+  const communityOptions = useMemo(() =>
+    Array.from(new Set(properties.map((p) => p.community).filter(Boolean) as string[])).sort()
+  , [properties]);
 
-  // Community/Subdivision narrow the loaded set client-side (Region + search are
-  // applied server-side above).
+  // Community narrows the loaded set client-side (Region + search are applied
+  // server-side above); its options come from the associated community names
+  // enriched onto the loaded rows.
   const visible = useMemo(() => properties.filter((p) =>
-    (community.length === 0 || community.includes(p.community || '')) &&
-    (subdivision.length === 0 || subdivision.includes(p.subdivision || ''))
-  ), [properties, community, subdivision]);
+    community.length === 0 || community.includes(p.community || '')
+  ), [properties, community]);
 
-  const anyFilter = !!search.trim() || region.length > 0 || community.length > 0 || subdivision.length > 0;
-  const clearAll = () => { setSearch(''); setRegion([]); setCommunity([]); setSubdivision([]); };
+  const anyFilter = !!search.trim() || region.length > 0 || community.length > 0;
+  const clearAll = () => { setSearch(''); setRegion([]); setCommunity([]); };
   const toggle = (id: string) => setExpanded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const pickerCls = (active: boolean) => `text-[13px] rounded-lg border px-3 py-2 ${active ? 'border-brand text-brand bg-brand/5' : 'border-gray-300 text-gray-700 bg-white'}`;
 
@@ -315,13 +310,9 @@ export default function PropertiesPage({ initialProperties, initialAfter, region
           <div className="flex flex-wrap items-center gap-2">
             <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}
               options={regionOpts.map((r) => ({ value: r, label: r }))} sheet selectAll />
-            {facets.communityOptions.length > 0 && (
+            {communityOptions.length > 0 && (
               <MultiFilter label="Community" selected={community} onChange={setCommunity} className={pickerCls(community.length > 0)}
-                options={facets.communityOptions.map((c) => ({ value: c, label: c }))} sheet selectAll />
-            )}
-            {facets.subdivisionOptions.length > 0 && (
-              <MultiFilter label="Subdivision" selected={subdivision} onChange={setSubdivision} className={pickerCls(subdivision.length > 0)}
-                options={facets.subdivisionOptions.map((s) => ({ value: s, label: s }))} sheet selectAll />
+                options={communityOptions.map((c) => ({ value: c, label: c }))} sheet selectAll />
             )}
             {anyFilter && (
               <button type="button" onClick={clearAll} className="text-[13px] text-gray-500 underline px-2 py-2">Clear filters</button>
@@ -345,8 +336,8 @@ export default function PropertiesPage({ initialProperties, initialAfter, region
             </div>
           )}
 
-          {/* Load more — the server has another page. Client Community/Subdivision
-              facets filter what's already loaded, so paging pulls more to filter. */}
+          {/* Load more — the server has another page. The client Community facet
+              filters what's already loaded, so paging pulls more to filter. */}
           {!loading && after && (
             <div className="text-center pt-1">
               <button type="button" disabled={loadingMore}

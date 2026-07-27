@@ -781,12 +781,11 @@ export async function fetchPropertiesPage(
 }
 
 // ── Admin Properties list — search + optional region filter, cursor-paginated ──
-// Projection lists community/subdivision variants; HubSpot ignores unknown
-// projection names, so whichever the object actually carries populates the facet.
+// Region is a real field on the property; Community is a separate object resolved
+// by ASSOCIATION and enriched onto the rows afterward (communityNamesForProperties).
 const ADMIN_PROP_PROJECTION = [
   'hs_object_id', 'name', 'address', 'city', 'state', 'state_code', 'zip', 'zip_code',
   'region', 'bedrooms', 'bathrooms', PROPERTY_STATUS_PROPERTY,
-  'community', 'community_name', 'sub_division', 'neighborhood_name',
 ];
 
 function mapAdminPropRow(r: any): AdminPropertyRow | null {
@@ -807,9 +806,15 @@ function mapAdminPropRow(r: any): AdminPropertyRow | null {
     region: (p.region || '').toString().trim() || undefined,
     status: status || undefined,
     bedrooms, bathrooms,
-    community: (p.community || p.community_name || '').toString().trim() || undefined,
-    subdivision: (p.sub_division || p.neighborhood_name || '').toString().trim() || undefined,
+    // community is filled by association enrichment in searchPropertiesAdmin.
   };
+}
+
+/** Attach the associated Community name to each row (best-effort, batched). */
+async function enrichAdminRowsCommunity(rows: AdminPropertyRow[]): Promise<void> {
+  if (!rows.length) return;
+  const names = await communityNamesForProperties(rows.map((r) => r.recordId)).catch(() => new Map<string, string>());
+  for (const r of rows) { const nm = names.get(r.recordId); if (nm) r.community = nm; }
 }
 
 /**
@@ -837,6 +842,7 @@ export async function searchPropertiesAdmin(
     const resp = await hubspotFetch(`/crm/v3/objects/${typeId}?${qs.toString()}`);
     const out: AdminPropertyRow[] = [];
     for (const r of resp.results || []) { const row = mapAdminPropRow(r); if (row) out.push(row); }
+    await enrichAdminRowsCommunity(out);
     return { properties: out, after: resp.paging?.next?.after };
   }
 
@@ -861,6 +867,7 @@ export async function searchPropertiesAdmin(
   const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, { method: 'POST', body: JSON.stringify(body) });
   const out: AdminPropertyRow[] = [];
   for (const r of resp.results || []) { const row = mapAdminPropRow(r); if (row) out.push(row); }
+  await enrichAdminRowsCommunity(out);
   return { properties: out, after: resp.paging?.next?.after };
 }
 
@@ -1459,6 +1466,59 @@ export async function fetchPropertyCommunityName(propertyRecordId: string): Prom
     console.warn('[community] name fetch failed:', e);
     return null;
   }
+}
+
+/**
+ * Associated Community NAME for many properties at once — for the admin Properties
+ * list's Community filter. Community is a property→community v4 ASSOCIATION (not a
+ * field on the property), so we batch-read the associations, then batch-read the
+ * community names — two calls per page of properties regardless of count. Returns
+ * a Map<propertyId, communityName> (only entries that resolve). Fail-open → the
+ * properties that couldn't resolve simply carry no community.
+ */
+export async function communityNamesForProperties(propertyIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const ids = Array.from(new Set(propertyIds.filter(Boolean)));
+  if (!ids.length) return out;
+  const meta = await resolveCommunityMeta().catch(() => null);
+  if (!meta) return out;
+  const { property } = typeIds();
+  try {
+    // 1) property → community associations (batch).
+    const propToComm = new Map<string, string>();
+    const commIds = new Set<string>();
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const assoc = await hubspotFetch(`/crm/v4/associations/${property}/${meta.typeId}/batch/read`, {
+        method: 'POST',
+        body: JSON.stringify({ inputs: chunk.map((id) => ({ id })) }),
+      });
+      for (const r of assoc?.results || []) {
+        const from = String(r.from?.id || '');
+        const to = r.to?.[0]?.toObjectId;
+        if (from && to != null) { propToComm.set(from, String(to)); commIds.add(String(to)); }
+      }
+    }
+    if (!commIds.size) return out;
+    // 2) community id → name (batch).
+    const nameById = new Map<string, string>();
+    const commArr = Array.from(commIds);
+    for (let i = 0; i < commArr.length; i += 100) {
+      const chunk = commArr.slice(i, i + 100);
+      const rec = await hubspotFetch(`/crm/v3/objects/${meta.typeId}/batch/read`, {
+        method: 'POST',
+        body: JSON.stringify({ properties: [meta.nameProp], inputs: chunk.map((id) => ({ id })) }),
+      });
+      for (const c of rec?.results || []) {
+        const nm = String(c.properties?.[meta.nameProp] || '').trim();
+        if (nm) nameById.set(String(c.id), nm);
+      }
+    }
+    for (const [pid, cid] of propToComm) { const nm = nameById.get(cid); if (nm) out.set(pid, nm); }
+  } catch (e) {
+    console.warn('[community] batch enrich failed:', e);
+  }
+  return out;
 }
 
 /**
