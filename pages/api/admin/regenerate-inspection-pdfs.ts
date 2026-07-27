@@ -58,12 +58,18 @@ const TEMPLATES = new Set([
 
 export const config = { maxDuration: 300 };
 
-async function regenerateOne(id: string, origin?: string): Promise<{ id: string; ok: boolean; pdfUrl?: string; error?: string }> {
+// Build the report PDF to an in-memory buffer from live HubSpot data — WITHOUT
+// uploading/attaching. Shared by the admin regenerate (which then uploads) and
+// the in-app "View PDF Report" live-render endpoint (which streams it), so the
+// two never drift. Returns the buffer + the names needed to build a filename.
+export async function buildReportPdfBuffer(id: string, origin?: string): Promise<
+  { ok: true; buf: Buffer; inspectionName: string; inspectionIdExternal: string } | { ok: false; error: string }
+> {
   const data = await fetchInspectionWithPropertyRef(id);
-  if (!data) return { id, ok: false, error: 'Inspection not found' };
+  if (!data) return { ok: false, error: 'Inspection not found' };
   const insp = data.inspection;
   const tmpl = insp.templateType;
-  if (!TEMPLATES.has(tmpl)) return { id, ok: false, error: `Template ${tmpl} not supported here` };
+  if (!TEMPLATES.has(tmpl)) return { ok: false, error: `Template ${tmpl} not supported here` };
 
   // Map questionIdExternal -> clean question text AND template order. The stored
   // answer_summary is section-prefixed, so we read the template's questions; key
@@ -229,7 +235,13 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
   };
 
   const buf = await renderToBuffer(React.createElement(InspectionPdf, { data: pdfData }) as any);
-  const safeName = (insp.inspectionName || 'Inspection').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60);
+  return { ok: true, buf: Buffer.from(buf as any), inspectionName: insp.inspectionName, inspectionIdExternal: insp.inspectionIdExternal };
+}
+
+async function regenerateOne(id: string, origin?: string): Promise<{ id: string; ok: boolean; pdfUrl?: string; error?: string }> {
+  const r = await buildReportPdfBuffer(id, origin);
+  if (!r.ok) return { id, ok: false, error: r.error };
+  const safeName = (r.inspectionName || 'Inspection').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60);
   // Mint a NEW file path on every regeneration. HubSpot's file CDN serves
   // overwritten files by PATH and ignores query strings (a per-request ?cb=
   // buster still returned stale bytes), so re-uploading to the same filename
@@ -237,7 +249,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
   // object. The clean /d/<id>/report link resolves to pdf_attachment_url, so it
   // transparently points at the new file and shared links are unaffected.
   const version = Date.now().toString(36);
-  const { url } = await uploadFileWithId(buf, `${safeName}_${insp.inspectionIdExternal}_v${version}.pdf`, 'application/pdf', '/inspection_pdfs', false);
+  const { url } = await uploadFileWithId(r.buf, `${safeName}_${r.inspectionIdExternal}_v${version}.pdf`, 'application/pdf', '/inspection_pdfs', false);
   await attachPdfUrlToInspection(id, url);
   // Refresh the clean short link so the record's "report" link/download resolves
   // to the regenerated PDF (matches /api/pdf). Best-effort.

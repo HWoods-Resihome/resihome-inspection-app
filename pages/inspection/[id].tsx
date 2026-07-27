@@ -830,7 +830,10 @@ export default function ExistingInspection() {
           onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
-          pdfUrl={shareLinks?.report || inspection.pdfUrl || undefined}
+          // LIVE render: rebuilds from current data every open, so format/data
+          // changes show with no manual regenerate (the stored file stays for
+          // email/sharing). Falls back to the stored report link pre-completion.
+          pdfUrl={isCompleted ? `/api/inspections/${encodeURIComponent(inspectionId)}/report-pdf` : (shareLinks?.report || inspection.pdfUrl || undefined)}
           existingAnswers={existingAnswers}
           readOnly={readOnly}
           onCancelInspection={readOnly ? undefined : handleCancelInspection}
