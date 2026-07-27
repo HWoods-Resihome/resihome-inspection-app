@@ -20,7 +20,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import {
   searchInspectionsMissingProp, readInspectionProps, updateInspection,
-  fetchInspectionById, fetchPropertyCommunityRrqcWalkEmail,
+  fetchInspectionById, fetchPropertyCommunityRrqcWalkEmail, ensureCompletionEmailedProperty,
 } from '@/lib/hubspot';
 import { notifyInspectionCompleted } from '@/lib/notifications/triggers';
 import { appBaseUrl } from '@/lib/notifications/send';
@@ -48,6 +48,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!authorized) return res.status(401).json({ error: 'Unauthorized' });
   const dryRun = req.query.dryRun === '1' || req.query.dry === '1';
 
+  // The dedupe property must exist before we can filter on NOT_HAS_PROPERTY.
+  const propOk = await ensureCompletionEmailedProperty().catch(() => false);
+  if (!propOk) return res.status(200).json({ ok: false, error: 'completion_emailed_at property unavailable (schema write scope?)' });
+
+  // Sending is OPT-IN via COMPLETION_EMAIL_BACKSTOP_SINCE (ISO). Only completions
+  // at/after that timestamp are eligible to send — so enabling it can never
+  // retro-email inspections that were already emailed under the old logic (which
+  // never set the stamp). Unset → the cron reports the gap but sends nothing.
+  const sinceEnv = (process.env.COMPLETION_EMAIL_BACKSTOP_SINCE || '').trim();
+  const sinceEnvMs = sinceEnv ? Date.parse(sinceEnv) : NaN;
+  const sendEnabled = !dryRun && !!sinceEnv && !isNaN(sinceEnvMs);
+
   const sinceMs = Date.now() - WINDOW_MS;
   let candidates: { id: string; props: Record<string, any> }[] = [];
   try {
@@ -66,18 +78,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const eligible = candidates.filter((c) => !OWN_EMAIL_TEMPLATES.has(String(c.props.template_type || '')));
 
-  if (dryRun) {
+  if (dryRun || !sendEnabled) {
     return res.status(200).json({
-      dryRun: true, windowHours: WINDOW_MS / 3600_000,
+      dryRun, sendEnabled, windowHours: WINDOW_MS / 3600_000,
       found: candidates.length, eligible: eligible.length,
+      note: sendEnabled ? undefined : 'Reporting only — set COMPLETION_EMAIL_BACKSTOP_SINCE=<ISO> to enable sending for completions at/after that time.',
       list: eligible.map((c) => ({ id: c.id, template: c.props.template_type, address: c.props.property_address_snapshot })),
     });
   }
 
+  const parseMs = (raw: any): number => {
+    const s = String(raw || '').trim(); if (!s) return 0;
+    if (/^\d+$/.test(s)) return Number(s);
+    const t = Date.parse(s); return isNaN(t) ? 0 : t;
+  };
   const base = appBaseUrl(req);
-  let sent = 0; const errors: { id: string; error: string }[] = [];
+  let sent = 0; let skippedPreCutover = 0; const errors: { id: string; error: string }[] = [];
   for (const c of eligible) {
     try {
+      // Only send for completions at/after the configured cutover — never
+      // retro-email older ones that predate the stamp mechanism.
+      if (parseMs(c.props.completed_at) < sinceEnvMs) { skippedPreCutover++; continue; }
       // Re-read right before sending to dedupe a race with /api/pdf on another
       // instance (it may have just sent + stamped).
       const fresh = await readInspectionProps(c.id, ['completion_emailed_at']).catch(() => null);
@@ -106,5 +127,5 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  return res.status(200).json({ ok: true, windowHours: WINDOW_MS / 3600_000, found: candidates.length, eligible: eligible.length, sent, errors });
+  return res.status(200).json({ ok: true, windowHours: WINDOW_MS / 3600_000, found: candidates.length, eligible: eligible.length, sent, skippedPreCutover, errors });
 }

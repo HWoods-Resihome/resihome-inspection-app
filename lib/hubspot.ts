@@ -4655,6 +4655,40 @@ export async function searchInspectionsMissingProp(opts: {
   return (resp?.results || []).map((r: any) => ({ id: String(r.id), props: r.properties || {} }));
 }
 
+// The completion-email dedupe stamp lives on the Inspection object. It's a NEW
+// property, so filtering/reading/writing it 400s until it's created. Create it
+// once at runtime (cached per instance), borrowing a valid property group from an
+// existing property so the create can't 400 on a bad groupName.
+let _completionEmailedPropEnsured = false;
+export async function ensureCompletionEmailedProperty(): Promise<boolean> {
+  if (_completionEmailedPropEnsured) return true;
+  const { inspection } = typeIds();
+  try {
+    await hubspotFetch(`/crm/v3/properties/${inspection}/completion_emailed_at`);
+    _completionEmailedPropEnsured = true; return true; // already exists
+  } catch { /* not found → create below */ }
+  let groupName = 'inspection_information';
+  try {
+    const ref = await hubspotFetch(`/crm/v3/properties/${inspection}/status`);
+    if (ref?.groupName) groupName = String(ref.groupName);
+  } catch { /* fall back to the default guess */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${inspection}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'completion_emailed_at',
+        label: 'Completion Emailed At',
+        type: 'string', fieldType: 'text', groupName,
+        description: 'ISO timestamp the completion email was sent — dedupe so it sends once per completion cycle (cleared on reopen).',
+      }),
+    });
+    _completionEmailedPropEnsured = true; return true;
+  } catch (e) {
+    console.warn('[completion-email] ensure property failed:', e);
+    return false;
+  }
+}
+
 export async function readInspectionProps(
   recordId: string,
   props: string[]

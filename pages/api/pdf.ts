@@ -3,7 +3,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
 import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
-import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection, readInspectionProps, fetchInspectionById, fetchPropertyCommunityRrqcWalkEmail } from '@/lib/hubspot';
+import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection, readInspectionProps, fetchInspectionById, fetchPropertyCommunityRrqcWalkEmail, ensureCompletionEmailedProperty } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
 import { reqOriginOf } from '@/lib/appUrl';
 import { externalOwnedWriteDenial } from '@/lib/inspectionGuard';
@@ -216,6 +216,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // rare duplicate; the stamp written after a confirmed send prevents dupes in
     // the normal case). Reopen clears the stamp, so an edited/re-completed
     // inspection re-emails on its next PDF.
+    await ensureCompletionEmailedProperty().catch(() => {}); // create the dedupe prop if missing (cached)
     let alreadyEmailed = false;
     try {
       const prior = await readInspectionProps(body.inspectionRecordId, ['completion_emailed_at']);
