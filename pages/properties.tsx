@@ -140,11 +140,17 @@ function ActivitySummaryChips({ activity }: { activity: Activity | null }) {
   const lastInsp = maxDate(insp.map((i) => i.date));
   const lastSvc = maxDate(svc.filter((s) => s.completedAt).map((s) => s.completedAt));
   const lastGc = maxDate(svc.filter((s) => s.isGrassCut && s.completedAt).map((s) => s.completedAt));
+  // Fixed-width label + value so a chip is the SAME size whether it shows a date
+  // or a — placeholder. That keeps the INS/SVC/GC columns aligned card-to-card:
+  // populating a date can no longer widen a chip and shift the labels.
   const chip = (label: string, v: string | null) => (
-    <span className="text-[11px] text-gray-500 whitespace-nowrap">{label} <b className="text-ink tabular-nums">{fmtDate(v)}</b></span>
+    <span className="inline-flex items-baseline gap-1 text-[11px] text-gray-500 whitespace-nowrap">
+      <span className="inline-block text-right" style={{ minWidth: '1.6rem' }}>{label}</span>
+      <b className="inline-block text-right text-ink tabular-nums" style={{ minWidth: '3.75rem' }}>{fmtDate(v)}</b>
+    </span>
   );
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-0.5 justify-end">
+    <div className="flex items-center gap-3 justify-end">
       {chip('INS', lastInsp)}
       {chip('SVC', lastSvc)}
       {chip('GC', lastGc)}
