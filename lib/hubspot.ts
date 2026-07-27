@@ -10431,9 +10431,56 @@ export async function upsertAnswers(
         for (const u of chunk) {
           try { collect(await runCreate([u])); }
           catch (itemErr: any) {
-            const reason = String(itemErr?.detail || itemErr?.message || itemErr).slice(0, 300);
-            console.error(`[upsertAnswers] SKIPPED create of answer ${u.answerProps?.answer_id_external} (${u.answerProps?.question_id_external}) — ${reason}`);
-            results.push({ recordId: '', answerIdExternal: u.answerProps?.answer_id_external || '', failed: true, reason });
+            // COLLISION RECOVERY — `answer_id_external` is a UNIQUE property, so a
+            // create can 400 ("Cannot set PropertyValueCoordinates(...)") purely
+            // because the record ALREADY exists: a racing write (e.g. the form's
+            // live save, or the durable photo-attach outbox replaying the same
+            // photo) created it moments earlier and HubSpot's SEARCH index — which
+            // the dedup guard above relies on — hadn't caught up yet (search is
+            // eventually consistent, the create/collision proves the record is
+            // there). Re-resolve the external id; if it now exists, MERGE in place
+            // instead of failing — unioning photo lists so a create that lost the
+            // race never clobbers the photos the winner already saved. This makes
+            // the idempotent attach/save converge on the first try rather than
+            // erroring, 502-ing, and spiking the error log. Only when the record
+            // is genuinely unresolvable (a real bad-value rejection, or search
+            // still lagging — the outbox retries that) do we log the skip.
+            const ext = String(u.answerProps?.answer_id_external || '');
+            let recovered = false;
+            if (ext) {
+              try {
+                const found = await findAnswerRecordIdsByExternalId(tids.answer, [ext]);
+                const rid = found.get(ext);
+                if (rid) {
+                  const merged: Record<string, any> = { ...u.answerProps };
+                  for (const pf of ['photo_urls', 'after_photo_urls'] as const) {
+                    if (merged[pf] == null) continue;
+                    try {
+                      const cur = await hubspotFetch(`/crm/v3/objects/${tids.answer}/${rid}?properties=${pf}`);
+                      const splitList = (raw: any): string[] => String(raw || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+                      const union = Array.from(new Set([...splitList(cur?.properties?.[pf]), ...splitList(merged[pf])]));
+                      merged[pf] = union.join(PHOTO_URL_DELIMITER);
+                      if (pf === 'photo_urls') merged.photo_count = union.length;
+                    } catch { /* couldn't read current photos — fall back to incoming value */ }
+                  }
+                  await hubspotFetch(`/crm/v3/objects/${tids.answer}/${rid}`, {
+                    method: 'PATCH', body: JSON.stringify({ properties: merged }),
+                  });
+                  // Re-associate (idempotent) so a pre-existing-but-orphaned record is still linked.
+                  newAnswers.push({ externalId: ext, recordId: rid });
+                  results.push({ recordId: rid, answerIdExternal: ext });
+                  recovered = true;
+                  console.warn(`[upsertAnswers] create collided with existing ${ext} (unique answer_id_external) — merged in place instead of failing`);
+                }
+              } catch (recErr: any) {
+                console.warn(`[upsertAnswers] create-collision recovery failed for ${ext}:`, String(recErr?.detail || recErr?.message || recErr).slice(0, 160));
+              }
+            }
+            if (!recovered) {
+              const reason = String(itemErr?.detail || itemErr?.message || itemErr).slice(0, 300);
+              console.error(`[upsertAnswers] SKIPPED create of answer ${u.answerProps?.answer_id_external} (${u.answerProps?.question_id_external}) — ${reason}`);
+              results.push({ recordId: '', answerIdExternal: u.answerProps?.answer_id_external || '', failed: true, reason });
+            }
           }
         }
       }
