@@ -79,6 +79,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/completion-email-backstop",
+      "schedule": "0 */2 * * *"
+    },
+    {
       "path": "/api/cron/blob-cleanup",
       "schedule": "0 8 * * *"
     },

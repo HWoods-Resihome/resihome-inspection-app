@@ -51,6 +51,9 @@ export async function postReinspectResultAlert(o: {
   inspectionId: string;
   templateType: string;
   baseUrl?: string;
+  /** Skip the per-deal note logging (used by the manual test endpoint so a test
+   *  post never creates notes on real leasing deals). */
+  skipDealNotes?: boolean;
 }): Promise<ReinspectAlertResult> {
   const tpl = REINSPECT_TEMPLATES[o.templateType];
   if (!tpl) return { status: 'NOT_APPLICABLE' };
@@ -186,9 +189,11 @@ export async function postReinspectResultAlert(o: {
     `<strong>${tpl.title} — ${verb}</strong><br>${line}<br>` +
     `Property: ${propertyAddress}<br>Move-In Ready Date: ${mirdText}<br>Inspector: ${inspectorName}`;
   let notesAdded = 0;
-  for (const d of deals) {
-    const id = await logDealNote(d.id, noteBody);
-    if (id) notesAdded++;
+  if (!o.skipDealNotes) {
+    for (const d of deals) {
+      const id = await logDealNote(d.id, noteBody);
+      if (id) notesAdded++;
+    }
   }
 
   console.log(`[reinspect] ${result} posted for ${o.inspectionId} → ${channel} (region ${region || 'UNKNOWN'}${target.sandbox ? ', sandbox' : ''}); deals ${deals.length}, notes ${notesAdded}`);
