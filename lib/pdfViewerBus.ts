@@ -14,8 +14,16 @@ export interface OpenPdfDetail {
   title?: string;
 }
 
-/** Open the given PDF in the in-app viewer. No-op during SSR. */
+/** Open the given PDF in the in-app viewer. No-op during SSR.
+ *
+ *  Appends a per-open cache-buster. The report link (/d/<id>/report/<sig>) is a
+ *  STABLE url, so after a regenerate the browser / pdf.js would otherwise reuse
+ *  the previously-loaded (old) document cached under that identical url — even
+ *  though the server resolves the fresh file. A unique query each open forces a
+ *  fresh fetch. Harmless downstream: the /d resolver reads route params (ignores
+ *  extra query), and HubSpot file urls ignore it too. */
 export function openPdf(url: string, title?: string): void {
   if (typeof window === 'undefined' || !url) return;
-  window.dispatchEvent(new CustomEvent<OpenPdfDetail>(PDF_OPEN_EVENT, { detail: { url, title } }));
+  const busted = `${url}${url.includes('?') ? '&' : '?'}_cb=${Date.now()}`;
+  window.dispatchEvent(new CustomEvent<OpenPdfDetail>(PDF_OPEN_EVENT, { detail: { url: busted, title } }));
 }
