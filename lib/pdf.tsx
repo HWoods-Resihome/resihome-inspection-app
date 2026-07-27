@@ -392,7 +392,9 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           listingLine={isCommunity || isRrqc ? null : listingLine}
           detailsFirst
           inspectorTopRight
-          summary={(
+          summary={isRrqc ? undefined : (
+            // RRQC shows the verdict in the grey stats bar instead, so the header's
+            // top-right RESULT is dropped to avoid duplicating it.
             <>
               <Text style={{ ...pdfStyles.headerRightLabel, marginTop: 5 }}>RESULT</Text>
               <Text style={pdfStyles.headerRightValue}>{resultText}</Text>
