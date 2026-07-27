@@ -207,21 +207,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const tUpload = Date.now() - t3;
     console.log(`[pdf] uploaded in ${tUpload}ms`);
 
-    // Completion email is sent ONCE per completion cycle, tracked by a dedicated
-    // `completion_emailed_at` stamp — NOT inferred from the PDF's existence (that
-    // proxy fired the email only on the very first PDF and, worse, its read was
-    // fail-CLOSED, so a HubSpot 429 during a burst of completions silently dropped
-    // the email for some of them). FAIL OPEN here: a read error → treat as
-    // NOT-emailed and attempt the send (a missed completion email is worse than a
-    // rare duplicate; the stamp written after a confirmed send prevents dupes in
-    // the normal case). Reopen clears the stamp, so an edited/re-completed
-    // inspection re-emails on its next PDF.
-    await ensureCompletionEmailedProperty().catch(() => {}); // create the dedupe prop if missing (cached)
-    let alreadyEmailed = false;
+    // Dedup the completion email: it is sent once, on the FIRST report. Gate on
+    // `pdf_attachment_url` — an ALWAYS-PRESENT property that this route writes
+    // (attachPdfUrlToInspection below) before the send, so a duplicate /api/pdf
+    // call for the same inspection reads it and skips. Read ONLY this property:
+    // reading a NEW/optional property (e.g. completion_emailed_at) risks a 400 on
+    // objects where it doesn't exist, which would fail-open into duplicate sends.
+    // FAIL CLOSED — if we genuinely can't tell, don't risk a duplicate; the
+    // completion-email-backstop cron catches the rare genuine miss.
+    let hadPdfBefore = true;
     try {
-      const prior = await readInspectionProps(body.inspectionRecordId, ['completion_emailed_at']);
-      alreadyEmailed = !!(prior?.completion_emailed_at || '').toString().trim();
-    } catch { alreadyEmailed = false; /* fail OPEN — attempt the send */ }
+      const prior = await readInspectionProps(body.inspectionRecordId, ['pdf_attachment_url']);
+      hadPdfBefore = !!(prior?.pdf_attachment_url || '').toString().trim();
+    } catch { hadPdfBefore = true; /* unknown → don't risk a duplicate */ }
 
     // Step 6: patch Inspection record with PDF URL + attach to Attachments card.
     await attachPdfUrlToInspection(body.inspectionRecordId, pdfUrl);
@@ -253,7 +251,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // why the emailed report came through with no attachment. One-shot: only on the
     // first PDF, and only for a COMPLETED non-rate-card inspection (rate cards email
     // at finalize; QC uses its own finalize). Best-effort — never blocks the PDF.
-    if (!alreadyEmailed) {
+    if (!hadPdfBefore) {
       try {
         const insp = await fetchInspectionById(body.inspectionRecordId);
         const st = (insp?.status || '').trim().toLowerCase();
@@ -278,8 +276,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             baseUrl: appBaseUrl(req),
             extraTo,
           });
-          // Stamp AFTER a confirmed send so a later regenerate doesn't re-email
-          // (and a burst that failed the read above still can't double-send).
+          // Best-effort secondary "emailed" stamp for the completion-email-backstop
+          // cron. NOT the dedup gate (that's pdf_attachment_url above), so if the
+          // property doesn't exist it simply doesn't record — it can never cause a
+          // duplicate. Ensure the property, then stamp; both fully swallowed.
+          await ensureCompletionEmailedProperty().catch(() => {});
           await updateInspection(body.inspectionRecordId, { completion_emailed_at: new Date().toISOString() }).catch(() => {});
         }
       } catch (e: any) { console.warn('[pdf] completion email skipped:', String(e?.message || e).slice(0, 140)); }
