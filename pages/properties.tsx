@@ -364,7 +364,7 @@ export default function PropertiesPage({ initialProperties, regionOptions, userN
 
   return (
     <>
-      <Head><title>Properties · ResiWALK</title></Head>
+      <Head><title>Properties · ResiWalk</title></Head>
       <div className="min-h-screen bg-gray-50">
         {/* Pink branded header — mirrors the Inspections masthead. */}
         <header className="bg-brand text-white sticky top-0 z-30" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
