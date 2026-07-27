@@ -196,6 +196,12 @@ async function loadAll(): Promise<Property[]> {
 /** Invalidate the in-memory mirror (after a fresh sync). */
 export function dropPropertyMemCache(): void { memCache = null; }
 
+/** The ENTIRE cached property list (offline-capable), unsorted. Empty when the
+ *  cache hasn't been synced on this device yet (or IndexedDB is unavailable). */
+export async function getAllCachedProperties(): Promise<Property[]> {
+  return loadAll();
+}
+
 /**
  * Search the FULL cached property list (offline-capable). Token-matches each
  * whitespace-separated term against name/address/city/zip (every term must hit

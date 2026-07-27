@@ -1,18 +1,14 @@
 /**
  * Admin Properties — a searchable/filterable list of every property. Admin-only
- * (gated in getServerSideProps + the backing API routes). Search by address/ZIP,
- * filter by Region (a field, server-side) and Community (the associated community
- * object's name, enriched onto each row). Each property card lazily loads its
- * recent activity as it scrolls
- * into view (last inspection / last service / last grass-cut chips), and expands
- * to show the full recent inspections + services, each linking to its record.
- *
- * Scale note: the Property object holds 15k+ records, so the list is search/region
- * driven — an initial page is rendered on open (SSR) and "Load more" pages the
- * rest; a search or region filter re-queries the server rather than filtering a
- * full client-side pull (which HubSpot search caps at 10k).
+ * (gated in getServerSideProps + the backing API routes). Mirrors the inspection
+ * property picker: the WHOLE property list is loaded client-side (from the device
+ * cache in lib/propertyCache — the same full list the picker uses), sorted by
+ * address, and filtered in the browser. Search by address/ZIP, filter by Region
+ * (a property field) and Community (the associated community object's name,
+ * enriched onto rows as they come into view). Each card lazily loads its recent
+ * inspections + services as it scrolls into view, and expands to show them.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GetServerSideProps, NextApiRequest } from 'next';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -21,6 +17,7 @@ import { isAppAdmin } from '@/lib/adminAccess';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { searchPropertiesAdmin, fetchRegionEnumOptions } from '@/lib/hubspot';
 import type { AdminPropertyRow } from '@/lib/types';
+import { getAllCachedProperties, syncAllProperties, dropPropertyMemCache } from '@/lib/propertyCache';
 import { MultiFilter } from '@/components/MultiFilter';
 import { SettingsMenu } from '@/components/SettingsMenu';
 import { SERVICE_STATUS_STYLE, serviceStatusText, type ServiceStatus } from '@/lib/services/model';
@@ -31,7 +28,6 @@ interface Activity { inspections: InspRow[]; services: SvcRow[] }
 
 interface Props {
   initialProperties: AdminPropertyRow[];
-  initialAfter: string | null;
   regionOptions: string[];
   userName: string;
   canServices: boolean;
@@ -43,15 +39,15 @@ export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
     return { redirect: { destination: '/app', permanent: false } };
   }
   const [page, regions, canServices] = await Promise.all([
+    // A small first page so the list paints immediately; the client then loads the
+    // FULL list from the device cache (or pages the server) and replaces this.
     searchPropertiesAdmin({ limit: 30 }).catch(() => ({ properties: [] as AdminPropertyRow[], after: undefined })),
     fetchRegionEnumOptions().catch(() => null),
     servicesEnabled(session.email).catch(() => false),
   ]);
   return {
     props: {
-      // Strip undefined-valued keys so Next can serialize the props.
-      initialProperties: JSON.parse(JSON.stringify(page.properties)),
-      initialAfter: page.after || null,
+      initialProperties: JSON.parse(JSON.stringify(page.properties)), // strip undefined for serialization
       regionOptions: regions || [],
       userName: session.name || '',
       canServices,
@@ -79,6 +75,23 @@ async function loadActivity(id: string): Promise<Activity> {
   return pr;
 }
 
+// Fallback full-list loader when the device cache is unavailable/empty: page the
+// same server endpoint the picker's cache uses, straight into memory.
+async function pageAllProperties(): Promise<AdminPropertyRow[]> {
+  const out: AdminPropertyRow[] = [];
+  let after: string | undefined;
+  let guard = 0;
+  do {
+    const r = await fetch('/api/properties/all' + (after ? `?after=${encodeURIComponent(after)}` : ''));
+    if (!r.ok) break;
+    const d = await r.json();
+    if (Array.isArray(d.properties)) out.push(...d.properties);
+    after = typeof d.after === 'string' ? d.after : undefined;
+    guard++;
+  } while (after && guard < 1000);
+  return out;
+}
+
 const toMs = (v: string | null): number => {
   if (!v) return 0;
   const s = String(v).trim();
@@ -101,6 +114,14 @@ const fmtDate = (v: string | null): string => {
 };
 const sortByDateDesc = <T extends { date: string | null }>(rows: T[]): T[] =>
   [...rows].sort((a, b) => toMs(b.date) - toMs(a.date));
+
+const addrKey = (p: AdminPropertyRow): string => (p.address || p.name || '').toLowerCase();
+const sortByAddress = (rows: AdminPropertyRow[]): AdminPropertyRow[] =>
+  [...rows].sort((a, b) => addrKey(a).localeCompare(addrKey(b)));
+const localityLine = (p: AdminPropertyRow): string => {
+  const cityState = [p.city, p.state].filter(Boolean).join(', ');
+  return [cityState, p.zip].filter(Boolean).join(' ').trim();
+};
 
 function StatusChip({ text, cls }: { text: string; cls: string }) {
   return <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${cls}`}>{text}</span>;
@@ -127,6 +148,7 @@ function ActivitySummaryChips({ activity }: { activity: Activity | null }) {
 function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded: boolean; onToggle: () => void }) {
   const [activity, setActivity] = useState<Activity | null>(() => activityCache.get(p.recordId) || null);
   const ref = useRef<HTMLDivElement>(null);
+  const loc = localityLine(p);
 
   // Lazy-load activity when the card first appears (or immediately if expanded).
   useEffect(() => {
@@ -157,6 +179,7 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
             {[p.region, p.status].filter(Boolean).join(' · ') || '—'}
             {p.community ? <span className="text-gray-400"> · {p.community}</span> : null}
           </div>
+          {loc && <div className="text-[12px] text-gray-400 truncate">{loc}</div>}
         </div>
         <div className="hidden sm:block shrink-0"><ActivitySummaryChips activity={activity} /></div>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -229,74 +252,112 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
   );
 }
 
-export default function PropertiesPage({ initialProperties, initialAfter, regionOptions, userName, canServices }: Props) {
+const PAGE_SIZE = 50;
+
+export default function PropertiesPage({ initialProperties, regionOptions, userName, canServices }: Props) {
   const [search, setSearch] = useState('');
   const [region, setRegion] = useState<string[]>([]);
   const [community, setCommunity] = useState<string[]>([]);
-  const [properties, setProperties] = useState<AdminPropertyRow[]>(initialProperties);
-  const [after, setAfter] = useState<string | null>(initialAfter);
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState('');
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [allProps, setAllProps] = useState<AdminPropertyRow[]>(initialProperties);
+  const [communityMap, setCommunityMap] = useState<Record<string, string>>(() =>
+    Object.fromEntries(initialProperties.filter((p) => p.community).map((p) => [p.recordId, p.community as string])));
+  const [fullLoaded, setFullLoaded] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [renderCount, setRenderCount] = useState(PAGE_SIZE);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const firstRun = useRef(true);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const runQuery = useCallback(async (opts: { search: string; regions: string[]; after?: string | null; append?: boolean }) => {
-    const qs = new URLSearchParams();
-    if (opts.search) qs.set('search', opts.search);
-    if (opts.regions.length) qs.set('regions', opts.regions.join(','));
-    if (opts.after) qs.set('after', opts.after);
-    qs.set('limit', '30');
-    const setL = opts.append ? setLoadingMore : setLoading;
-    setL(true); setError('');
-    try {
-      const r = await fetch(`/api/properties/list?${qs.toString()}`);
-      const d = await r.json();
-      if (!r.ok) { setError(d.error || 'Could not load properties.'); return; }
-      setProperties((prev) => (opts.append ? [...prev, ...d.properties] : d.properties));
-      setAfter(d.after || null);
-    } catch { setError('Couldn’t reach the server. Try again.'); }
-    finally { setL(false); }
+  // Load the FULL property list (device cache, like the inspection picker), then
+  // refresh if stale. Falls back to paging the server if the cache is unavailable.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setSyncing(true);
+      try {
+        const cached = await getAllCachedProperties().catch(() => [] as AdminPropertyRow[]);
+        if (!cancelled && cached.length) { setAllProps(cached); setFullLoaded(true); }
+        const r = await syncAllProperties({ force: cached.length === 0 }).catch(() => null);
+        if (r && r.synced > 0) {
+          dropPropertyMemCache();
+          const fresh = await getAllCachedProperties().catch(() => [] as AdminPropertyRow[]);
+          if (!cancelled && fresh.length) { setAllProps(fresh); setFullLoaded(true); }
+        } else if (!cancelled && cached.length === 0) {
+          // No device cache (IndexedDB unavailable / first-ever & sync failed) →
+          // page the server list straight into memory so the full list still shows.
+          const mem = await pageAllProperties().catch(() => [] as AdminPropertyRow[]);
+          if (!cancelled && mem.length) { setAllProps(mem); setFullLoaded(true); }
+        }
+      } finally { if (!cancelled) setSyncing(false); }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  // Re-query the server when the search term or region set changes (debounced).
-  // Skip the first run — SSR already provided the initial page.
-  useEffect(() => {
-    if (firstRun.current) { firstRun.current = false; return; }
-    const h = setTimeout(() => runQuery({ search: search.trim(), regions: region }), 300);
-    return () => clearTimeout(h);
-  }, [search, region, runQuery]);
+  // Filter (Region + Community + search) then sort by address.
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const toks = term ? term.split(/\s+/).filter(Boolean) : [];
+    const rows = allProps.filter((p) => {
+      if (region.length && !(p.region && region.includes(p.region))) return false;
+      if (community.length && !community.includes(communityMap[p.recordId] || p.community || '')) return false;
+      if (toks.length) {
+        const hay = `${p.name} ${p.address || ''} ${p.city || ''} ${p.state || ''} ${p.zip || ''}`.toLowerCase();
+        if (!toks.every((t) => hay.includes(t))) return false;
+      }
+      return true;
+    });
+    return sortByAddress(rows);
+  }, [allProps, region, community, communityMap, search]);
 
-  // Region options: the property `region` enum when available, else faceted from
-  // whatever's loaded. Community options come from the loaded rows' enriched names.
+  const visible = useMemo(() => filtered.slice(0, renderCount), [filtered, renderCount]);
+
+  // Reset paging when the filter set changes so you always see the top matches.
+  useEffect(() => { setRenderCount(PAGE_SIZE); }, [search, region, community]);
+
+  // Enrich the visible rows' community names (batched) — community is an
+  // association, not a field, so it's filled in lazily as rows come into view.
+  useEffect(() => {
+    const ids = visible.map((p) => p.recordId).filter((id) => communityMap[id] === undefined);
+    if (!ids.length) return;
+    let cancelled = false;
+    (async () => {
+      for (let i = 0; i < ids.length && !cancelled; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        let map: Record<string, string> = {};
+        try {
+          const r = await fetch('/api/properties/communities', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: chunk }),
+          });
+          if (r.ok) { const d = await r.json(); map = d.map || {}; }
+        } catch { /* leave blank; marked resolved below so we don't refetch */ }
+        if (cancelled) return;
+        setCommunityMap((m) => { const n = { ...m }; for (const id of chunk) n[id] = map[id] || ''; return n; });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [visible, communityMap]);
+
   const regionOpts = useMemo(() => {
     if (regionOptions.length) return regionOptions;
-    return Array.from(new Set(properties.map((p) => p.region).filter(Boolean) as string[])).sort();
-  }, [regionOptions, properties]);
-  const communityOptions = useMemo(() =>
-    Array.from(new Set(properties.map((p) => p.community).filter(Boolean) as string[])).sort()
-  , [properties]);
+    return Array.from(new Set(allProps.map((p) => p.region).filter(Boolean) as string[])).sort();
+  }, [regionOptions, allProps]);
 
-  // Community narrows the loaded set client-side (Region + search are applied
-  // server-side above); its options come from the associated community names
-  // enriched onto the loaded rows.
-  const visible = useMemo(() => properties.filter((p) =>
-    community.length === 0 || community.includes(p.community || '')
-  ), [properties, community]);
+  const communityOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of allProps) { const nm = communityMap[p.recordId] || p.community; if (nm) s.add(nm); }
+    return Array.from(s).sort();
+  }, [allProps, communityMap]);
 
   const anyFilter = !!search.trim() || region.length > 0 || community.length > 0;
   const anyFacetActive = region.length > 0 || community.length > 0;
   const clearAll = () => { setSearch(''); setRegion([]); setCommunity([]); };
   const toggle = (id: string) => setExpanded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const pickerCls = (active: boolean) => `text-[13px] rounded-lg border px-3 py-2 ${active ? 'border-brand text-brand bg-brand/5' : 'border-gray-300 text-gray-700 bg-white'}`;
+  const pickerCls = (active: boolean) => `w-full flex items-center justify-between text-[13px] rounded-lg border px-3 py-2 ${active ? 'border-brand text-brand bg-brand/5' : 'border-gray-300 text-gray-700 bg-white'}`;
 
   return (
     <>
       <Head><title>Properties · ResiWALK</title></Head>
       <div className="min-h-screen bg-gray-50">
-        {/* Pink branded header — mirrors the Inspections masthead: logo + title on
-            the left, app switcher + settings gear on the right. */}
+        {/* Pink branded header — mirrors the Inspections masthead. */}
         <header className="bg-brand text-white sticky top-0 z-30" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
           <div className="max-w-3xl mx-auto px-4 pt-2 pb-2.5">
             <div className="flex items-center justify-between gap-3">
@@ -330,8 +391,7 @@ export default function PropertiesPage({ initialProperties, initialAfter, region
         </header>
 
         <main className="max-w-3xl mx-auto px-4 py-4 space-y-3">
-          {/* Search + a Filters toggle that collapses/expands the Region/Community
-              row (a pink dot flags active filters while it's hidden). */}
+          {/* Search + a Filters toggle that collapses/expands the filter row. */}
           <div className="flex items-center gap-2">
             <div className="relative flex-1 min-w-0">
               <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
@@ -355,25 +415,33 @@ export default function PropertiesPage({ initialProperties, initialAfter, region
             </button>
           </div>
 
-          {/* Region + Community on one row; Clear pushed to the right. */}
+          {/* Region + Community fill the row; Clear sits to the right. */}
           {filtersOpen && (
             <div className="flex items-center gap-2">
-              <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}
-                options={regionOpts.map((r) => ({ value: r, label: r }))} sheet selectAll />
-              {communityOptions.length > 0 && (
+              <div className="flex-1 min-w-0">
+                <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}
+                  options={regionOpts.map((r) => ({ value: r, label: r }))} sheet selectAll />
+              </div>
+              <div className="flex-1 min-w-0">
                 <MultiFilter label="Community" selected={community} onChange={setCommunity} className={pickerCls(community.length > 0)}
                   options={communityOptions.map((c) => ({ value: c, label: c }))} sheet selectAll />
-              )}
+              </div>
               {anyFilter && (
-                <button type="button" onClick={clearAll} className="ml-auto shrink-0 text-[13px] text-gray-500 hover:text-brand underline px-1 py-2">Clear</button>
+                <button type="button" onClick={clearAll} className="shrink-0 text-[13px] text-gray-500 hover:text-brand underline px-1 py-2">Clear</button>
               )}
             </div>
           )}
 
-          {error && <div className="text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+          {/* Count + freshness hint */}
+          {fullLoaded && (
+            <div className="text-[12px] text-gray-400">
+              Showing {Math.min(visible.length, filtered.length)} of {filtered.length}
+              {syncing ? ' · updating…' : ''}
+            </div>
+          )}
 
           {/* List */}
-          {loading ? (
+          {allProps.length === 0 && syncing ? (
             <div className="text-center text-sm text-gray-400 py-10">Loading properties…</div>
           ) : visible.length === 0 ? (
             <div className="text-center text-sm text-gray-400 py-10">
@@ -387,14 +455,12 @@ export default function PropertiesPage({ initialProperties, initialAfter, region
             </div>
           )}
 
-          {/* Load more — the server has another page. The client Community facet
-              filters what's already loaded, so paging pulls more to filter. */}
-          {!loading && after && (
+          {/* Load more — reveal the next chunk of the (client-filtered) full list. */}
+          {renderCount < filtered.length && (
             <div className="text-center pt-1">
-              <button type="button" disabled={loadingMore}
-                onClick={() => runQuery({ search: search.trim(), regions: region, after, append: true })}
-                className="text-sm font-heading font-bold rounded-xl px-5 py-2.5 bg-white border border-gray-300 text-ink hover:border-brand/50 disabled:opacity-50">
-                {loadingMore ? 'Loading…' : 'Load more'}
+              <button type="button" onClick={() => setRenderCount((n) => n + PAGE_SIZE)}
+                className="text-sm font-heading font-bold rounded-xl px-5 py-2.5 bg-white border border-gray-300 text-ink hover:border-brand/50">
+                Load more ({filtered.length - renderCount} more)
               </button>
             </div>
           )}
