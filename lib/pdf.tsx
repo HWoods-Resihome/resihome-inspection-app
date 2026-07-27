@@ -14,7 +14,7 @@ import {
 } from '@react-pdf/renderer';
 import { isVideoEntry, getPosterUrl, getVideoUrl } from '@/lib/media';
 import {
-  PDF_COLORS, pdfStyles, PdfHeaderStrip, PdfFooter, isoToHumanDate, buildListingLine, PdfFinalChecklist, PdfGalleryBaseProvider,
+  PDF_COLORS, pdfStyles, PdfHeaderStrip, PdfSectionHeader, PdfFooter, isoToHumanDate, buildListingLine, PdfFinalChecklist, PdfGalleryBaseProvider,
 } from '@/lib/pdfShared';
 
 const COLORS = {
@@ -476,14 +476,17 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           if (answers.length === 0 && sectionPhotos.length === 0) return null;
           return (
             <View key={sectionName} wrap>
-              {/* Section title — kept off the very bottom of a page via
-                  minPresenceAhead (so it never strands above a page break), but
-                  NOT wrapped atomically with its photos: a section with many
-                  photos must be free to paginate, or the block overflows the
-                  page (photos run under the footer, next title overlaps them). */}
-              <View style={styles.sectionHeader} minPresenceAhead={72}>
-                <Text>{sectionName}</Text>
-              </View>
+              {/* Section (room separation) title. RRQC mirrors the Scope report's
+                  header exactly — the shared PdfSectionHeader (bold title + thin
+                  pink underline, no grey fill). Other question-driven reports keep
+                  the grey bar. minPresenceAhead keeps it off a page bottom. */}
+              {isRrqc ? (
+                <PdfSectionHeader title={sectionName} photoUrls={[]} minPresenceAhead={72} />
+              ) : (
+                <View style={styles.sectionHeader} minPresenceAhead={72}>
+                  <Text>{sectionName}</Text>
+                </View>
+              )}
               {sectionPhotos.length > 0 && (
                 <View style={styles.sectionPhotosBlock}>
                   <Text style={styles.sectionPhotosLabel}>Section Photos</Text>
