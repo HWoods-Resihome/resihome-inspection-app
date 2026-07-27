@@ -130,6 +130,18 @@ function StatusChip({ text, cls }: { text: string; cls: string }) {
   return <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${cls}`}>{text}</span>;
 }
 const INSP_CHIP = 'bg-slate-100 text-slate-700 border-slate-300';
+// Inspection status → chip colors, mirroring components/StatusBadge so a
+// "Completed" inspection here reads the SAME green as on the Inspections/Services
+// pages (not a flat slate chip).
+function inspStatusCls(status: string): string {
+  const s = (status || '').trim().toLowerCase().replace(/[ -]/g, '_');
+  if (s === 'completed' || s === 'complete' || s === 'submitted') return 'bg-green-100 text-green-800 border-green-300';
+  if (s === 'in_progress' || s === 'inprogress') return 'bg-amber-100 text-amber-800 border-amber-300';
+  if (s === 'pending_approval' || s === 'pendingapproval') return 'bg-purple-100 text-purple-800 border-purple-300';
+  if (s === 'cancelled' || s === 'canceled') return 'bg-gray-100 text-gray-500 border-gray-300';
+  if (s === 'scheduled') return 'bg-gray-100 text-gray-700 border-gray-300';
+  return INSP_CHIP;
+}
 
 function ActivitySummaryChips({ activity }: { activity: Activity | null }) {
   // ALWAYS render the INS / SVC / GC field so the card layout is stable — before
@@ -224,7 +236,7 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
                       <div className="text-[13px] font-semibold text-ink truncate">{i.label}</div>
                       {i.inspectorName && <div className="text-[11px] text-gray-400 truncate">{i.inspectorName}</div>}
                     </div>
-                    {i.status && <StatusChip text={i.status} cls={INSP_CHIP} />}
+                    {i.status && <StatusChip text={i.status} cls={inspStatusCls(i.status)} />}
                     <div className="text-[12px] text-gray-500 tabular-nums w-16 text-right shrink-0">{fmtDate(i.date)}</div>
                   </Link>
                 ))}
@@ -280,6 +292,18 @@ export default function PropertiesPage({ initialProperties, regionOptions, userN
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // The WHOLE community-name list for the filter — independent of which property
+  // rows have been lazy-enriched, so every community is selectable up front.
+  const [allCommunityNames, setAllCommunityNames] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/communities').then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (alive && Array.isArray(d?.communities)) {
+        setAllCommunityNames(d.communities.map((c: any) => String(c?.name || '').trim()).filter(Boolean));
+      }
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // Load the FULL property list (device cache, like the inspection picker), then
   // refresh if stale. Falls back to paging the server if the cache is unavailable.
@@ -359,10 +383,12 @@ export default function PropertiesPage({ initialProperties, regionOptions, userN
   }, [regionOptions, allProps]);
 
   const communityOptions = useMemo(() => {
-    const s = new Set<string>();
+    // Start from the FULL community list so every community is selectable even
+    // before its properties are enriched; union in any names already resolved.
+    const s = new Set<string>(allCommunityNames);
     for (const p of allProps) { const nm = communityMap[p.recordId] || p.community; if (nm) s.add(nm); }
-    return Array.from(s).sort();
-  }, [allProps, communityMap]);
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [allProps, communityMap, allCommunityNames]);
 
   const anyFilter = !!search.trim() || region.length > 0 || community.length > 0;
   const anyFacetActive = region.length > 0 || community.length > 0;
