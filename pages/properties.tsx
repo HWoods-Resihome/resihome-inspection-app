@@ -140,17 +140,17 @@ function ActivitySummaryChips({ activity }: { activity: Activity | null }) {
   const lastInsp = maxDate(insp.map((i) => i.date));
   const lastSvc = maxDate(svc.filter((s) => s.completedAt).map((s) => s.completedAt));
   const lastGc = maxDate(svc.filter((s) => s.isGrassCut && s.completedAt).map((s) => s.completedAt));
-  // Each chip is a single fixed-width slot with the date right after the label
-  // (natural spacing, left-aligned). Fixed width → the INS/SVC/GC columns stay
-  // aligned card-to-card whether a date or a — shows; the reserved space is
-  // trailing (after the date), so there's no gap between label and date.
+  // Fixed-width label + a fixed-width, CENTER-aligned value. Centering the date
+  // (or the — placeholder) in its own box distributes each chip evenly and keeps
+  // the INS/SVC/GC columns aligned card-to-card no matter what the value is.
   const chip = (label: string, v: string | null) => (
-    <span className="inline-block whitespace-nowrap text-[11px] text-gray-500" style={{ width: '4.5rem' }}>
-      {label} <b className="text-ink tabular-nums">{fmtDate(v)}</b>
+    <span className="inline-flex items-baseline text-[11px] text-gray-500 whitespace-nowrap">
+      <span className="inline-block" style={{ minWidth: '1.75rem' }}>{label}</span>
+      <b className="inline-block text-center text-ink tabular-nums" style={{ width: '3.75rem' }}>{fmtDate(v)}</b>
     </span>
   );
   return (
-    <div className="flex items-center gap-2 justify-end">
+    <div className="flex items-center gap-2.5 justify-end">
       {chip('INS', lastInsp)}
       {chip('SVC', lastSvc)}
       {chip('GC', lastGc)}
