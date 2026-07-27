@@ -53,7 +53,7 @@ export default function InsightsPortal() {
 
   return (
     <>
-      <Head><title>ResiWalk Insights</title></Head>
+      <Head><title>ResiWalk</title></Head>
       <div className="min-h-screen bg-[#0e0e11]">
         {/* Standard centered header (logo + title + back), with the account menu
             in the right slot. */}

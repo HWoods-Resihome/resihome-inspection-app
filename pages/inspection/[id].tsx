@@ -649,7 +649,7 @@ export default function ExistingInspection() {
   return (
     <>
       <Head>
-        <title>{inspection.propertyAddressSnapshot || 'Inspection'} - ResiWalk</title>
+        <title>ResiWalk</title>
       </Head>
       {/* Single fixed scroll container so the DOCUMENT never scrolls — the only
           way to stop iOS's native WKWebView rubber-band (CSS overscroll-behavior

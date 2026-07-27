@@ -14,7 +14,7 @@ export default function TrainingGuide() {
   const router = useRouter();
   return (
     <>
-      <Head><title>Training Guide</title></Head>
+      <Head><title>ResiWalk</title></Head>
       <div className="fixed inset-0 flex flex-col bg-gray-50">
         <PageHeader title="Training Guide" onBack={() => router.back()} backLabel="Back" homeHref="/" />
         {/* Appendix strip — the short vendor-facing Services quick-start lives

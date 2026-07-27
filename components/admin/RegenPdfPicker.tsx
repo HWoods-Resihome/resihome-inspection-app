@@ -345,7 +345,7 @@ export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}
 
   return embedded ? body : (
     <div className="min-h-screen bg-gray-50">
-      <Head><title>Regenerate PDFs</title></Head>
+      <Head><title>ResiWalk</title></Head>
       <div className="max-w-2xl mx-auto px-5 py-6">{body}</div>
     </div>
   );

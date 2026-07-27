@@ -161,6 +161,10 @@ export default function App({ Component, pageProps }: AppProps) {
     <ErrorBoundary>
       <RouteProgress />
       <Head>
+        {/* Default browser-tab title — every app page reads "ResiWalk" unless it
+            deliberately overrides (the public marketing/FAQ pages keep their
+            descriptive SEO titles). Fixes tabs that otherwise showed the bare URL. */}
+        <title>ResiWalk</title>
         {/* Single global viewport. No maximum-scale so pinch-zoom works
             (accessibility). Individual pages no longer set their own.
             viewport-fit=cover makes iOS expose env(safe-area-inset-*) so

@@ -540,7 +540,7 @@ export default function VendorManagement() {
 
   return (
     <>
-      <Head><title>Vendor Management — ResiWalk</title></Head>
+      <Head><title>ResiWalk</title></Head>
       {/* Swipe-down refresh, same as the inspections home. */}
       <PullToRefresh onRefresh={() => load(true)} />
       <main className="min-h-screen bg-gray-50 pb-16">

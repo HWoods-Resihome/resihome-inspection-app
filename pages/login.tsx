@@ -263,7 +263,7 @@ export default function LoginPage() {
             a stale version; these explicit tags replace the auto-generated snippet
             on the next crawl. (No robots:noindex — this is the public landing for
             resiwalk.com, so it should be indexable with the description below.) */}
-        <title>ResiWalk — Field Inspections & Recurring Services</title>
+        <title>ResiWalk</title>
         <meta name="description" content="ResiWalk is the leading field inspection and recurring services platform for Property Managers. Powered with AI automation, customizable workflows, and an intuitive interface that maximizes efficiency and solves day to day challenges." />
         <meta property="og:site_name" content="ResiWalk" />
         <meta property="og:title" content="ResiWalk — Field Inspections & Recurring Services" />

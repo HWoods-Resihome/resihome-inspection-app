@@ -100,7 +100,7 @@ export default function AiUsagePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Head><title>AI Usage &amp; Cost</title></Head>
+      <Head><title>ResiWalk</title></Head>
       <div className="max-w-3xl mx-auto px-5 py-6">
         <h1 className="font-heading font-extrabold text-xl text-ink">AI Usage &amp; Cost</h1>
         <p className="text-sm text-gray-600 mt-1 leading-relaxed">

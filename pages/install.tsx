@@ -180,7 +180,7 @@ export default function InstallPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-ink">
-      <Head><title>Install ResiWalk</title><meta name="robots" content="noindex" /></Head>
+      <Head><title>ResiWalk</title><meta name="robots" content="noindex" /></Head>
       <div className="max-w-md mx-auto px-5 py-8">
         <div className="flex items-center gap-3 mb-5">
           {/* Logo → app home. */}

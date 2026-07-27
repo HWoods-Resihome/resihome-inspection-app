@@ -91,7 +91,7 @@ export default function AdminFlowsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Head><title>Admin</title></Head>
+      <Head><title>ResiWalk</title></Head>
       <PageHeader title="Admin" onBack={() => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push('/app'))} backHref="/app" maxW="max-w-2xl" />
 
       <main className="max-w-2xl mx-auto px-4 py-6">

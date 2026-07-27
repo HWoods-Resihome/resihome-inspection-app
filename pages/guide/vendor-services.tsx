@@ -23,7 +23,7 @@ export default function VendorServicesGuide() {
   const router = useRouter();
   return (
     <>
-      <Head><title>Vendor Guide — Services</title></Head>
+      <Head><title>ResiWalk</title></Head>
       <main className="min-h-screen bg-gray-50 pb-16">
         <PageHeader title="Vendor Guide: Services" onBack={() => router.back()} backLabel="Back" homeHref="/services" />
         <div className="max-w-3xl mx-auto px-4 pt-4 space-y-4">

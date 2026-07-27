@@ -629,7 +629,7 @@ export default function NewInspection() {
   return (
     <>
       <Head>
-        <title>New Inspection</title>
+        <title>ResiWalk</title>
       </Head>
       {/* Fill the screen and don't rubber-band. position:fixed makes this the
           ONLY scroller (the document/body has nothing to scroll, so iOS can't

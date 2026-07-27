@@ -51,9 +51,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 };
 
 
-type SortField = 'due' | 'updated' | 'address' | 'worktype' | 'vendor' | 'status' | 'region' | 'community';
+type SortField = 'date' | 'address' | 'worktype' | 'vendor' | 'status' | 'region' | 'community';
 const SORT_OPTIONS: { value: SortField; label: string }[] = [
-  { value: 'due', label: 'Due date' }, { value: 'updated', label: 'Updated' },
+  // One "Date" sort = coalesce(Completed Date, Due Date): completed orders sort by
+  // when they were done, open ones by when they're due — so recent completions and
+  // still-due work read on one timeline.
+  { value: 'date', label: 'Date' },
   { value: 'address', label: 'Address' },
   { value: 'worktype', label: 'Work type' }, { value: 'vendor', label: 'Vendor' },
   { value: 'region', label: 'Region' }, { value: 'community', label: 'Community' },
@@ -208,7 +211,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
   const [community, setCommunity] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [pastDueOnly, setPastDueOnly] = useState(false);
-  const [sortField, setSortField] = useState<SortField>('due');
+  const [sortField, setSortField] = useState<SortField>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
@@ -406,7 +409,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
     const list = scoped.filter(mStatus);
     const dir = sortDir === 'asc' ? 1 : -1;
     const key = (s: typeof list[number]) => ({
-      due: s.dueDate, updated: s.updatedAt || s.completedAt || s.estimatedAt || '',
+      date: s.completedAt || s.dueDate || '',
       address: s.address.toLowerCase(), worktype: worktypeLabel(s.worktype),
       vendor: (s.vendor || '~').toLowerCase(), status: (STATUS_LABEL[s.status] || String(s.status)).toLowerCase(),
       region: s.region.toLowerCase(), community: (s.community || '~').toLowerCase(),
@@ -453,7 +456,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
         if (typeof s.pastDueOnly === 'boolean') setPastDueOnly(s.pastDueOnly);
         // Vendors always land sorted by due date ascending — don't restore a
         // prior sort for them (mirrors the All Open / collapsed-panel default).
-        if (!isVendor && typeof s.sortField === 'string') setSortField(s.sortField);
+        if (!isVendor && typeof s.sortField === 'string' && SORT_OPTIONS.some((o) => o.value === s.sortField)) setSortField(s.sortField);
         if (!isVendor && (s.sortDir === 'asc' || s.sortDir === 'desc')) setSortDir(s.sortDir);
         if (typeof s.pageSize === 'number') setPageSize(s.pageSize);
         if (!isVendor && typeof s.filtersOpen === 'boolean') setFiltersOpen(s.filtersOpen);
