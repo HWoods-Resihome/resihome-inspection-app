@@ -177,16 +177,16 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
   const lastGc = maxDate(services.filter((s) => s.isGrassCut && s.completedAt).map((s) => s.completedAt));
 
   return (
-    <div ref={ref} className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+    <div ref={ref} className={`bg-white border rounded-2xl overflow-hidden transition-colors ${expanded ? 'border-brand/40 shadow-sm' : 'border-gray-200'}`}>
       <button type="button" onClick={onToggle} aria-expanded={expanded}
         className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors">
         <div className="min-w-0 flex-1">
           <div className="text-[14px] font-heading font-bold text-ink truncate">{p.address || p.name}</div>
-          <div className="text-[12px] text-gray-500 truncate">
+          {loc && <div className="text-[12px] text-gray-500 truncate">{loc}</div>}
+          <div className="text-[12px] text-gray-400 truncate">
             {[p.region, p.status].filter(Boolean).join(' · ') || '—'}
-            {p.community ? <span className="text-gray-400"> · {p.community}</span> : null}
+            {p.community ? <span> · {p.community}</span> : null}
           </div>
-          {loc && <div className="text-[12px] text-gray-400 truncate">{loc}</div>}
         </div>
         <div className="hidden sm:block shrink-0"><ActivitySummaryChips activity={activity} /></div>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -196,11 +196,11 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
       <div className="sm:hidden px-4 -mt-1 pb-2"><ActivitySummaryChips activity={activity} /></div>
 
       {expanded && (
-        <div className="border-t border-gray-100 px-4 py-3 space-y-4 bg-gray-50/40">
+        <div className="border-t border-brand/15 px-4 py-3 space-y-4 bg-brand/[0.03]">
           {/* Recent inspections */}
           <section>
-            <div className="flex items-baseline justify-between gap-2 mb-1.5">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Recent inspections</div>
+            <div className="flex items-baseline justify-between gap-2 mb-2 px-2.5 py-1.5 rounded-lg bg-brand/5 border border-brand/15">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-brand">Recent inspections</div>
               <div className="text-[11px] text-gray-500">Last <b className="text-ink tabular-nums">{fmtDate(lastInsp)}</b></div>
             </div>
             {!activity ? (
@@ -226,8 +226,8 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
 
           {/* Recent services */}
           <section>
-            <div className="flex items-baseline justify-between gap-2 mb-1.5">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Recent services</div>
+            <div className="flex items-baseline justify-between gap-2 mb-2 px-2.5 py-1.5 rounded-lg bg-brand/5 border border-brand/15">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-brand">Recent services</div>
               <div className="text-[11px] text-gray-500">Last <b className="text-ink tabular-nums">{fmtDate(lastSvc)}</b> · GC <b className="text-ink tabular-nums">{fmtDate(lastGc)}</b></div>
             </div>
             {!activity ? (
