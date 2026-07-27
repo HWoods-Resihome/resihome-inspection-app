@@ -473,6 +473,11 @@ export function PdfHeaderStrip(props: {
   inspectorTopRight?: boolean;
   /** Right-aligned summary content — typically a Tenant Total or Vendor Total. */
   summary?: React.ReactNode;
+  /** Optional inspection external id shown as a line in the header. When
+   *  `idHref` is set the id text itself becomes the HubSpot link (no separate
+   *  "Open in HubSpot" text, and no meta line below the header). */
+  idExternal?: string | null;
+  idHref?: string | null;
   /** Scope marks rendered right after the property name (Master PDF only). */
   tenantHasPet?: boolean;
   pestControlEnrolled?: boolean;
@@ -506,6 +511,13 @@ export function PdfHeaderStrip(props: {
   ) : null;
   const detailsEl = <Text style={pdfStyles.headerMeta}>{metaParts.join(' · ')}</Text>;
   const listingEl = props.listingLine ? <Text style={pdfStyles.headerMeta}>{props.listingLine}</Text> : null;
+  // Inspection ID line in the header — the id itself is the HubSpot link when
+  // idHref is set (no separate "Open in HubSpot" text).
+  const idEl = props.idExternal ? (
+    props.idHref
+      ? <Link src={props.idHref} style={[pdfStyles.headerMeta, { textDecoration: 'underline' }]}>Inspection ID: {props.idExternal}</Link>
+      : <Text style={pdfStyles.headerMeta}>Inspection ID: {props.idExternal}</Text>
+  ) : null;
 
   const logoSrc = brandLogoDataUri();
   // Inspector shown in the left column ONLY when it's not pinned to the top-right.
@@ -539,6 +551,7 @@ export function PdfHeaderStrip(props: {
             {listingEl}
             {inspectorLeftEl}
             {approverEl}
+            {idEl}
           </>
         ) : (
           <>
@@ -546,6 +559,7 @@ export function PdfHeaderStrip(props: {
             {approverEl}
             {detailsEl}
             {listingEl}
+            {idEl}
           </>
         )}
       </View>

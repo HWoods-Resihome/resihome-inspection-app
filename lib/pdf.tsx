@@ -392,6 +392,10 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           listingLine={isCommunity || isRrqc ? null : listingLine}
           detailsFirst
           inspectorTopRight
+          idExternal={isRrqc ? data.externalId : undefined}
+          idHref={isRrqc && data.hubspotRecordId
+            ? `https://app.hubspot.com/contacts/${process.env.HUBSPOT_PORTAL_ID || '51415639'}/record/${process.env.HUBSPOT_INSPECTION_TYPE_ID || '2-63142762'}/${data.hubspotRecordId}`
+            : undefined}
           summary={isRrqc ? undefined : (
             // RRQC shows the verdict in the grey stats bar instead, so the header's
             // top-right RESULT is dropped to avoid duplicating it.
@@ -402,21 +406,25 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           )}
         />
 
-        {/* ID + HubSpot link */}
-        <View style={styles.metaLine}>
-          <Text style={styles.metaLineText}>Inspection ID: {data.externalId}</Text>
-          {data.hubspotRecordId && (
-            <>
-              <Text style={styles.metaLineText}>   ·   </Text>
-              <Link
-                src={`https://app.hubspot.com/contacts/${process.env.HUBSPOT_PORTAL_ID || '51415639'}/record/${process.env.HUBSPOT_INSPECTION_TYPE_ID || '2-63142762'}/${data.hubspotRecordId}`}
-                style={styles.metaLineLink}
-              >
-                Open in HubSpot
-              </Link>
-            </>
-          )}
-        </View>
+        {/* ID + HubSpot link. RRQC moves this INTO the pink header (the id itself
+            is the link), so the below-header meta line is dropped to reclaim the
+            whitespace. Other templates keep it here. */}
+        {!isRrqc && (
+          <View style={styles.metaLine}>
+            <Text style={styles.metaLineText}>Inspection ID: {data.externalId}</Text>
+            {data.hubspotRecordId && (
+              <>
+                <Text style={styles.metaLineText}>   ·   </Text>
+                <Link
+                  src={`https://app.hubspot.com/contacts/${process.env.HUBSPOT_PORTAL_ID || '51415639'}/record/${process.env.HUBSPOT_INSPECTION_TYPE_ID || '2-63142762'}/${data.hubspotRecordId}`}
+                  style={styles.metaLineLink}
+                >
+                  Open in HubSpot
+                </Link>
+              </>
+            )}
+          </View>
+        )}
 
         {/* Stats strip. Community shows the score; 1099/vacancy show the
             maintenance-ticket status. Passed/Failed always shown. */}
