@@ -1308,11 +1308,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // email so they get a copy of the scope report they completed.
         inspectorEmail: inspection.inspectorEmail,
         attachments: {
-          masterPdf: { name: masterFilename, url: masterUrl },
-          chargebackPdf: chargebackBuf && chargebackUrl ? { name: chargebackFilename, url: chargebackUrl } : null,
+          // Attach the freshly-rendered buffers directly (content) so the emailed
+          // Master is the FINAL render — never a stale draft re-downloaded from the
+          // just-overwritten CDN URL. url stays as the fallback when a buffer is
+          // absent (e.g. a selective regen path that didn't re-render that kind).
+          masterPdf: { name: masterFilename, url: masterUrl, content: masterBuf || undefined },
+          chargebackPdf: chargebackBuf && chargebackUrl ? { name: chargebackFilename, url: chargebackUrl, content: chargebackBuf } : null,
           chargebackXlsx: chargebackXlsxBuf && chargebackXlsxUrl ? { name: chargebackXlsxFilename, url: chargebackXlsxUrl } : null,
           vendorPdfs: Object.entries(vendorUrls).map(([vendor, url]) => ({
-            vendor, url, name: vendorFilename(vendor),
+            vendor, url, name: vendorFilename(vendor), content: vendorBufs.get(vendor) || undefined,
           })),
         },
         // Report the SFTP delivery status of the Tenant Chargeback Import xlsx.

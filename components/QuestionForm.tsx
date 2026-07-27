@@ -2660,17 +2660,22 @@ export function QuestionForm({
         }}
       />
 
-      {/* Section-photo viewer (swipe / markup / delete / video) */}
+      {/* Section-photo viewer (swipe / markup / delete / video). Hand it ALL room
+          instances as groups (+ the whole photo map) so it shows the real room name
+          as the header and lets you click through rooms — mirroring the Scope
+          viewer. PhotoLightbox drops empty groups, so rooms with no photos are
+          skipped. delete/replace use the group id the viewer passes back (the
+          currently-viewed room), so they stay correct after navigating rooms. */}
       {photoLightbox && (sectionPhotos[photoLightbox.instanceKey] || []).length > 0 && (
         <PhotoLightbox
-          groups={[{ id: photoLightbox.instanceKey, name: 'Photos' }]}
-          photosByGroup={{ [photoLightbox.instanceKey]: sectionPhotos[photoLightbox.instanceKey] || [] }}
+          groups={sectionInstances.map((inst) => ({ id: inst.instanceKey, name: inst.displayName }))}
+          photosByGroup={sectionPhotos}
           initialGroupId={photoLightbox.instanceKey}
           initialIndex={Math.min(photoLightbox.index, (sectionPhotos[photoLightbox.instanceKey] || []).length - 1)}
           readOnly={readOnly}
           onClose={() => setPhotoLightbox(null)}
-          onDelete={(_g, i) => removeSectionPhoto(photoLightbox.instanceKey, i)}
-          onReplace={(_g, i, file) => replaceSectionPhoto(photoLightbox.instanceKey, i, file)}
+          onDelete={(g, i) => removeSectionPhoto(g, i)}
+          onReplace={(g, i, file) => replaceSectionPhoto(g, i, file)}
         />
       )}
       <InspectionAuditTrail

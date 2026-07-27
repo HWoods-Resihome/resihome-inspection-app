@@ -15,9 +15,10 @@ export interface InspectionEmailPayload {
   htmlBody: string;
   textBody: string;
   /** Files to attach as base64 MIME parts when the email is actually sent.
-   *  Each entry references a HubSpot Files URL — the sender is responsible
-   *  for fetching the bytes and encoding them. */
-  attachments: Array<{ filename: string; url: string; mimeType: string }>;
+   *  Each entry references a HubSpot Files URL as a fallback; when `content` is
+   *  provided the sender attaches THOSE bytes directly (bypassing a re-download,
+   *  which can serve a stale CDN copy — e.g. the just-overwritten draft Master). */
+  attachments: Array<{ filename: string; url: string; mimeType: string; content?: Buffer }>;
 }
 
 /** Address & state info pulled off the property record + inspection. */
@@ -48,10 +49,12 @@ interface VendorTotal {
 
 /** Files to attach. PDF/xlsx URLs come from the finalize endpoint output. */
 export interface InspectionAttachments {
-  masterPdf: { name: string; url: string } | null;
-  chargebackPdf: { name: string; url: string } | null;
-  chargebackXlsx: { name: string; url: string } | null;
-  vendorPdfs: Array<{ vendor: string; name: string; url: string }>;
+  // `content` (when present) is attached directly — preferred over re-fetching
+  // `url`, which can return a stale CDN copy right after an in-place overwrite.
+  masterPdf: { name: string; url: string; content?: Buffer } | null;
+  chargebackPdf: { name: string; url: string; content?: Buffer } | null;
+  chargebackXlsx: { name: string; url: string; content?: Buffer } | null;
+  vendorPdfs: Array<{ vendor: string; name: string; url: string; content?: Buffer }>;
 }
 
 // ----- Recipient helpers -----
@@ -469,6 +472,7 @@ export function composeInspectionEmail(args: {
       filename: attachments.masterPdf.name,
       url: attachments.masterPdf.url,
       mimeType: 'application/pdf',
+      content: attachments.masterPdf.content,
     });
   }
   if (attachments.chargebackPdf) {
@@ -476,6 +480,7 @@ export function composeInspectionEmail(args: {
       filename: attachments.chargebackPdf.name,
       url: attachments.chargebackPdf.url,
       mimeType: 'application/pdf',
+      content: attachments.chargebackPdf.content,
     });
   }
   // Vendor PDFs in the order produced by vendorBreakdown so the listing in
@@ -484,7 +489,7 @@ export function composeInspectionEmail(args: {
   for (const vb of vendorBreakdown) {
     const vp = vendorPdfMap.get(vb.vendor);
     if (vp) {
-      attachmentList.push({ filename: vp.name, url: vp.url, mimeType: 'application/pdf' });
+      attachmentList.push({ filename: vp.name, url: vp.url, mimeType: 'application/pdf', content: vp.content });
     }
   }
   // The Tenant Chargeback xlsx import file ALWAYS goes last, after every PDF.

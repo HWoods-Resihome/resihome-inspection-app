@@ -121,11 +121,19 @@ async function buildMimeMessage(
   let attachBytes = 0;
   for (const att of payload.attachments) {
     let bytes: Buffer;
-    try {
-      bytes = await fetchAttachment(att.url);
-    } catch (e) {
-      console.error(`[gmail] skipping attachment (fetch failed): ${att.filename}`, e);
-      continue;
+    // Prefer the in-memory bytes when provided (the freshly-rendered PDF) — a
+    // re-download of `url` can serve a stale CDN copy right after an in-place
+    // overwrite (e.g. the draft Master before the final replaced it at the same
+    // URL). Fall back to fetching the URL only when no buffer was supplied.
+    if (att.content && Buffer.isBuffer(att.content) && att.content.length > 0) {
+      bytes = att.content;
+    } else {
+      try {
+        bytes = await fetchAttachment(att.url);
+      } catch (e) {
+        console.error(`[gmail] skipping attachment (fetch failed): ${att.filename}`, e);
+        continue;
+      }
     }
     if (attachBytes + bytes.length > MAX_TOTAL_ATTACH_BYTES) {
       console.warn(`[gmail] skipping attachment (size cap ${MAX_TOTAL_ATTACH_BYTES} exceeded): ${att.filename} (${bytes.length} bytes; ${attachBytes} already attached) — available via the email's download links`);
