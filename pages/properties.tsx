@@ -145,12 +145,12 @@ function ActivitySummaryChips({ activity }: { activity: Activity | null }) {
   // the INS/SVC/GC columns aligned card-to-card no matter what the value is.
   const chip = (label: string, v: string | null) => (
     <span className="inline-flex items-baseline text-[11px] text-gray-500 whitespace-nowrap">
-      <span className="inline-block" style={{ minWidth: '1.75rem' }}>{label}</span>
-      <b className="inline-block text-center text-ink tabular-nums" style={{ width: '3.75rem' }}>{fmtDate(v)}</b>
+      <span className="inline-block" style={{ minWidth: '1.5rem' }}>{label}</span>
+      <b className="inline-block text-center text-ink tabular-nums" style={{ width: '3.25rem' }}>{fmtDate(v)}</b>
     </span>
   );
   return (
-    <div className="flex items-center gap-2.5 justify-end">
+    <div className="flex items-center gap-2 justify-end">
       {chip('INS', lastInsp)}
       {chip('SVC', lastSvc)}
       {chip('GC', lastGc)}
