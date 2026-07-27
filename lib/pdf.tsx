@@ -216,6 +216,15 @@ function formatDate(iso: string): string {
   }
 }
 
+// Compact M/D/YY (Eastern) — RRQC headers use this instead of the spelled-out
+// "Mon D, YYYY".
+function fmtMdyShort(iso: string): string {
+  try {
+    const d = /^\d+$/.test(iso) ? new Date(Number(iso)) : new Date(iso);
+    return d.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric', year: '2-digit' });
+  } catch { return iso; }
+}
+
 // Pass/fail tone of an answer value (mirrors components/QuestionItem.answerTone).
 function toneOf(v: string | undefined): 'pass' | 'fail' | null {
   const n = (v || '').trim().toLowerCase();
@@ -314,7 +323,25 @@ export function InspectionPdf({ data }: { data: PdfData }) {
       if (a.answerValue && a.answerValue.trim()) flat.push({ room: section, q: a.questionText, value: a.answerValue, tone });
     }
   }
-  const result: 'pass' | 'fail' | null = failCount > 0 ? 'fail' : passCount > 0 ? 'pass' : null;
+  const isRrqc = /rrqc/i.test(data.templateLabel || '');
+  // RRQC's overall verdict is the Review & Sign-Off call — mirrors how
+  // inspection_result is set at submit (a fail only in THAT section flips it) —
+  // not the raw all-sections fail count. So a signed-off Pass isn't overridden by
+  // a single flagged item elsewhere (the "top FAIL but bottom PASS" mismatch).
+  let signoffFails = 0; let signoffToned = 0;
+  if (isRrqc) {
+    for (const section of data.sectionsInOrder) {
+      if (!/sign[-\s]?off|review\s*&?\s*sign/i.test(section)) continue;
+      for (const a of (data.answersBySection[section] || [])) {
+        const t = toneOf(a.answerValue);
+        if (t === 'fail') signoffFails++;
+        if (t) signoffToned++;
+      }
+    }
+  }
+  const signoffResult: 'pass' | 'fail' | null = signoffToned ? (signoffFails > 0 ? 'fail' : 'pass') : null;
+  const result: 'pass' | 'fail' | null =
+    isRrqc && signoffResult ? signoffResult : (failCount > 0 ? 'fail' : passCount > 0 ? 'pass' : null);
   const resultText = result === 'fail' ? 'FAIL' : result === 'pass' ? 'PASS' : '—';
   const ticketYes = /^y/i.test(maintTicket || '');
   const isCommunity = /community/i.test(data.templateLabel || '');
@@ -360,9 +387,9 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           propertyStatus={data.propertyStatus ?? null}
           bedrooms={data.bedrooms}
           bathrooms={data.bathrooms}
-          generatedAtLabel={isoToHumanDate(data.completedAt)}
+          generatedAtLabel={isRrqc ? fmtMdyShort(data.completedAt) : isoToHumanDate(data.completedAt)}
           locationLine={isCommunity ? (data.communityLocation || null) : null}
-          listingLine={isCommunity ? null : listingLine}
+          listingLine={isCommunity || isRrqc ? null : listingLine}
           detailsFirst
           inspectorTopRight
           summary={(
@@ -396,6 +423,12 @@ export function InspectionPdf({ data }: { data: PdfData }) {
             <View style={styles.statItem}>
               <Text style={styles.statLabel}>Community Score</Text>
               <Text style={{ ...styles.statValue, color: COLORS.emerald }}>{communityScore}</Text>
+            </View>
+          )}
+          {isRrqc && (
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Result</Text>
+              <Text style={{ ...styles.statValue, color: result === 'fail' ? COLORS.red : COLORS.emerald }}>{resultText}</Text>
             </View>
           )}
           <View style={styles.statItem}>
