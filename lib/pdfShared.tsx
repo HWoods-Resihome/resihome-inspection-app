@@ -511,22 +511,25 @@ export function PdfHeaderStrip(props: {
   ) : null;
   const detailsEl = <Text style={pdfStyles.headerMeta}>{metaParts.join(' · ')}</Text>;
   const listingEl = props.listingLine ? <Text style={pdfStyles.headerMeta}>{props.listingLine}</Text> : null;
-  // Inspection ID line in the header — the id itself is the HubSpot link when
-  // idHref is set (no separate "Open in HubSpot" text).
+  // Inspection ID — the bare id (no "Inspection ID:" label), the id itself the
+  // HubSpot link (underlined) when idHref is set. Rendered in the RIGHT column
+  // under the inspector name (see rightCol), so it costs no extra left-column line.
   const idEl = props.idExternal ? (
     props.idHref
-      ? <Link src={props.idHref} style={[pdfStyles.headerMeta, { textDecoration: 'underline' }]}>Inspection ID: {props.idExternal}</Link>
-      : <Text style={pdfStyles.headerMeta}>Inspection ID: {props.idExternal}</Text>
+      ? <Link src={props.idHref} style={[pdfStyles.headerMeta, { textDecoration: 'underline', textAlign: 'right' }]}>{props.idExternal}</Link>
+      : <Text style={[pdfStyles.headerMeta, { textAlign: 'right' }]}>{props.idExternal}</Text>
   ) : null;
 
   const logoSrc = brandLogoDataUri();
   // Inspector shown in the left column ONLY when it's not pinned to the top-right.
   const inspectorLeftEl = props.inspectorTopRight ? null : inspectorEl;
-  const rightCol = (props.summary || props.inspectorTopRight) ? (
+  const rightCol = (props.summary || props.inspectorTopRight || idEl) ? (
     <View style={pdfStyles.headerRight}>
       {props.inspectorTopRight ? (
         <Text style={[pdfStyles.headerProperty, { textAlign: 'right' }]}>{inspectorLine}</Text>
       ) : null}
+      {/* Inspection ID sits directly under the inspector name (right column). */}
+      {idEl}
       {props.summary}
     </View>
   ) : null;
@@ -551,7 +554,6 @@ export function PdfHeaderStrip(props: {
             {listingEl}
             {inspectorLeftEl}
             {approverEl}
-            {idEl}
           </>
         ) : (
           <>
@@ -559,7 +561,6 @@ export function PdfHeaderStrip(props: {
             {approverEl}
             {detailsEl}
             {listingEl}
-            {idEl}
           </>
         )}
       </View>

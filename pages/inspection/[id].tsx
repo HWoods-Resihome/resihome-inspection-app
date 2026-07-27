@@ -348,6 +348,20 @@ export default function ExistingInspection() {
     return () => { cancelled = true; };
   }, [inspectionId]);
 
+  // Pre-warm the LIVE report render so "View PDF Report" opens instantly — the
+  // build (photo embedding) is the slow part, so we render+cache it server-side
+  // on page load. Question-driven completed reports only (scope/QC use other
+  // viewers). Fire-and-forget; the ?warm=1 response is empty (204).
+  useEffect(() => {
+    if (!inspection || !isCompletedStatus(inspection.status)) return;
+    const t = inspection.templateType;
+    if (t === 'pm_scope_rate_card' || t === 'pm_turn_reinspect_qc') return;
+    const ctrl = new AbortController();
+    fetch(`/api/inspections/${encodeURIComponent(inspectionId)}/report-pdf?warm=1`, { signal: ctrl.signal }).catch(() => {});
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspection?.recordId]);
+
   async function handleSubmit(answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>, meta?: QuestionFormSubmitMeta) {
     if (!inspection) return;
     // A still-local (offline-started) inspection has no server record yet — submit
