@@ -331,7 +331,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
   let signoffFails = 0; let signoffToned = 0;
   if (isRrqc) {
     for (const section of data.sectionsInOrder) {
-      if (!/sign[-\s]?off|review\s*&?\s*sign/i.test(section)) continue;
+      if (!/sign[\s/_-]*off|review\s*[/&-]?\s*sign/i.test(section)) continue;
       for (const a of (data.answersBySection[section] || [])) {
         const t = toneOf(a.answerValue);
         if (t === 'fail') signoffFails++;
