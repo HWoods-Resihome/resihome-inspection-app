@@ -89,11 +89,14 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
     if (Math.abs(e.clientX - lpStart.current.x) > 10 || Math.abs(e.clientY - lpStart.current.y) > 10) clearLp();
   };
   const selCls = selectMode ? (!selectable ? 'opacity-50 border-gray-200' : selected ? 'border-brand ring-1 ring-brand' : 'border-gray-200') : 'border-gray-200 hover:border-brand/40 hover:shadow-md';
-  // Bottom-left date cell: "Estimate <date>" while estimating, else "Due <date>"
-  // (turns red once past due) — mirrors the inspection card's date.
+  // Bottom-left date cell: "Estimate <date>" while estimating, "Completed <date>"
+  // once done (the completion date is what matters after the fact), else
+  // "Due <date>" (turns red once past due) — mirrors the inspection card's date.
   const dateText = s.status === 'estimated'
     ? `Estimate${(s.estimatedAt || s.dueDate) ? ` ${fmtMDY(s.estimatedAt || s.dueDate)}` : ''}`
-    : `Due ${fmtMDY(s.dueDate)}`;
+    : s.status === 'completed'
+      ? `Completed ${fmtMDY(s.completedAt || s.dueDate)}`
+      : `Due ${fmtMDY(s.dueDate)}`;
   // Locality line: a community's title is already its name, so show just the
   // locality; a property appends a distinct community tag.
   const localityLine = s.scope === 'community'

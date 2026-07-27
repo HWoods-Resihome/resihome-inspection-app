@@ -72,11 +72,11 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
 
   const { street, locality } = splitAddress(i.propertyAddressSnapshot || i.inspectionName);
   const isReinspect = i.templateType === 'pm_turn_reinspect_qc';
-  // Overall pass/fail glyph: the Turn Re-Inspect QC carries it as qc_verdict; the
-  // Leasing Agent (1099) inspection carries it as inspection_result. Both render
-  // as the same colored ✓ Pass / ✕ Fail on the card.
-  const isLeasingAgent = i.templateType === 'leasing_agent_1099_property_inspection';
-  const cardVerdict: 'pass' | 'fail' | null = isReinspect ? i.qcVerdict : (isLeasingAgent ? (i.inspectionResult ?? null) : null);
+  // Overall pass/fail glyph — shown on ANY inspection that actually carries a
+  // verdict, not just two templates: QC records it as qc_verdict, the Leasing
+  // Agent (1099) as inspection_result, and any other template that has one is
+  // honored too. Both render as the same colored ✓ Pass / ✕ Fail on the card.
+  const cardVerdict: 'pass' | 'fail' | null = i.qcVerdict ?? i.inspectionResult ?? null;
   // Date on the left: the scheduled date ONLY while the inspection is still
   // Scheduled (the planned visit is the meaningful date then); once work starts
   // it switches to the last-updated date.
