@@ -48,6 +48,14 @@ export interface PhotoAttachEntry {
 }
 
 const KEY = 'resiwalk_photo_attach_v1';
+// A deferral ("parent record not there yet") normally resolves within a few
+// ONLINE ticks once the answer outbox syncs the parent. If it NEVER resolves —
+// the inspection was DELETED, or the attach is orphaned — the entry would retry
+// every tick forever, hammering HubSpot (a 404 per tick from the write guard,
+// plus 429s from the volume). Bound it: drop after this many online deferrals, or
+// once it's this old (a calendar cap for devices that are rarely online).
+const MAX_DEFER_ATTEMPTS = 60;                 // ~20 min of online retries at the 20s drain
+const MAX_DEFER_AGE_MS = 24 * 60 * 60 * 1000;  // 24h backstop
 
 function read(): PhotoAttachEntry[] {
   if (typeof window === 'undefined') return [];
@@ -149,7 +157,24 @@ export async function drainPhotoAttachOutbox(opts?: { skipInspectionIds?: Set<st
       // answer outbox hasn't synced it). Keep the entry so it retries next tick;
       // don't treat a deferral as done (that would silently drop the attach).
       const data = await res.json().catch(() => ({} as any));
-      if (data && data.deferred) continue;
+      if (data && data.deferred) {
+        // Bump the deferral count; drop a permanently-stuck entry (parent will
+        // never appear — deleted inspection / orphaned attach) so it can't loop
+        // forever. A genuine "not synced yet" deferral clears well under the cap.
+        const cur = read();
+        const idx = cur.findIndex((x) => x.id === e.id);
+        if (idx >= 0) {
+          const attempts = (cur[idx].attempts || 0) + 1;
+          const ageMs = Date.now() - (cur[idx].createdAt || Date.now());
+          if (attempts >= MAX_DEFER_ATTEMPTS || ageMs > MAX_DEFER_AGE_MS) {
+            cur.splice(idx, 1); write(cur);
+            console.warn(`[photo-attach] dropping stuck deferred attach ${e.id} (inspection ${e.inspectionRecordId}) after ${attempts} attempts / ${Math.round(ageMs / 3600000)}h — parent record never appeared.`);
+          } else {
+            cur[idx].attempts = attempts; write(cur);
+          }
+        }
+        continue;
+      }
       write(read().filter((x) => x.id !== e.id)); done++; continue;
     }
     if (res.status === 401 || res.status === 403) break;           // re-auth needed — keep

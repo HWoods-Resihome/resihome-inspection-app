@@ -317,8 +317,16 @@ async function hubspotFetchInner(url: string, method: string, path: string, init
     }
     if (!res.ok) {
       const text = await res.text();
-      // Log the FULL upstream detail server-side for debugging...
-      console.error(`[hubspotFetch] ${method} ${path} failed ${res.status}: ${text.slice(0, 1000)}`);
+      // A 404 on a GET single-object read is a BENIGN "not found" (a deleted/
+      // archived record, or an eventually-consistent read) — callers handle it by
+      // returning null. Log it quietly so a deleted record being polled/retried
+      // can't flood the error stream as if it were a real failure. Everything else
+      // logs the full upstream detail at error level.
+      if (res.status === 404 && method === 'GET') {
+        console.warn(`[hubspotFetch] ${method} ${path} → 404 not found`);
+      } else {
+        console.error(`[hubspotFetch] ${method} ${path} failed ${res.status}: ${text.slice(0, 1000)}`);
+      }
       // ...but throw a sanitized error so routes that surface e.message to the
       // browser don't leak HubSpot internals (object type ids, property names,
       // validation specifics).
