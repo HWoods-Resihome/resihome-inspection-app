@@ -55,6 +55,8 @@ export interface ServiceRecord {
                           // via the property's stored coords when lat/lng are absent
   masterServiceId?: string; // set on a per-property billing line split from a community master
   forBilling?: boolean;     // this record is a billing line (children after split; masters before)
+  vendorCost?: number | null; // vendor payout — shown on the list card for INTERNAL users only
+                              // (the list API strips it for vendor viewers).
 }
 
 export const SERVICE_STATUS_ORDER: ServiceStatus[] =

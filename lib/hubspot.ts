@@ -1891,7 +1891,7 @@ const SERVICE_LIST_PROPS = [
   'region_snapshot', 'portfolio_snapshot', 'address_snapshot', 'locality_snapshot', 'community_name',
   'property_status_snapshot', 'latitude', 'longitude', 'vendor_name', 'pet_stations',
   'property_id_ref', 'community_id_ref', 'submitted_at', 'completed_at', 'ontime',
-  'master_service_id', 'for_billing',
+  'master_service_id', 'for_billing', 'vendor_cost',
   'hs_createdate', 'hs_lastmodifieddate',
 ];
 
@@ -1926,6 +1926,9 @@ function mapServiceRow(r: any): ServiceRecord {
   if (p.is_bid_item === 'true') rec.isBidItem = true;
   if (String(p.master_service_id || '').trim()) rec.masterServiceId = String(p.master_service_id).trim();
   if (p.for_billing === 'true') rec.forBilling = true;
+  // Vendor payout — shown on the list card for INTERNAL users only (the list API
+  // strips it for vendors). Allow 0 through (num() drops 0), so parse directly.
+  if (p.vendor_cost != null && p.vendor_cost !== '') { const vc = Number(p.vendor_cost); if (Number.isFinite(vc)) rec.vendorCost = vc; }
   if (p.community_name) rec.community = p.community_name;
   if (p.property_status_snapshot) rec.propertyStatus = p.property_status_snapshot;
   if (p.ontime === 'true') rec.onTime = true;

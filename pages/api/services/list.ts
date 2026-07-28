@@ -12,6 +12,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { searchServiceWorkOrders } from '@/lib/hubspot';
+import { isInternalEmail } from '@/lib/userAccess';
 import { scopeServices } from '@/lib/services/scope';
 import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services/scopeServer';
 
@@ -28,7 +29,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Community billing children roll up into their master — hidden from the
     // operational list (mirrors the old gSSP; see RECURRING_SERVICES_PLAN.md).
     const operational = (real ?? []).filter((s) => !s.masterServiceId);
-    const services = scopeServices(operational, viewer);
+    const scoped = scopeServices(operational, viewer);
+    // Vendor payout is an INTERNAL-only figure. Strip it for anyone who isn't an
+    // internal ResiHome user (vendors, and any non-internal viewer) so it never
+    // reaches the client for them — the card only renders it when it's present.
+    const isInternal = !session?.vendor && isInternalEmail(session?.realEmail || session?.email);
+    const services = isInternal ? scoped : scoped.map((s) => ({ ...s, vendorCost: undefined }));
     return res.status(200).json({ services, live: !!real });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });

@@ -131,6 +131,11 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
               <p className="text-[11px] font-heading font-semibold text-gray-400 tabular-nums mb-0.5">SVC #{s.id}</p>
               <p className="text-[13px] font-heading font-bold uppercase tracking-wide text-brand mb-1 truncate">
                 {worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)}
+                {/* Vendor payout — INTERNAL viewers only (the list API strips it
+                    for vendors), e.g. "Landscaping · Grass Cut ($45)". */}
+                {isAdmin && s.vendorCost != null && (
+                  <span className="text-emerald-600"> (${s.vendorCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })})</span>
+                )}
               </p>
               <h3 className="font-bold text-[15px] text-ink break-words leading-snug">
                 <span className="align-middle">{s.address}</span>
