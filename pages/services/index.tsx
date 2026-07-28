@@ -134,7 +134,7 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
                 {/* Vendor payout — INTERNAL viewers only (the list API strips it
                     for vendors), e.g. "Landscaping · Grass Cut ($45)". */}
                 {isAdmin && s.vendorCost != null && (
-                  <span className="text-emerald-600"> (${s.vendorCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })})</span>
+                  <span> (${s.vendorCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })})</span>
                 )}
               </p>
               <h3 className="font-bold text-[15px] text-ink break-words leading-snug">
