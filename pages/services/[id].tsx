@@ -575,8 +575,9 @@ const houseNum = (a: string): number => { const m = /^\s*(\d+)/.exec(a || ''); r
 const byAddr = (x: CoveredProp, y: CoveredProp): number => (houseNum(x.address) - houseNum(y.address)) || x.address.localeCompare(y.address);
 function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boolean }) {
   const router = useRouter();
-  const split = svc.forBilling === 'false' || !!svc.splitAt;
-  const canEdit = isInternal && svc.live && !split && ['pending', 'assigned', 'submitted', 'review'].includes(svc.status);
+  // Community billing splits are retired — a master shows its covered homes in
+  // every status (including Completed), editable only while the order is open.
+  const canEdit = isInternal && svc.live && ['pending', 'assigned', 'submitted', 'review'].includes(svc.status);
   const [covered, setCovered] = useState<CoveredProp[]>([]);
   const [available, setAvailable] = useState<CoveredProp[]>([]);
   const [loading, setLoading] = useState(svc.live);
@@ -635,7 +636,7 @@ function MasterCoverage({ svc, isInternal }: { svc: ServiceView; isInternal: boo
     <CollapsibleSection
       title="Covered Homes"
       defaultOpen={false}
-      subtitle={split ? 'Split into per-property billing lines — final.' : `One visit, billed as ${count} individual cut${count === 1 ? '' : 's'}.`}
+      subtitle={`One visit — ${count} home${count === 1 ? '' : 's'} serviced.`}
       right={<span className="text-[12px] font-heading font-bold text-brand tabular-nums">{count} home{count === 1 ? '' : 's'}</span>}
     >
       {loading ? (

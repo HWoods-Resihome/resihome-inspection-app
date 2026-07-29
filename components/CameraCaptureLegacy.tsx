@@ -1376,6 +1376,81 @@ export function CameraCaptureLegacy({
   const openGallery = useCallback(() => {
     galleryInputRef.current?.click();
   }, []);
+  // Burn the SAME evidence stamp (address + timestamp + GPS proximity) into a
+  // photo that did NOT come from the in-app shutter — the in-overlay "Upload"
+  // (gallery) and the native-camera fallback. Previously these imported files
+  // skipped stamping entirely (only the shutter path stamped), so a vendor who
+  // tapped Upload / loaded from the gallery ended up with UN-stamped evidence and
+  // the AI review flagged "no burned-in evidence stamp". Best-effort: on any
+  // decode/encode failure the original file is enqueued unchanged, never dropped.
+  const stampImportedFile = useCallback(async (file: File): Promise<File> => {
+    if (!file.type.startsWith('image/')) return file; // videos pass through untouched
+    let objectUrl: string | null = null;
+    let bmp: ImageBitmap | null = null;
+    try {
+      let src: CanvasImageSource;
+      let sw: number, sh: number;
+      if (typeof createImageBitmap === 'function') {
+        bmp = await createImageBitmap(file, { imageOrientation: 'from-image' } as any);
+        src = bmp; sw = bmp.width; sh = bmp.height;
+      } else {
+        objectUrl = URL.createObjectURL(file);
+        const img = await new Promise<HTMLImageElement>((res, rej) => {
+          const i = new Image();
+          i.onload = () => res(i);
+          i.onerror = () => rej(new Error('decode failed'));
+          i.src = objectUrl as string;
+        });
+        src = img; sw = img.naturalWidth; sh = img.naturalHeight;
+      }
+      if (!sw || !sh) return file;
+      const scale = Math.min(1, MAX_SAVE_EDGE / Math.max(sw, sh));
+      const vw = Math.max(1, Math.round(sw * scale));
+      const vh = Math.max(1, Math.round(sh * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = vw; canvas.height = vh;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return file;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(src, 0, 0, sw, sh, 0, 0, vw, vh);
+      const stampLines: StampLine[] = [];
+      if (addressSnapshot) stampLines.push({ text: addressSnapshot });
+      stampLines.push({ text: new Date().toLocaleString() });
+      stampLines.push(...buildGeoStampLines());
+      drawEvidenceStamp(ctx, vw, vh, stampLines);
+      const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/jpeg', PHOTO_SAVE_QUALITY));
+      canvas.width = 0; canvas.height = 0;
+      if (!blob) return file;
+      const base = (file.name || '').replace(/\.[^.]+$/, '') || `import_${Date.now()}`;
+      return new File([blob], `${base}_stamped.jpg`, { type: 'image/jpeg' });
+    } catch {
+      return file;
+    } finally {
+      try { bmp?.close(); } catch { /* noop */ }
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    }
+  }, [addressSnapshot, buildGeoStampLines]);
+
+  // Small (~400px) thumbnail for an imported File so the strip renders tiny tiles
+  // instead of the full-res blob (iOS memory). Best-effort → undefined.
+  const fileThumbDataUrl = useCallback(async (file: File): Promise<string | undefined> => {
+    if (typeof createImageBitmap !== 'function' || !file.type.startsWith('image/')) return undefined;
+    let bmp: ImageBitmap | null = null;
+    try {
+      try { bmp = await createImageBitmap(file, { resizeWidth: 400, resizeQuality: 'medium' } as any); }
+      catch { bmp = await createImageBitmap(file); }
+      const scale = Math.min(1, 400 / Math.max(bmp.width, bmp.height));
+      const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const ctx = c.getContext('2d'); if (!ctx) return undefined;
+      ctx.drawImage(bmp, 0, 0, w, h);
+      const url = c.toDataURL('image/jpeg', 0.6);
+      c.width = 0; c.height = 0;
+      return url;
+    } catch { return undefined; }
+    finally { try { bmp?.close(); } catch { /* noop */ } }
+  }, []);
+
   const handleNativeFiles = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
     const room = Math.max(0, maxPhotos - itemsRef.current.length);
@@ -1383,8 +1458,15 @@ export function CameraCaptureLegacy({
     if (picked.length < files.length) {
       void dialog.alert(`Only the first ${room} photo(s) were added (max ${maxPhotos} per session).`);
     }
-    for (const f of picked) enqueueFile(f);
-  }, [enqueueFile, maxPhotos]);
+    // Stamp (address + time + GPS proximity) then enqueue — so gallery/native
+    // imports carry the same burned-in evidence as in-app shutter captures.
+    for (const f of picked) {
+      void stampImportedFile(f).then(async (stamped) => {
+        const thumb = await fileThumbDataUrl(stamped);
+        enqueueFile(stamped, thumb);
+      });
+    }
+  }, [enqueueFile, maxPhotos, dialog, stampImportedFile, fileThumbDataUrl]);
 
   const capturePhoto = useCallback(() => {
     // Count from the ref so rapid taps see the live total (state can lag a frame).

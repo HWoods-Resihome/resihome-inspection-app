@@ -53,7 +53,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
     if (!isCommunityCutMaster(p)) return res.status(400).json({ error: 'Not a community grass-cut master.' });
-    if (p.for_billing === 'false' || String(p.split_at || '').trim()) return res.status(409).json({ error: 'This master has already been split — its covered list is final.' });
+    // Community billing splits are retired: community masters now bill at the
+    // master level (total across covered homes). Legacy masters that were split
+    // still carry their full covered snapshot, so READING (GET) always returns the
+    // covered homes. Only EDITING (POST) is refused once the order is terminal —
+    // billing is final then.
+    if (req.method === 'POST' && ['completed', 'canceled'].includes(String(p.status || ''))) {
+      return res.status(409).json({ error: 'This order is completed — its covered list is final.' });
+    }
 
     const communityId = String(p.community_id_ref || '').trim();
     const all = communityId ? await fetchCommunityProperties(communityId) : [];
