@@ -54,6 +54,47 @@ function anthropicKey(): string {
   return k;
 }
 
+/**
+ * Resilient Anthropic Messages call for the learning loop. The old code did a
+ * single raw fetch with no timeout or retry, so any transient network hiccup
+ * surfaced to the admin as the bare undici "fetch failed" (the reported bug).
+ * This hard-times-out each attempt and retries network errors / 429 / 5xx a
+ * couple of times with backoff, staying within the endpoint's 60s budget, and
+ * fails fast on a real 4xx. Returns the parsed JSON.
+ */
+async function anthropicLearningCall(body: Record<string, any>): Promise<any> {
+  const TIMEOUT_MS = 25000;
+  const RETRIES = 2; // → up to 3 attempts; 3×25s + backoff stays under 60s
+  let lastErr: any = null;
+  for (let attempt = 0; attempt <= RETRIES; attempt++) {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+    let resp: Response;
+    try {
+      resp = await fetch(ANTHROPIC_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey(), 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+    } catch (e: any) {
+      // Network failure / aborted timeout ("fetch failed") — transient, retry.
+      lastErr = e;
+      clearTimeout(to);
+      if (attempt < RETRIES) { await new Promise((r) => setTimeout(r, 600 * (attempt + 1))); continue; }
+      break;
+    }
+    clearTimeout(to);
+    if (resp.ok) return await resp.json();
+    const t = await resp.text().catch(() => '');
+    const err = new Error(`Learning call failed ${resp.status}: ${t.slice(0, 200)}`);
+    if (resp.status !== 429 && resp.status < 500) throw err; // real 4xx — don't retry
+    lastErr = err;
+    if (attempt < RETRIES) { await new Promise((r) => setTimeout(r, 600 * (attempt + 1))); continue; }
+  }
+  throw new Error(`AI learning request failed after retries: ${String(lastErr?.message || lastErr).slice(0, 200)}`);
+}
+
 /** Synthesize learned check candidates from reviewer decisions. */
 export async function synthesizeServiceCheckCandidates(samples: ReviewSample[]): Promise<AutoServiceCheckCandidate[]> {
   if (samples.length < 3) return []; // need a little signal before generalizing
@@ -90,17 +131,11 @@ export async function synthesizeServiceCheckCandidates(samples: ReviewSample[]):
     },
   };
 
-  const resp = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey(), 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
-      model: MODEL, max_tokens: 900, system,
-      tools: [tool], tool_choice: { type: 'tool', name: 'report_checks' },
-      messages: [{ role: 'user', content: [{ type: 'text', text: `Recently reviewed services (${samples.length}):\n${lines}\n\nPropose up to 8 learned checks.` }] }],
-    }),
+  const data = await anthropicLearningCall({
+    model: MODEL, max_tokens: 900, system,
+    tools: [tool], tool_choice: { type: 'tool', name: 'report_checks' },
+    messages: [{ role: 'user', content: [{ type: 'text', text: `Recently reviewed services (${samples.length}):\n${lines}\n\nPropose up to 8 learned checks.` }] }],
   });
-  if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error(`Learning call failed ${resp.status}: ${t.slice(0, 200)}`); }
-  const data = await resp.json();
   try {
     const u = data?.usage;
     recordAiUsage({
