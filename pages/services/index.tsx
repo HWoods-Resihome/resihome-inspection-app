@@ -475,15 +475,25 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
     try { sessionStorage.setItem(LIST_KEY, JSON.stringify({ status, worktype, vendor, region, community, search, pastDueOnly, sortField, sortDir, pageSize, filtersOpen })); } catch { /* quota/private */ }
   }, [status, worktype, vendor, region, community, search, pastDueOnly, sortField, sortDir, pageSize, filtersOpen]);
 
+  // Selecting a status bucket sets the DEFAULT sort: Completed → service date
+  // descending (most recently completed first); every other bucket → date
+  // ascending (soonest first). A manual sort toggle after this still applies
+  // until the next bucket switch.
+  const selectStatus = (val: ServiceStatus | 'all' | 'all_open') => {
+    setStatus(val);
+    setPastDueOnly(false);
+    setSortField('date');
+    setSortDir(val === 'completed' ? 'desc' : 'asc');
+  };
   const chip = (val: ServiceStatus | 'all', label: string) => (
-    <button type="button" onClick={() => { setStatus(val); setPastDueOnly(false); }}
+    <button type="button" onClick={() => selectStatus(val)}
       className={`w-full text-center text-[11px] font-heading font-semibold px-2 py-1.5 rounded-full border transition whitespace-nowrap ${
         status === val && !pastDueOnly ? 'bg-brand text-white border-brand' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
       {label}{val === 'all' ? ` (${counts.all})` : counts[val] ? ` (${counts[val]})` : ''}
     </button>
   );
   const allChip = (
-    <button type="button" onClick={() => { setPastDueOnly(false); setStatus((s) => (s === 'all' ? 'all_open' : 'all')); }}
+    <button type="button" onClick={() => selectStatus(status === 'all' ? 'all_open' : 'all')}
       title="Tap again to toggle All ↔ All Open (hide completed)"
       className={`w-full text-center text-[11px] font-heading font-semibold px-2 py-1.5 rounded-full border transition whitespace-nowrap ${
         (status === 'all' || status === 'all_open') && !pastDueOnly ? 'bg-brand text-white border-brand' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
@@ -659,7 +669,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
             </div>
             {(status !== 'all' || pastDueOnly || worktype.length > 0 || vendor.length > 0 || region.length > 0 || community.length > 0 || search) && (
               <div className="flex justify-end">
-                <button type="button" onClick={() => { setStatus('all'); setPastDueOnly(false); setWorktype([]); setVendor([]); setRegion([]); setCommunity([]); setSearch(''); }}
+                <button type="button" onClick={() => { selectStatus('all'); setWorktype([]); setVendor([]); setRegion([]); setCommunity([]); setSearch(''); }}
                   className="text-[11px] font-heading font-semibold text-gray-500 hover:text-brand underline">Clear filters</button>
               </div>
             )}
