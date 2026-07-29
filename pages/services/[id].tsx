@@ -502,10 +502,11 @@ function CollapsibleSection({ title, subtitle, right, defaultOpen = true, bodyCl
 // add ANY community property or drop covered ones — the price recomputes down
 // (count × per-property rate). Photos stay on the master; children reference it.
 interface CoveredProp { id: string; address: string; locality: string; rrqc: boolean; status: string }
-// Admin correction of vendor cost + markup on a COMPLETED order. Client cost is
-// recomputed live. Saving patches the record (PDFs render live from it, so they
-// reflect the new pricing on next open) and does NOT re-email the vendor.
-function CompletedPricingEditor({ svc }: { svc: ServiceView }) {
+// Admin correction of vendor cost + markup on a service order, in ANY status.
+// Client cost is recomputed live. Saving patches the record (PDFs render live
+// from it, so they reflect the new pricing on next open) and does NOT re-email
+// the vendor.
+function PricingEditor({ svc }: { svc: ServiceView }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [vc, setVc] = useState(String(svc.vendorCost ?? 0));
@@ -557,7 +558,7 @@ function CompletedPricingEditor({ svc }: { svc: ServiceView }) {
       <div className="flex items-center justify-between text-[13px] border-t border-brand/15 pt-1.5">
         <span className="text-gray-600">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(client)}</span>
       </div>
-      <p className="text-[11px] text-gray-500">Updates the record and PDFs. The vendor is not re-emailed.</p>
+      <p className="text-[11px] text-gray-500">Updates the record (and PDFs, which render live). The vendor is not re-emailed.</p>
       {err && <p className="text-[12px] text-red-600">{err}</p>}
       <div className="flex items-center gap-2 justify-end">
         <button type="button" onClick={() => setOpen(false)} className="text-[12px] font-heading font-semibold text-gray-500 hover:text-ink px-2 py-1">Cancel</button>
@@ -1533,9 +1534,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       <CostVendorRows svc={svc} total={svc.vendorCost} />
       {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
       {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
-      {/* Admins can correct vendor cost + markup on a completed order; PDFs re-render
+      {/* Admins can correct vendor cost + markup in ANY status; PDFs re-render
           live from the record and the vendor is not re-emailed. */}
-      {isInternal && svc.live && svc.status === 'completed' && <CompletedPricingEditor svc={svc} />}
+      {isInternal && svc.live && <PricingEditor svc={svc} />}
     </CollapsibleSection>
   ) : null;
 
@@ -1582,6 +1583,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       {liveCost.changed && liveCost.reason && (
         <div className="text-[12px] text-amber-700 pt-1">{liveCost.reason} — was {money(svc.vendorCost)}.</div>
       )}
+      {/* Same admin pricing override as the view mode — available in every status. */}
+      {isInternal && svc.live && <PricingEditor svc={svc} />}
     </CollapsibleSection>
   ) : null;
 

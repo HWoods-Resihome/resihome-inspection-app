@@ -1,16 +1,15 @@
 /**
  * POST /api/services/[id]/edit-pricing — internal admins correct the vendor cost
- * and/or markup on a COMPLETED service order. Client cost is recomputed from the
- * two. Records an audit entry.
+ * and/or markup on a service order in ANY status. Client cost is recomputed from
+ * the two. Records an audit entry.
  *
- * Deliberately does NOT re-notify the vendor: the completion email already went
- * out at completion, and this is a back-office billing correction. The service
- * PDFs are rendered live from the record on every open (GET /api/services/[id]/pdf),
- * so they reflect the new pricing immediately — no stored PDF to regenerate, and
- * no new email.
+ * Deliberately does NOT re-notify the vendor: this is a back-office billing
+ * correction, not a status change. The service PDFs are rendered live from the
+ * record on every open (GET /api/services/[id]/pdf), so they reflect the new
+ * pricing immediately — no stored PDF to regenerate, and no new email.
  *
  * Body: { vendorCost: number, markupPct: number }
- * INTERNAL only. Completed orders only.
+ * INTERNAL only.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -38,9 +37,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rec = await fetchServiceWorkOrder(id);
     if (!rec) return res.status(200).json({ ok: true, preview: true }); // object not configured
     const p = rec.props;
-    if (String(p.status || '') !== 'completed') {
-      return res.status(409).json({ error: 'Pricing can only be edited on completed orders here (use the review/bid decision while the order is open).' });
-    }
 
     const vc = Math.round(vendorCost * 100) / 100;
     const mk = Math.round(markupPct * 100) / 100;
@@ -51,7 +47,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await patchServiceWorkOrder(id, { vendor_cost: vc, markup_pct: mk, client_cost: clientCost });
     void recordServiceAudit({
       serviceId: id, action: 'price_edit', actorEmail: email, actorName: session?.name,
-      detail: `Pricing edited on completed order: vendor ${prevVc} → ${vc}, markup ${prevMk}% → ${mk}% (client ${clientCost}). No vendor re-notification.`.slice(0, 500),
+      detail: `Pricing edited (status ${String(p.status || '?')}): vendor ${prevVc} → ${vc}, markup ${prevMk}% → ${mk}% (client ${clientCost}). No vendor re-notification.`.slice(0, 500),
       meta: { vendorCost: vc, markupPct: mk, clientCost },
     });
     return res.status(200).json({ ok: true, id, vendorCost: vc, markupPct: mk, clientCost });
