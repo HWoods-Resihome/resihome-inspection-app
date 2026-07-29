@@ -103,7 +103,11 @@ export async function synthesizeServiceCheckCandidates(samples: ReviewSample[]):
   const data = await resp.json();
   try {
     const u = data?.usage;
-    recordAiUsage({ source: 'service_ai_learning', model: MODEL, inputTokens: (u?.input_tokens || 0) + (u?.cache_read_input_tokens || 0), outputTokens: u?.output_tokens || 0 });
+    recordAiUsage({
+      source: 'service_ai_learning', model: MODEL,
+      inputTokens: u?.input_tokens || 0, outputTokens: u?.output_tokens || 0,
+      cacheReadTokens: u?.cache_read_input_tokens || 0, cacheCreationTokens: u?.cache_creation_input_tokens || 0,
+    });
   } catch { /* noop */ }
   const block = (data?.content || []).find((c: any) => c.type === 'tool_use' && c.name === 'report_checks');
   const raw = Array.isArray(block?.input?.checks) ? block.input.checks : [];
