@@ -1,8 +1,10 @@
 {
   "git": {
     "deploymentEnabled": {
+      "claude/power-bi-web-replication-HaWLD": false,
+      "claude/reinspect-pdf-photos-l3sifd": false,
       "claude/resiwalk-setup-auto-deploy-Ciris": false,
-      "claude/reinspect-pdf-photos-l3sifd": false
+      "claude/upbeat-edison-xg3kyt": false
     }
   },
   "functions": {
