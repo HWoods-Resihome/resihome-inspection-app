@@ -133,6 +133,10 @@ export interface InspectionSummary {
   // is enriched server-side with the SOURCE scope's client total (the scope it
   // re-inspects), since the re-inspect itself carries no rate-card lines.
   totalClientCost: number | null;
+  // Rolled-up VENDOR total of all rate-card lines (from `total_vendor_cost`,
+  // maintained by recomputeInspectionTotals). Populated for Scope Rate Card
+  // inspections; null/0 for non-scope templates. List mapper only.
+  totalVendorCost?: number | null;
   // ResiWalk Insights analytics: overall pass/fail (1099/Vacancy) and the photo
   // count stamped at submit. Optional — only the list mapper (mapInspectionRow,
   // used by searchInspectionsPage) populates these; other constructors omit them.

@@ -2819,7 +2819,7 @@ const INSPECTION_LIST_PROPERTIES = [
   'pdf_attachment_url',
   'hs_createdate',
   'last_edited_at', 'hs_lastmodifieddate',
-  'total_client_cost',
+  'total_client_cost', 'total_vendor_cost',
   'source_rate_card_id', 'source_rate_card_name', 'qc_verdict', 'qc_overall_note',
   // Added for ResiWalk Insights analytics (region filter, turnaround timestamps,
   // pass/fail, photo counts). Harmless extra fields for the home list.
@@ -2880,6 +2880,8 @@ function mapInspectionRow(r: any): InspectionSummary {
     resolutionTimingJson: null,
     totalClientCost: p.total_client_cost != null && p.total_client_cost !== ''
       ? Number(p.total_client_cost) : null,
+    totalVendorCost: p.total_vendor_cost != null && p.total_vendor_cost !== ''
+      ? Number(p.total_vendor_cost) : null,
     inspectionResult: (p.inspection_result === 'pass' || p.inspection_result === 'fail') ? p.inspection_result : null,
     totalPhotosAttached: p.total_photos_attached != null && p.total_photos_attached !== ''
       ? Number(p.total_photos_attached) : null,

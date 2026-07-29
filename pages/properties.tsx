@@ -23,7 +23,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { SettingsMenu } from '@/components/SettingsMenu';
 import { SERVICE_STATUS_STYLE, serviceStatusText, type ServiceStatus } from '@/lib/services/model';
 
-interface InspRow { id: string; label: string; status: string; date: string | null; inspectorName: string }
+interface InspRow { id: string; label: string; status: string; date: string | null; inspectorName: string; result?: 'pass' | 'fail' | null; vendorCost?: number | null }
 interface SvcRow { id: string; label: string; status: string; isGrassCut: boolean; completedAt: string | null; dueDate: string | null; vendor: string; date: string | null }
 interface Activity { inspections: InspRow[]; services: SvcRow[] }
 
@@ -236,6 +236,14 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
                       <div className="text-[13px] font-semibold text-ink truncate">{i.label}</div>
                       {i.inspectorName && <div className="text-[11px] text-gray-400 truncate">{i.inspectorName}</div>}
                     </div>
+                    {/* Overall pass/fail when the template carries it (RRQC /
+                        Re-Inspect); otherwise the scope's vendor total (Scope
+                        Rate Card). Admin-only page, so vendor cost is fine here. */}
+                    {i.result === 'pass' || i.result === 'fail' ? (
+                      <StatusChip text={i.result} cls={i.result === 'pass' ? 'bg-green-100 text-green-800 border-green-300' : 'bg-red-100 text-red-700 border-red-300'} />
+                    ) : i.vendorCost != null && i.vendorCost > 0 ? (
+                      <span className="text-[12px] font-semibold text-ink tabular-nums shrink-0">${i.vendorCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+                    ) : null}
                     {i.status && <StatusChip text={i.status} cls={inspStatusCls(i.status)} />}
                     <div className="text-[12px] text-gray-500 tabular-nums w-16 text-right shrink-0">{fmtDate(i.date)}</div>
                   </Link>

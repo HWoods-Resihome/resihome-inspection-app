@@ -34,6 +34,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Best available "when": completed → submitted → started → scheduled → created.
       date: i.completedAt || i.submittedAt || i.startedAt || i.scheduledDate || i.createdAt || null,
       inspectorName: i.inspectorName || '',
+      // Overall pass/fail — only on templates that carry it (RRQC / Re-Inspect);
+      // null for scope-type inspections. Vendor cost — the scope's rolled-up
+      // vendor total (Scope Rate Card); null/0 for pass/fail templates.
+      result: i.inspectionResult || null,
+      vendorCost: i.totalVendorCost != null ? i.totalVendorCost : null,
     }));
 
     const services = svcs.map((s) => ({
