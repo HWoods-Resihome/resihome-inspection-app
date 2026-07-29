@@ -7549,8 +7549,8 @@ export function bustCompanyCodeCache(): void { _companyCodeByEmail.clear(); }
  *  address }. Chunked batch/read (100/req). Unknown ids are simply absent. */
 export async function fetchPropertyBillingByIds(
   ids: string[],
-): Promise<Map<string, { entityId: string; portfolio: string; region: string; address: string }>> {
-  const out = new Map<string, { entityId: string; portfolio: string; region: string; address: string }>();
+): Promise<Map<string, { entityId: string; portfolio: string; region: string; address: string; status: string }>> {
+  const out = new Map<string, { entityId: string; portfolio: string; region: string; address: string; status: string }>();
   const distinct = Array.from(new Set(ids.map((s) => String(s || '').trim()).filter(Boolean)));
   if (!distinct.length) return out;
   const { property: typeId } = typeIds();
@@ -7559,7 +7559,7 @@ export async function fetchPropertyBillingByIds(
     try {
       const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/batch/read`, {
         method: 'POST',
-        body: JSON.stringify({ properties: ['entity_id', 'portfolio', 'region', 'address', 'city', 'state_code', 'zip_code', 'zip'], inputs: chunk.map((id) => ({ id })) }),
+        body: JSON.stringify({ properties: ['entity_id', 'portfolio', 'region', 'address', 'city', 'state_code', 'zip_code', 'zip', PROPERTY_STATUS_PROPERTY], inputs: chunk.map((id) => ({ id })) }),
       });
       for (const rec of resp.results || []) {
         const p = rec.properties || {};
@@ -7568,6 +7568,7 @@ export async function fetchPropertyBillingByIds(
           portfolio: String(p.portfolio || '').trim(),
           region: String(p.region || '').trim(),
           address: String(p.address || '').trim(),
+          status: String(p[PROPERTY_STATUS_PROPERTY] || '').trim(),
         });
       }
     } catch (e) { console.warn('[billing] property batch read failed:', String((e as any)?.message || e).slice(0, 120)); }

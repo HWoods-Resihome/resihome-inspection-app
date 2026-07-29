@@ -223,8 +223,10 @@ export async function fetchServiceBillingRows(filters: BillingFilters = {}): Pro
       entityId: idValue,
       fullAddress: [String(p.address_snapshot || p.community_name || '').trim(), String(p.locality_snapshot || '').trim()].filter(Boolean).join(', '),
       // Property status snapshotted when the vendor submitted the completed work
-      // (stamped at submit in /api/services/[id]/submit) — the status at completion.
-      propertyStatus: String(p.property_status_snapshot || '').trim(),
+      // (stamped at submit) — the status at completion. Bid items completed via the
+      // "complete now" path skip that submit stamp, so fall back to the property's
+      // current live status (from the batched Property read) rather than blank.
+      propertyStatus: String(p.property_status_snapshot || '').trim() || (prop?.status || ''),
       personName: vendorName,
       brokerCode: companyCode,
       typeLabel,

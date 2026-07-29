@@ -20,7 +20,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
-import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, patchServiceWorkOrder, fetchPropertyStatus } from '@/lib/hubspot';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { notifyServiceCompleted } from '@/lib/notifications/triggers';
@@ -78,11 +78,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // the bid straight to Completed (skip assign → do → submit) and email them the
     // completion confirmation with the PDF, exactly like the QC completion review.
     if (finalize === 'complete') {
-      await patchServiceWorkOrder(id, {
+      // Freeze the property's current status onto the order (the "status at
+      // completion" the billing report shows). The normal submit flow stamps this,
+      // but this path skips submit — so without it a completed bid item had a blank
+      // Property Status in billing. Property scope only; don't clobber an existing one.
+      const completeProps: Record<string, any> = {
         ...base, status: 'completed',
         vendor_cost: vendorCost, markup_pct: markupPct, client_cost: clientCost,
         completed_at: now,
-      });
+      };
+      if (p.property_id_ref && !p.property_status_snapshot) {
+        const liveStatus = await fetchPropertyStatus(String(p.property_id_ref)).catch(() => null);
+        if (liveStatus) completeProps.property_status_snapshot = liveStatus;
+      }
+      await patchServiceWorkOrder(id, completeProps);
       void recordServiceAudit({ serviceId: id, action: 'bid', actorEmail: email, actorName: session?.name, detail: (notes ? `Bid ${verb} → Completed (vendor already performed the work): ${notes}` : `Bid ${verb} → Completed (vendor already performed the work)`).slice(0, 500), meta: { decision, finalize } });
       // Vendor completion email (PDF attached). Deferred via waitUntil — the PDF
       // render + send is seconds of work the reviewer's screen shouldn't wait on;
