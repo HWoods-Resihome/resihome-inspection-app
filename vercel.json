@@ -1,4 +1,10 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "claude/resiwalk-setup-auto-deploy-Ciris": false,
+      "claude/reinspect-pdf-photos-l3sifd": false
+    }
+  },
   "functions": {
     "pages/api/submit.ts": {
       "maxDuration": 10
