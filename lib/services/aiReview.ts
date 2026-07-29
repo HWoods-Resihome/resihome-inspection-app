@@ -16,6 +16,7 @@ import { searchServiceWorkOrdersByStatus, fetchServiceWorkOrder, patchServiceWor
 import { recordServiceAudit } from './serviceAudit';
 import { notifyServicesInboxStatus } from '@/lib/notifications/triggers';
 import { recordAiUsage } from '@/lib/aiUsage';
+import { put, list, del } from '@vercel/blob';
 import { SAMPLE_AI_CHECKS, type AiCheck } from './aiKnowledge';
 import { worktypeLabel, subtypeLabel, type Worktype } from './worktypes';
 import { PROOF_URL_KEY } from './model';
@@ -31,6 +32,29 @@ const PHOTO_EDGE = 768;
 // threshold (lib/evidenceStamp PROXIMITY_THRESHOLD_M). Defined locally so this
 // server module never imports the browser/canvas stamp code.
 const PROXIMITY_THRESHOLD_M = Number(process.env.NEXT_PUBLIC_PROXIMITY_THRESHOLD_M) || 250;
+
+// ── Batch API (opt-in via SERVICE_AI_REVIEW_BATCH) ───────────────────────────
+// The nightly backlog drain can submit its whole queue to the Message Batches
+// API (50% cheaper) instead of calling the model inline. Because a batch can take
+// up to an hour (occasionally 24h) — far beyond the 300s cron budget — it's a
+// two-phase job: the nightly cron SUBMITS + persists a pending record per batch
+// to Vercel Blob; a frequent collect cron (services-review-collect) POLLS each
+// batch and APPLIES verdicts once it ends. Verdicts apply through the exact same
+// applyVerdict path as the synchronous review, so behavior is identical.
+const BATCH_URL = 'https://api.anthropic.com/v1/messages/batches';
+const BATCH_PREFIX = 'service-ai-batch/';
+// Orders per batch. Each order carries up to MAX_PHOTOS base64 images (~0.4-0.8MB
+// each), so a chunk keeps the payload well under the 256MB batch ceiling AND keeps
+// payload assembly (image fetch+resize) inside one 300s cron. Multiple chunks →
+// multiple pending batches, all drained by the collect cron.
+const BATCH_CHUNK = 80;
+
+interface PendingBatch { batchId: string; orderIds: string[]; todayISO: string; createdAt: string; }
+
+function batchEnabled(): boolean {
+  const v = String(process.env.SERVICE_AI_REVIEW_BATCH || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
 
 const splitUrls = (v: any): string[] =>
   String(v || '').split(/[\n,]+/).map((s) => s.trim()).filter((s) => /^https?:\/\//i.test(s.split('#')[0]));
@@ -227,8 +251,15 @@ export interface ServiceVerdict {
   timeOnSite: string;
 }
 
-/** Run the AI review for one submitted order's evidence, against the given check set. */
-export async function reviewOne(order: { id: string; props: Record<string, any> }, allChecks: AiCheck[] = SAMPLE_AI_CHECKS): Promise<ServiceVerdict> {
+/**
+ * Build the Anthropic Messages request body for one order's review (system +
+ * tool + photos). Shared by the synchronous path (reviewOne) and the Batch API
+ * path (submitServiceAiReviewBatch), so both send byte-identical requests.
+ * `proofLoaded` reports whether the proof document actually decoded.
+ */
+async function buildReviewParams(
+  order: { id: string; props: Record<string, any> }, allChecks: AiCheck[],
+): Promise<{ params: Record<string, any>; hasProof: boolean; proofLoaded: boolean }> {
   const p = order.props;
   const worktype = (p.worktype || '') as Worktype;
   const subtype = p.subtype || '';
@@ -322,23 +353,26 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
       : `${photoContent.length ? 'Photos follow (read each one’s burned-in evidence stamp for GPS/time).' : 'No usable photos were available — that itself is a concern for most services.'}\n\n`) +
     `Return your decision via the report_verdict tool.`;
 
-  const resp = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey(), 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
-      model: MODEL, max_tokens: 700,
-      // Block 1 (stable rules + tool) carries the 1h cache breakpoint; block 2 is
-      // the per-order tail. Reads the ~1.6k-token prefix at ~0.1x on repeat calls.
-      system: [
-        { type: 'text', text: STABLE_RULES, cache_control: { type: 'ephemeral', ttl: '1h' } },
-        { type: 'text', text: variableSystem },
-      ],
-      tools: [REVIEW_TOOL], tool_choice: { type: 'tool', name: 'report_verdict' },
-      messages: [{ role: 'user', content: [{ type: 'text', text: summary }, ...photoContent] }],
-    }),
-  });
-  if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error(`AI review call failed ${resp.status}: ${t.slice(0, 200)}`); }
-  const data = await resp.json();
+  const params = {
+    model: MODEL, max_tokens: 700,
+    // Block 1 (stable rules + tool) carries the 1h cache breakpoint; block 2 is
+    // the per-order tail. Reads the ~1.6k-token prefix at ~0.1x on repeat calls.
+    system: [
+      { type: 'text', text: STABLE_RULES, cache_control: { type: 'ephemeral', ttl: '1h' } },
+      { type: 'text', text: variableSystem },
+    ],
+    tools: [REVIEW_TOOL], tool_choice: { type: 'tool', name: 'report_verdict' },
+    messages: [{ role: 'user', content: [{ type: 'text', text: summary }, ...photoContent] }],
+  };
+  return { params, hasProof, proofLoaded: !!proofBlock };
+}
+
+/**
+ * Parse an Anthropic Messages response (from either the live call or a batch
+ * result) into a ServiceVerdict, and record usage. `hasProof`/`proofLoaded`
+ * gate whether a proof summary is trusted.
+ */
+function parseVerdict(data: any, opts: { hasProof: boolean; proofLoaded: boolean }): ServiceVerdict {
   try {
     const u = data?.usage;
     recordAiUsage({
@@ -354,7 +388,7 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
   // actually show the work, even if the vendor's answers say it's done.
   const geofenceOk = input.geofence_ok !== false;
   const workEvidenced = input.work_evidenced !== false;
-  const verdict: ServiceVerdict = {
+  return {
     verdict: (input.verdict === 'clean' && geofenceOk && workEvidenced) ? 'clean' : 'needs_review',
     workEvidenced,
     geofenceOk,
@@ -363,11 +397,23 @@ export async function reviewOne(order: { id: string; props: Record<string, any> 
       ? input.issues.map((s: any) => String(s)).filter((s: string) => !SAMPLE_CAVEAT_RE.test(s)).slice(0, 12)
       : [],
     // Only trust a summary when a proof doc was actually attached and readable.
-    proofSummary: hasProof && proofBlock ? String(input.proof_summary || '').slice(0, 1500) : '',
-    hasProof,
+    proofSummary: opts.hasProof && opts.proofLoaded ? String(input.proof_summary || '').slice(0, 1500) : '',
+    hasProof: opts.hasProof,
     timeOnSite: String(input.time_on_site || '').slice(0, 120),
   };
-  return verdict;
+}
+
+/** Run the AI review for one submitted order's evidence, against the given check set. */
+export async function reviewOne(order: { id: string; props: Record<string, any> }, allChecks: AiCheck[] = SAMPLE_AI_CHECKS): Promise<ServiceVerdict> {
+  const { params, hasProof, proofLoaded } = await buildReviewParams(order, allChecks);
+  const resp = await fetch(ANTHROPIC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey(), 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify(params),
+  });
+  if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error(`AI review call failed ${resp.status}: ${t.slice(0, 200)}`); }
+  const data = await resp.json();
+  return parseVerdict(data, { hasProof, proofLoaded });
 }
 
 export interface ReviewResult {
@@ -378,24 +424,26 @@ export interface ReviewResult {
   routedToReview: number;
   errors: number;
   items: { id: string; service: string; verdict: string; notes: string; issues: string[]; action: string; timeOnSite?: string; error?: string }[];
+  /** Batch mode only: how many orders were submitted to the Batch API this run
+   *  (verdicts are applied later by the collect cron), and the batch ids. */
+  batchSubmitted?: number;
+  batches?: string[];
 }
 
 /**
- * Review ONE order and (when apply) write the verdict + move status. Shared by
- * the backlog cron and the single-service re-run so both behave identically.
- * Never throws for a bad model result — callers wrap for error accounting.
+ * Apply an already-computed verdict to one order: (when apply) write
+ * ai_verdict/ai_notes, move status (clean → completed + completed_at/ontime,
+ * else → review), extract proof photos, audit, and alert the services inbox.
+ * Shared by the synchronous path and the Batch API collector so a verdict is
+ * applied identically no matter how it was produced. Assumes the order is still
+ * eligible (caller re-checks status for the async batch path).
  */
-async function reviewOrderAndApply(
+async function applyVerdict(
   order: { id: string; props: Record<string, any> },
-  allChecks: AiCheck[], apply: boolean, todayISO: string,
-): Promise<{ clean: boolean; verdict: ServiceVerdict; item: ReviewResult['items'][number] }> {
+  v: ServiceVerdict, apply: boolean, todayISO: string,
+): Promise<{ clean: boolean; item: ReviewResult['items'][number] }> {
   const service = String(order.props.address_snapshot || order.props.service_name || order.id);
-  const v = await reviewOne(order, allChecks);
-  // Community grass-cut masters now bill at the community level (total vendor/
-  // client cost, no per-property split), so they auto-complete on a clean review
-  // like any other service — no forced human-review-to-split step.
   const clean = v.verdict === 'clean';
-
   if (apply) {
     const workPrefix = v.workEvidenced ? '' : '⚠ Work not evidenced: before/after photos don’t clearly show the work was done — verify before completing.\n\n';
     const geoPrefix = v.geofenceOk ? '' : '⚠ Geofence: photo location/timing evidence is off-site or missing — verify before completing.\n\n';
@@ -439,6 +487,23 @@ async function reviewOrderAndApply(
     }
   }
   const item = { id: order.id, service, verdict: v.verdict, notes: v.notes, issues: v.issues, timeOnSite: v.timeOnSite, action: apply ? (clean ? 'completed' : 'review') : (clean ? 'would-complete' : 'would-review') };
+  return { clean, item };
+}
+
+/**
+ * Review ONE order and (when apply) write the verdict + move status. Shared by
+ * the backlog cron and the single-service re-run so both behave identically.
+ * Never throws for a bad model result — callers wrap for error accounting.
+ */
+async function reviewOrderAndApply(
+  order: { id: string; props: Record<string, any> },
+  allChecks: AiCheck[], apply: boolean, todayISO: string,
+): Promise<{ clean: boolean; verdict: ServiceVerdict; item: ReviewResult['items'][number] }> {
+  // Community grass-cut masters now bill at the community level (total vendor/
+  // client cost, no per-property split), so they auto-complete on a clean review
+  // like any other service — no forced human-review-to-split step.
+  const v = await reviewOne(order, allChecks);
+  const { clean, item } = await applyVerdict(order, v, apply, todayISO);
   return { clean, verdict: v, item };
 }
 
@@ -494,6 +559,21 @@ export async function runServiceAiReview(apply: boolean, todayISO: string, onlyI
   const savedChecks = await readServiceAiChecks().catch(() => null);
   const allChecks: AiCheck[] = savedChecks && savedChecks.length ? (savedChecks as AiCheck[]) : SAMPLE_AI_CHECKS;
 
+  // Batch API path (opt-in): for the backlog drain (not the inline on-submit
+  // review, not dry-runs), submit the whole queue to the Message Batches API at
+  // 50% cost and let the collect cron apply verdicts once the batch ends. The
+  // on-submit review (onlyId) stays synchronous/instant. Falls back to the sync
+  // loop below if batching can't run, so a misconfig never strands the backlog.
+  if (!onlyId && apply && batchEnabled()) {
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      console.warn('[ai-review] SERVICE_AI_REVIEW_BATCH set but BLOB_READ_WRITE_TOKEN missing — using synchronous path.');
+    } else {
+      const { submitted, batches, failedChunks } = await submitServiceAiReviewBatch(orders, allChecks, todayISO);
+      console.log('[ai-review] batch submit', JSON.stringify({ submitted, batches: batches.length, failedChunks }));
+      return { mode: 'apply', configured: true, reviewed: 0, completed: 0, routedToReview: 0, errors: failedChunks, items: [], batchSubmitted: submitted, batches };
+    }
+  }
+
   const result: ReviewResult = { mode: apply ? 'apply' : 'dry-run', configured: true, reviewed: 0, completed: 0, routedToReview: 0, errors: 0, items: [] };
   const processOne = async (order: { id: string; props: Record<string, any> }) => {
     const service = String(order.props.address_snapshot || order.props.service_name || order.id);
@@ -515,6 +595,125 @@ export async function runServiceAiReview(apply: boolean, todayISO: string, onlyI
     await Promise.all(orders.slice(i, i + CONCURRENCY).map(processOne));
   }
   return result;
+}
+
+/**
+ * Phase 1 of batch mode: build each order's review request and submit them to the
+ * Message Batches API in chunks, persisting one pending record per batch to Blob.
+ * Never applies verdicts — that's the collect phase. Per-chunk failures are
+ * counted (those orders stay `submitted` and are retried next run), so a single
+ * bad chunk can't strand the rest.
+ */
+async function submitServiceAiReviewBatch(
+  orders: { id: string; props: Record<string, any> }[], allChecks: AiCheck[], todayISO: string,
+): Promise<{ submitted: number; batches: string[]; failedChunks: number }> {
+  const key = anthropicKey();
+  const batches: string[] = [];
+  let submitted = 0; let failedChunks = 0;
+  for (let i = 0; i < orders.length; i += BATCH_CHUNK) {
+    const chunk = orders.slice(i, i + BATCH_CHUNK);
+    try {
+      const built = await Promise.all(chunk.map(async (o) => {
+        try { const { params } = await buildReviewParams(o, allChecks); return { custom_id: o.id, params }; }
+        catch (e) { console.warn('[ai-review-batch] build failed for', o.id, e); return null; }
+      }));
+      const requests = built.filter(Boolean) as { custom_id: string; params: Record<string, any> }[];
+      if (!requests.length) continue;
+      const resp = await fetch(BATCH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ requests }),
+      });
+      if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error(`batch create failed ${resp.status}: ${t.slice(0, 200)}`); }
+      const data = await resp.json();
+      const batchId = String(data?.id || '');
+      if (!batchId) throw new Error('batch create returned no id');
+      const rec: PendingBatch = { batchId, orderIds: requests.map((r) => r.custom_id), todayISO, createdAt: new Date().toISOString() };
+      await put(`${BATCH_PREFIX}${batchId}.json`, JSON.stringify(rec),
+        { access: 'public', contentType: 'application/json', allowOverwrite: true, addRandomSuffix: false });
+      batches.push(batchId); submitted += requests.length;
+    } catch (e) {
+      failedChunks++;
+      console.error('[ai-review-batch] chunk submit failed:', e);
+    }
+  }
+  return { submitted, batches, failedChunks };
+}
+
+export interface BatchCollectResult {
+  configured: boolean;
+  pendingBatches: number;   // batches still processing (left for a later run)
+  endedBatches: number;     // batches whose results were applied this run
+  reviewed: number; completed: number; routedToReview: number; errors: number;
+}
+
+/**
+ * Phase 2 of batch mode: poll each pending batch; when one has ended, stream its
+ * results and apply each verdict through applyVerdict (re-fetching the order and
+ * skipping any that already left `submitted`, so it never double-applies). Deletes
+ * the pending record once a batch's results are processed. Safe to run on a short
+ * interval — a still-processing batch is a cheap status GET and left in place.
+ */
+export async function collectServiceAiReviewBatches(todayISO: string): Promise<BatchCollectResult> {
+  const out: BatchCollectResult = { configured: true, pendingBatches: 0, endedBatches: 0, reviewed: 0, completed: 0, routedToReview: 0, errors: 0 };
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return { ...out, configured: false };
+  const key = anthropicKey();
+
+  const pending: { url: string }[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await list({ prefix: BATCH_PREFIX, cursor, limit: 1000 });
+    for (const b of page.blobs) pending.push({ url: b.url });
+    cursor = page.hasMore ? page.cursor : undefined;
+  } while (cursor);
+
+  for (const blob of pending) {
+    const rec: PendingBatch | null = await fetch(blob.url).then((r) => r.json()).catch(() => null);
+    if (!rec?.batchId) { await del(blob.url).catch(() => {}); continue; }
+
+    const sresp = await fetch(`${BATCH_URL}/${rec.batchId}`, { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' } });
+    if (!sresp.ok) {
+      // 404 → the batch is gone (expired past its 29-day window, or never created);
+      // drop the stale record so it stops being polled. Other errors: retry later.
+      if (sresp.status === 404) await del(blob.url).catch(() => {});
+      else out.errors++;
+      continue;
+    }
+    const sdata = await sresp.json();
+    const resultsUrl = String(sdata?.results_url || '');
+    if (sdata?.processing_status !== 'ended' || !resultsUrl) { out.pendingBatches++; continue; }
+
+    const rresp = await fetch(resultsUrl, { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' } });
+    if (!rresp.ok) { out.errors++; continue; }
+    const text = await rresp.text();
+    out.endedBatches++;
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+
+    const applyLine = async (line: string) => {
+      let parsed: any; try { parsed = JSON.parse(line); } catch { return; }
+      const customId = String(parsed?.custom_id || '');
+      const r = parsed?.result;
+      if (!customId) return;
+      if (r?.type !== 'succeeded' || !r?.message) { out.errors++; return; } // errored/expired/canceled — order stays submitted, retried next run
+      // Re-fetch fresh and skip anything no longer submitted (the inline review or
+      // a human may have moved it) so a verdict is never double-applied.
+      const one = await fetchServiceWorkOrder(customId).catch(() => null);
+      if (!one || String(one.props.status || '') !== 'submitted') return;
+      let hasProof = false;
+      try { const ans = JSON.parse(one.props.answers_json || '{}'); hasProof = /^https?:\/\//i.test(String(ans[PROOF_URL_KEY] || '').trim()); } catch { /* noop */ }
+      const v = parseVerdict(r.message, { hasProof, proofLoaded: hasProof });
+      const { clean } = await applyVerdict({ id: one.id, props: one.props }, v, true, rec.todayISO || todayISO);
+      out.reviewed++; if (clean) out.completed++; else out.routedToReview++;
+    };
+    const CONCURRENCY = 4;
+    for (let i = 0; i < lines.length; i += CONCURRENCY) {
+      await Promise.all(lines.slice(i, i + CONCURRENCY).map((l) => applyLine(l).catch((e) => { out.errors++; console.warn('[ai-review-batch] apply failed:', e); })));
+    }
+    // Results processed → drop the pending record. Results stay downloadable for
+    // 29 days if we ever need to re-pull; the record's only job is done.
+    await del(blob.url).catch(() => {});
+  }
+  return out;
 }
 
 export interface TimeOnSiteBackfillResult {

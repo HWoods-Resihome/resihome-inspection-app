@@ -48,6 +48,9 @@
     "pages/api/cron/services-review.ts": {
       "maxDuration": 300
     },
+    "pages/api/cron/services-review-collect.ts": {
+      "maxDuration": 300
+    },
     "pages/api/cron/services-due.ts": {
       "maxDuration": 300
     },
@@ -117,6 +120,10 @@
     {
       "path": "/api/cron/services-review",
       "schedule": "30 11 * * *"
+    },
+    {
+      "path": "/api/cron/services-review-collect",
+      "schedule": "*/20 * * * *"
     },
     {
       "path": "/api/cron/services-due",
