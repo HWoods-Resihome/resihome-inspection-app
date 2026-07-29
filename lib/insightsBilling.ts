@@ -49,6 +49,7 @@ export interface BillingRow {
   externalId: string;
   entityId: string;
   fullAddress: string;
+  propertyStatus: string;   // services: property status snapshotted at completion; '' for inspections
   personName: string;   // Inspector (inspections) / Vendor (services)
   brokerCode: string;
   typeLabel: string;    // Template Type / Service type
@@ -94,19 +95,25 @@ export const INSPECTION_COLUMNS = [
   'Template Type', 'Inspector Name', 'Broker Code', 'Completed Date', 'Vendor Invoice Amount', 'Client Invoice Amount',
 ] as const;
 export const SERVICE_COLUMNS = [
-  'Service ID', 'Entity / Master ID', 'Region', 'Portfolio', 'Full Address',
+  'Service ID', 'Entity / Master ID', 'Region', 'Portfolio', 'Full Address', 'Property Status',
   'Service Type', 'Vendor', 'Company Code', 'Completed Date', 'Due Date', 'Vendor Invoice Amount', 'Client Invoice Amount',
 ] as const;
 
 export function rowToCells(r: BillingRow, object: 'inspections' | 'services' = 'inspections'): (string | number)[] {
-  const common = [
+  // Services carry a Property Status column (status at completion) right after
+  // Full Address, and a Due Date column between Completed Date and the amounts.
+  if (object === 'services') {
+    return [
+      r.externalId, r.entityId, r.region, r.portfolio, r.fullAddress, r.propertyStatus || '',
+      r.typeLabel, r.personName, r.brokerCode, fmtMDY(r.completedDate), fmtMDY(r.dueDate),
+      r.vendorAmount, r.clientAmount,
+    ];
+  }
+  return [
     r.externalId, r.entityId, r.region, r.portfolio, r.fullAddress,
     r.typeLabel, r.personName, r.brokerCode, fmtMDY(r.completedDate),
+    r.vendorAmount, r.clientAmount,
   ];
-  // Services carry a Due Date column between Completed Date and the amounts.
-  return object === 'services'
-    ? [...common, fmtMDY(r.dueDate), r.vendorAmount, r.clientAmount]
-    : [...common, r.vendorAmount, r.clientAmount];
 }
 
 /** Inspections billing rows (completed only), filtered. `preSnap` lets the
@@ -155,6 +162,7 @@ export async function fetchInspectionBillingRows(filters: BillingFilters = {}, p
       externalId: r.inspectionIdExternal || r.recordId,
       entityId: prop?.entityId || '',
       fullAddress: r.propertyAddress || prop?.address || '',
+      propertyStatus: '',   // services-only column
       personName: inspectorName,
       brokerCode,
       typeLabel,
@@ -214,6 +222,9 @@ export async function fetchServiceBillingRows(filters: BillingFilters = {}): Pro
       externalId: serviceExternalId(id, completedDate),
       entityId: idValue,
       fullAddress: [String(p.address_snapshot || p.community_name || '').trim(), String(p.locality_snapshot || '').trim()].filter(Boolean).join(', '),
+      // Property status snapshotted when the vendor submitted the completed work
+      // (stamped at submit in /api/services/[id]/submit) — the status at completion.
+      propertyStatus: String(p.property_status_snapshot || '').trim(),
       personName: vendorName,
       brokerCode: companyCode,
       typeLabel,

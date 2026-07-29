@@ -2638,7 +2638,13 @@ export async function searchServiceWorkOrdersByStatus(
     do {
       const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
         method: 'POST',
-        body: JSON.stringify({ limit: 100, after, properties: SERVICE_DETAIL_PROPS, filterGroups: [{ filters }] }),
+        // Sort newest-completed first. Without an explicit sort HubSpot returns a
+        // default order, so once completed orders exceed the `limit` cap the most
+        // RECENT completions fell outside the returned page — which made the
+        // billing snapshot (built with a 5000 cap, no date bound) miss the last
+        // few days entirely (the "no services in the last 7 days" bug). Rows with
+        // no completed_at (e.g. a 'submitted' scan) just sort together at the end.
+        body: JSON.stringify({ limit: 100, after, properties: SERVICE_DETAIL_PROPS, filterGroups: [{ filters }], sorts: [{ propertyName: 'completed_at', direction: 'DESCENDING' }] }),
       });
       for (const r of resp.results || []) out.push({ id: String(r.id), props: r.properties || {} });
       after = resp.paging?.next?.after;
