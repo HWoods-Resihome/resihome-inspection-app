@@ -130,6 +130,10 @@ function StatusChip({ text, cls }: { text: string; cls: string }) {
   return <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${cls}`}>{text}</span>;
 }
 const INSP_CHIP = 'bg-slate-100 text-slate-700 border-slate-300';
+// These cards surface completed work, so a "Completed" status chip is redundant.
+// Detect it (inspection label "Completed" / service status "completed") so we can
+// hide just that chip while still showing one for non-completed statuses.
+const isCompletedStatus = (status: string): boolean => /^(completed|complete)$/i.test((status || '').trim());
 // Inspection status → chip colors, mirroring components/StatusBadge so a
 // "Completed" inspection here reads the SAME green as on the Inspections/Services
 // pages (not a flat slate chip).
@@ -236,15 +240,18 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
                       <div className="text-[13px] font-semibold text-ink truncate">{i.label}</div>
                       {i.inspectorName && <div className="text-[11px] text-gray-400 truncate">{i.inspectorName}</div>}
                     </div>
-                    {/* Overall pass/fail when the template carries it (RRQC /
-                        Re-Inspect); otherwise the scope's vendor total (Scope
-                        Rate Card). Admin-only page, so vendor cost is fine here. */}
+                    {/* These cards show completed work, so the "Completed" chip
+                        is just noise — drop it, but keep a chip for any genuinely
+                        non-completed status so it still reads clearly. */}
+                    {i.status && !isCompletedStatus(i.status) && <StatusChip text={i.status} cls={inspStatusCls(i.status)} />}
+                    {/* Right-aligned: overall pass/fail when the template carries
+                        it (RRQC / Re-Inspect); otherwise the scope's vendor total
+                        (Scope Rate Card). Admin-only page, so vendor cost is fine. */}
                     {i.result === 'pass' || i.result === 'fail' ? (
                       <StatusChip text={i.result} cls={i.result === 'pass' ? 'bg-green-100 text-green-800 border-green-300' : 'bg-red-100 text-red-700 border-red-300'} />
                     ) : i.vendorCost != null && i.vendorCost > 0 ? (
                       <span className="text-[12px] font-semibold text-ink tabular-nums shrink-0">${i.vendorCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
                     ) : null}
-                    {i.status && <StatusChip text={i.status} cls={inspStatusCls(i.status)} />}
                     <div className="text-[12px] text-gray-500 tabular-nums w-16 text-right shrink-0">{fmtDate(i.date)}</div>
                   </Link>
                 ))}
@@ -273,7 +280,7 @@ function PropertyCard({ p, expanded, onToggle }: { p: AdminPropertyRow; expanded
                         <div className="text-[13px] font-semibold text-ink truncate">{s.label}</div>
                         {s.vendor && <div className="text-[11px] text-gray-400 truncate">{s.vendor}</div>}
                       </div>
-                      {s.status && <StatusChip text={serviceStatusText((s.status || 'assigned') as ServiceStatus, true)} cls={cls} />}
+                      {s.status && !isCompletedStatus(s.status) && <StatusChip text={serviceStatusText((s.status || 'assigned') as ServiceStatus, true)} cls={cls} />}
                       <div className="text-[12px] text-gray-500 tabular-nums w-16 text-right shrink-0">{fmtDate(s.completedAt || s.dueDate || s.date)}</div>
                     </Link>
                   );
