@@ -9202,12 +9202,16 @@ export interface VendorAdminRow {
   inspectionAccess: boolean;        // may sign in to the Inspections app (limited: own work only)
   inspectionFull: boolean;          // FULL inspections access (see/do everything, like internal)
   hasPassword: boolean;             // has set their ResiWalk login password
+  companyCode: string;              // the "Company Code" used on the billing report ('' when unset)
 }
 
-const VENDOR_ADMIN_PROPS = ['name', 'email', 'regions_serviced', 'resiwalk_access', 'eligible_for_recurring', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_inspection_full', 'resiwalk_password'];
+// The vendor's Company CODE (the "Company Code" shown on the services billing
+// report) — same property the billing lookup reads, editable from the vendor card.
+const VENDOR_COMPANY_CODE_PROP = (process.env.HUBSPOT_COMPANY_CODE_PROP || 'company_code').trim();
+const VENDOR_ADMIN_PROPS = ['name', 'email', 'regions_serviced', 'resiwalk_access', 'eligible_for_recurring', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_inspection_full', 'resiwalk_password', VENDOR_COMPANY_CODE_PROP];
 // Properties that may not exist in a portal — dropped (with a warning) instead of
 // failing the whole list, mirroring the resiwalk_password fallback above.
-const VENDOR_ADMIN_OPTIONAL = ['regions_serviced', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_inspection_full', 'resiwalk_password'];
+const VENDOR_ADMIN_OPTIONAL = ['regions_serviced', 'after_hours_service', 'resiwalk_inspection_access', 'resiwalk_inspection_full', 'resiwalk_password', VENDOR_COMPANY_CODE_PROP];
 
 /** Provision the vendor inspection Company properties (idempotent): check-first,
  *  then create — trying the two checkbox encodings HubSpot accepts (type bool,
@@ -9326,6 +9330,7 @@ export async function fetchVendorAdminList(force = false): Promise<VendorAdminRo
         inspectionAccess: vendorTruthy(p.resiwalk_inspection_access),
         inspectionFull: vendorTruthy(p.resiwalk_inspection_full),
         hasPassword: isVendorPasswordSet(p.resiwalk_password),
+        companyCode: String(p[VENDOR_COMPANY_CODE_PROP] || '').trim(),
       });
     }
     after = resp.paging?.next?.after || undefined;
@@ -9343,6 +9348,7 @@ export interface VendorWritePatch {
   afterHoursService?: boolean;
   inspectionAccess?: boolean;
   inspectionFull?: boolean;
+  companyCode?: string;
 }
 
 // The Yes/No flags may be booleancheckbox ('true') OR a Yes/No enum ('Yes')
@@ -9432,6 +9438,7 @@ function vendorPropsFor(patch: VendorWritePatch, flagMap: Record<string, { yes: 
   if (patch.name != null) props.name = patch.name.trim();
   if (patch.email != null) props.email = patch.email.trim();
   if (patch.regionsServiced != null) props.regions_serviced = patch.regionsServiced.trim();
+  if (patch.companyCode != null) props[VENDOR_COMPANY_CODE_PROP] = patch.companyCode.trim();
   for (const { key, prop } of VENDOR_FLAG_PROPS) {
     const v = patch[key];
     if (typeof v === 'boolean') props[prop] = v ? (flagMap[prop]?.yes ?? 'true') : (flagMap[prop]?.no ?? 'false');
@@ -9507,6 +9514,8 @@ export async function createVendorCompany(patch: VendorWritePatch): Promise<stri
 export async function updateVendorCompany(id: string, patch: VendorWritePatch): Promise<void> {
   await vendorWrite(`/crm/v3/objects/companies/${id}`, 'PATCH', patch);
   bustVendorCompaniesCache();
+  // A code change must re-read on the billing report (which caches code by email).
+  if (patch.companyCode != null) bustCompanyCodeCache();
 }
 
 /** The two inspection flags as ACTUALLY STORED on a vendor Company right now —

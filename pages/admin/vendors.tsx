@@ -36,6 +36,7 @@ interface VendorRow {
   id: string; name: string; email: string; regionsServiced: string;
   resiwalkAccess: boolean; eligibleForRecurring: boolean; afterHoursService: boolean;
   inspectionAccess: boolean; inspectionFull: boolean; hasPassword: boolean;
+  companyCode: string;          // billing "Company Code" ('' when unset)
   lastActive?: string | null;   // most recent sign-in (ISO), null if never
 }
 
@@ -50,6 +51,28 @@ const fmtActive = (iso?: string | null): string => {
   if (isNaN(d.getTime())) return '—';
   return `${d.getMonth() + 1}-${d.getDate()}-${String(d.getFullYear()).slice(-2)}`;
 };
+
+// Vendor Code (billing "Company Code") — displays the current value and saves the
+// edit on blur / Enter when it changed. Kept as a tiny component so each card owns
+// its own draft state without threading per-vendor state through the list.
+function VendorCodeField({ value, onSave }: { value: string; onSave: (code: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  const commit = () => { const c = draft.trim(); if (c !== (value || '').trim()) onSave(c); };
+  return (
+    <div>
+      <span className="text-[11px] font-heading font-bold uppercase tracking-wide text-gray-400 block mb-1">Vendor Code</span>
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+        placeholder="Set the billing company code"
+        className="w-full text-[13px] text-gray-700 border border-gray-200 hover:border-brand/50 focus:border-brand rounded-lg px-3 py-2 bg-white focus:outline-none"
+      />
+    </div>
+  );
+}
 
 type SortField = 'name' | 'email' | 'regions';
 const SORT_OPTIONS: { value: SortField; label: string }[] = [
@@ -334,6 +357,7 @@ export default function VendorManagement() {
         regionsServiced: joinRegions(newRegions), resiwalkAccess: true,
         eligibleForRecurring: newRecurring, afterHoursService: newAfterHours,
         inspectionAccess: newInspLevel !== 'none', inspectionFull: newInspLevel === 'full', hasPassword: false,
+        companyCode: '',
       };
       setVendors((cur) => [...cur.filter((x) => x.id !== row.id), row]);
       writePendingCreates([...readPendingCreates(), { row, at: Date.now() }]);
@@ -478,6 +502,10 @@ export default function VendorManagement() {
                 </button>
               </div>
             )}
+
+            {/* Vendor Code (billing Company Code) — displayed + editable, below the
+                name/email line. Saves on blur/Enter; billing re-reads it live. */}
+            <VendorCodeField value={v.companyCode || ''} onSave={(code) => { mutateLocal(v.id, { companyCode: code }); void patchVendor(v.id, { companyCode: code }); }} />
 
             {/* Regions Serviced — the value line IS the picker (tap to edit). */}
             <div>

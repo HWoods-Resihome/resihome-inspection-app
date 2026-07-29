@@ -45,6 +45,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!regions) return res.status(400).json({ error: 'At least one region is required.' });
       patch.regionsServiced = regions;
     }
+    // Company Code — free text (the billing "Company Code"); '' clears it.
+    if (b.companyCode != null) patch.companyCode = String(b.companyCode).trim().slice(0, 60);
     if (typeof b.eligibleForRecurring === 'boolean') patch.eligibleForRecurring = b.eligibleForRecurring;
     if (typeof b.afterHoursService === 'boolean') patch.afterHoursService = b.afterHoursService;
     // Inspections access is TRI-STATE: none / limited / full — encoded on the
