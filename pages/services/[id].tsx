@@ -502,6 +502,72 @@ function CollapsibleSection({ title, subtitle, right, defaultOpen = true, bodyCl
 // add ANY community property or drop covered ones — the price recomputes down
 // (count × per-property rate). Photos stay on the master; children reference it.
 interface CoveredProp { id: string; address: string; locality: string; rrqc: boolean; status: string }
+// Admin correction of vendor cost + markup on a COMPLETED order. Client cost is
+// recomputed live. Saving patches the record (PDFs render live from it, so they
+// reflect the new pricing on next open) and does NOT re-email the vendor.
+function CompletedPricingEditor({ svc }: { svc: ServiceView }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [vc, setVc] = useState(String(svc.vendorCost ?? 0));
+  const [mk, setMk] = useState(String(svc.markupPct ?? 0));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const vNum = Math.max(0, Number(vc || '0'));
+  const mNum = Math.max(0, Number(mk || '0'));
+  const client = Math.round(vNum * (1 + mNum / 100) * 100) / 100;
+  const changed = Math.round(vNum * 100) !== Math.round((svc.vendorCost ?? 0) * 100)
+    || Math.round(mNum * 100) !== Math.round((svc.markupPct ?? 0) * 100);
+  const valid = Number.isFinite(vNum) && Number.isFinite(mNum);
+  const save = async () => {
+    setSaving(true); setErr('');
+    try {
+      const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/edit-pricing`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendorCost: vNum, markupPct: mNum }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(j?.error || 'Save failed.'); setSaving(false); return; }
+      setOpen(false);
+      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {}); // reflect new pricing
+    } catch (e: any) { setErr(String(e?.message || e)); }
+    setSaving(false);
+  };
+  if (!open) {
+    return (
+      <button type="button"
+        onClick={() => { setVc(String(svc.vendorCost ?? 0)); setMk(String(svc.markupPct ?? 0)); setErr(''); setOpen(true); }}
+        className="mt-1.5 text-[12px] font-heading font-semibold text-brand hover:underline">Edit pricing</button>
+    );
+  }
+  return (
+    <div className="mt-2 rounded-lg border border-brand/30 bg-brand/5 p-3 space-y-2">
+      <div className="text-[11px] font-bold uppercase tracking-wide text-brand">Edit pricing</div>
+      <label className="flex items-center justify-between gap-2 text-[13px]">
+        <span className="text-gray-600">Vendor Cost</span>
+        <span className="flex items-center gap-1"><span className="text-gray-400">$</span>
+          <input type="number" inputMode="decimal" min="0" step="0.01" value={vc} onChange={(e) => setVc(e.target.value)}
+            className="w-24 text-right border border-gray-300 rounded px-2 py-1 tabular-nums" /></span>
+      </label>
+      <label className="flex items-center justify-between gap-2 text-[13px]">
+        <span className="text-gray-600">Markup</span>
+        <span className="flex items-center gap-1">
+          <input type="number" inputMode="decimal" min="0" step="0.1" value={mk} onChange={(e) => setMk(e.target.value)}
+            className="w-20 text-right border border-gray-300 rounded px-2 py-1 tabular-nums" /><span className="text-gray-400">%</span></span>
+      </label>
+      <div className="flex items-center justify-between text-[13px] border-t border-brand/15 pt-1.5">
+        <span className="text-gray-600">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(client)}</span>
+      </div>
+      <p className="text-[11px] text-gray-500">Updates the record and PDFs. The vendor is not re-emailed.</p>
+      {err && <p className="text-[12px] text-red-600">{err}</p>}
+      <div className="flex items-center gap-2 justify-end">
+        <button type="button" onClick={() => setOpen(false)} className="text-[12px] font-heading font-semibold text-gray-500 hover:text-ink px-2 py-1">Cancel</button>
+        <button type="button" disabled={saving || !changed || !valid} onClick={save}
+          className="text-[12px] font-heading font-semibold text-white bg-brand disabled:opacity-40 rounded px-3 py-1.5">{saving ? 'Saving…' : 'Save'}</button>
+      </div>
+    </div>
+  );
+}
+
 // Sort by leading house number (smallest → largest), then street text — so the
 // list reads like a route, not an ASCII sort ("2" before "10").
 const houseNum = (a: string): number => { const m = /^\s*(\d+)/.exec(a || ''); return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER; };
@@ -1467,6 +1533,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       <CostVendorRows svc={svc} total={svc.vendorCost} />
       {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
       {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
+      {/* Admins can correct vendor cost + markup on a completed order; PDFs re-render
+          live from the record and the vendor is not re-emailed. */}
+      {isInternal && svc.live && svc.status === 'completed' && <CompletedPricingEditor svc={svc} />}
     </CollapsibleSection>
   ) : null;
 
