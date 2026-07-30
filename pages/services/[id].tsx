@@ -1120,8 +1120,11 @@ const photoGuidance = (_worktype: string, _subtype: string): string =>
 
 export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta, asVendor, isVendor, viewerEmail }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null; asVendor: boolean; isVendor: boolean; viewerEmail?: string }) {
   const router = useRouter();
-  // Bid items are never crew-completed here — they go straight to internal bid review.
-  const editable = EDITABLE.has(svc.status) && !svc.isBidItem;
+  // A bid item is a quote while ESTIMATED (internal reviews it → assigns it). Once
+  // it's ASSIGNED it becomes real work the vendor must complete, so it gets the
+  // full completion experience (photos, checklist, ECD, mark-complete) just like a
+  // normal assigned order. Other statuses fall through to the standard rule.
+  const editable = svc.isBidItem ? svc.status === 'assigned' : EDITABLE.has(svc.status);
   // Past-due (open statuses only) — turns the header Due date red, like the home list.
   // Past-due against the REAL today for live records (sample preview keeps its
   // fixed reference date). Strict "<" so a service due TODAY is still on-time.
@@ -1775,8 +1778,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             )}
 
             {/* Estimated Completion Date — its own one-line bubble, ABOVE the order
-                description. Editable while open (assigned vendor / internal). */}
-            {svc.live && !svc.isBidItem && <EtaSection svc={svc} editable={editable} />}
+                description. Editable while open (assigned vendor / internal). Also
+                available on an ASSIGNED bid item now that it's completable work. */}
+            {svc.live && <EtaSection svc={svc} editable={editable} />}
 
             {/* Office instructions / service brief — always at the TOP for every
                 status (re-issued services carry the reviewer's note here). Bid
@@ -1819,9 +1823,27 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
               </div>
             )}
 
+            {/* Bid-item context — the bid request + how it compares to the original
+                visit. Shown in EVERY phase (estimated bid review, assigned
+                completion, and after submit) so the crew always sees what the extra
+                work is; the completion form / read-only view renders below. */}
+            {svc.isBidItem && svc.description && (
+              <CollapsibleSection title="Bid request" bodyClass="">
+                <p className="text-[13px] text-gray-700 whitespace-pre-line">{svc.description}</p>
+                <p className="text-[12px] text-gray-400 mt-1.5">Submitted by {svc.vendor || 'the vendor'} while completing a {worktypeLabel(svc.worktype)} service.</p>
+              </CollapsibleSection>
+            )}
+            {svc.isBidItem && svc.originalOrder && (
+              <OriginalVisitCard oo={svc.originalOrder} bidVendor={svc.vendorCost ?? 0} bidClient={svc.clientCost} bidMarkup={svc.markupPct} isInternal={isInternal} />
+            )}
+
             {editable ? (
               /* ── Editable completion form (assigned crew) ── */
               <>
+                {/* A bid item has no standard checklist — skip the empty section for
+                    it (photos + mark-complete below are enough). Non-bid orders still
+                    surface the "not configured" hint so a form misconfig is visible. */}
+                {(form.length > 0 || !svc.isBidItem) && (
                 <CollapsibleSection title="Completion Checklist">
                   {form.length === 0 && <div className="text-[13px] text-gray-400">No completion form is configured for this service type yet.</div>}
                   {form.filter(isVisible).map((q) => (
@@ -1925,6 +1947,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                     </div>
                   ))}
                 </CollapsibleSection>
+                )}
 
                 <CollapsibleSection title="Photos" subtitle={photoGuidance(svc.worktype, svc.subtype)}>
                   {/* When a proof-of-service invoice is attached, before/after photos are
@@ -1941,7 +1964,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   <ProofOfService url={proofUrl} name={String(answers[PROOF_NAME_KEY] || '')} onChange={(u, n) => { setAns(PROOF_URL_KEY, u); setAns(PROOF_NAME_KEY, n); }} />
                 </CollapsibleSection>
 
-                {/* Additional-work bid — spawns an Estimated "Bid Item" for review. */}
+                {/* Additional-work bid — spawns an Estimated "Bid Item" for review.
+                    Not offered while completing a bid item itself (no bidding off a bid). */}
+                {!svc.isBidItem && (
                 <CollapsibleSection title="Submit Bid Item?" subtitle="Flag extra work that needs its own bid." defaultOpen={false} bodyClass="space-y-3">
                   <div className="flex gap-2">
                     {([['no', 'No'], ['yes', 'Yes — submit a bid']] as const).map(([v, label]) => (
@@ -1966,6 +1991,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                     </div>
                   )}
                 </CollapsibleSection>
+                )}
 
                 {editableCostDetail}
 
@@ -1986,15 +2012,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 {!svc.isBidItem && svc.bids && svc.bids.length > 0 && (
                   <SubmittedBidsCard bids={svc.bids} isInternal={isInternal} />
                 )}
-                {svc.isBidItem && svc.description && (
-                  <CollapsibleSection title="Bid request" bodyClass="">
-                    <p className="text-[13px] text-gray-700 whitespace-pre-line">{svc.description}</p>
-                    <p className="text-[12px] text-gray-400 mt-1.5">Submitted by {svc.vendor || 'the vendor'} while completing a {worktypeLabel(svc.worktype)} service.</p>
-                  </CollapsibleSection>
-                )}
-                {svc.isBidItem && svc.originalOrder && (
-                  <OriginalVisitCard oo={svc.originalOrder} bidVendor={svc.vendorCost ?? 0} bidClient={svc.clientCost} bidMarkup={svc.markupPct} isInternal={isInternal} />
-                )}
+                {/* (Bid request + Visit summary now render above the editable/read-only
+                    split so they also show while an assigned bid item is being completed.) */}
                 {isInternal && (svc.aiVerdict || svc.aiNotes) && (
                   <CollapsibleSection title="AI review" bodyClass=""
                     right={svc.aiVerdict ? chip(svc.aiVerdict === 'clean' ? 'Clean' : 'Needs review', svc.aiVerdict === 'clean' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700') : undefined}>
