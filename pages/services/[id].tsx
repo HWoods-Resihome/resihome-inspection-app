@@ -8,7 +8,7 @@ import { resolveServiceViewerAsync, servicesViewerAllowed } from '@/lib/services
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { grassTierAmount, DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
-import { DEFAULT_SERVICE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
+import { DEFAULT_SERVICE_FORMS, UNIVERSAL_QUESTIONS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SERVICE_STATUS_STYLE, serviceStatusText, easternTodayISO, PROOF_URL_KEY, PROOF_NAME_KEY, type ServiceStatus, type ServiceRecord } from '@/lib/services/model';
 import { serviceVisibleTo } from '@/lib/services/scope';
 import { fetchServiceWorkOrder, findServiceBidChildren, fetchPropertyLockInfo, fetchPropertyMoveInDate, readServiceForms } from '@/lib/hubspot';
@@ -252,7 +252,13 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   }
   const savedForms = await readServiceForms().catch(() => null);
   const formSet: Record<string, any[]> = { ...DEFAULT_SERVICE_FORMS, ...(savedForms || {}) };
-  const form = (formSet[formKey(svc.worktype, svc.subtype)] || [])
+  // A bid item is ad-hoc extra work, so its subtype ('bid_item') has no configured
+  // worktype form. It still needs the UNIVERSAL completion gate (Service Completed?
+  // → date on Yes, reason + trip fee on No) so an assigned bid item can be closed
+  // out on either route — the submit logic keys off those same universal IDs.
+  const baseForm = formSet[formKey(svc.worktype, svc.subtype)]
+    || (svc.isBidItem ? UNIVERSAL_QUESTIONS : []);
+  const form = baseForm
     .filter((q: any) => q.enabled)
     // Community grass cuts are a per-contract visit, not a per-home cut — the
     // "Grass Height at Arrival" tier doesn't apply, so drop it for community scope.
