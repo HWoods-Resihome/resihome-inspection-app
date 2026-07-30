@@ -514,7 +514,7 @@ interface CoveredProp { id: string; address: string; locality: string; rrqc: boo
 // Client cost is recomputed live. Saving patches the record (PDFs render live
 // from it, so they reflect the new pricing on next open) and does NOT re-email
 // the vendor.
-function PricingEditor({ svc }: { svc: ServiceView }) {
+function PricingEditor({ svc, onSaved }: { svc: ServiceView; onSaved?: (p: { vendorCost: number; markupPct: number; clientCost: number }) => void }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [vc, setVc] = useState(String(svc.vendorCost ?? 0));
@@ -537,7 +537,10 @@ function PricingEditor({ svc }: { svc: ServiceView }) {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(j?.error || 'Save failed.'); setSaving(false); return; }
       setOpen(false);
-      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {}); // reflect new pricing
+      // Show the new numbers INSTANTLY (optimistic) — HubSpot's read-after-write can
+      // lag the SSR re-fetch, so don't make the admin wait on a full refresh.
+      onSaved?.({ vendorCost: vNum, markupPct: mNum, clientCost: client });
+      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {}); // reconcile with the server
     } catch (e: any) { setErr(String(e?.message || e)); }
     setSaving(false);
   };
@@ -1587,18 +1590,28 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     finally { setSavingDue(false); }
   };
 
+  // Optimistic pricing: an admin's edit shows the new numbers INSTANTLY, before the
+  // SSR re-fetch lands (HubSpot's read-after-write can lag a beat), so the Cost
+  // Detail never waits on a full page refresh. Cleared once fresh props arrive
+  // already carrying the edit (or a different edit) — then we read from `svc` again.
+  const [pricingOverride, setPricingOverride] = useState<{ vendorCost: number; markupPct: number; clientCost: number } | null>(null);
+  useEffect(() => { setPricingOverride(null); }, [svc.vendorCost, svc.markupPct, svc.clientCost]);
+  const svcPriced = pricingOverride
+    ? { ...svc, vendorCost: pricingOverride.vendorCost, markupPct: pricingOverride.markupPct, clientCost: pricingOverride.clientCost }
+    : svc;
+
   // Cost Detail — its own section (after Photos). Vendor Cost is visible to all;
   // Markup % and Client Cost are internal-only (vendors never see them). A
   // reviewer deciding sees the live New/Original/Difference in the DecisionPanel's
   // mini-table below, so this stays the plain saved figures.
-  const costDetail = svc.vendorCost != null ? (
+  const costDetail = svcPriced.vendorCost != null ? (
     <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">
-      <CostVendorRows svc={svc} total={svc.vendorCost} />
-      {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
-      {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
+      <CostVendorRows svc={svcPriced} total={svcPriced.vendorCost} />
+      {isInternal && svcPriced.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svcPriced.markupPct}%</span></div>}
+      {isInternal && svcPriced.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(svcPriced.clientCost)}</span></div>}
       {/* Admins can correct vendor cost + markup in ANY status; PDFs re-render
           live from the record and the vendor is not re-emailed. */}
-      {isInternal && svc.live && <PricingEditor svc={svc} />}
+      {isInternal && svc.live && <PricingEditor svc={svcPriced} onSaved={setPricingOverride} />}
     </CollapsibleSection>
   ) : null;
 
@@ -1608,8 +1621,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   // No → $0; grass-cut is priced by height (−25% if the back yard was skipped);
   // otherwise the assigned rate stands.
   const liveCost = useMemo(() => {
-    const orig = svc.vendorCost ?? 0;
-    const markup = svc.markupPct ?? 0;
+    const orig = svcPriced.vendorCost ?? 0;
+    const markup = svcPriced.markupPct ?? 0;
     const answerFor = (idHint: string, labelRe: RegExp) => {
       if (answers[idHint] != null && answers[idHint] !== '') return answers[idHint];
       const q = form.find((x) => labelRe.test(x.label));
@@ -1635,18 +1648,18 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     }
     const client = Number.isFinite(markup) ? Math.round(vendor * (1 + markup / 100) * 100) / 100 : vendor;
     return { vendor, client, markup, reason, changed: Math.round(vendor * 100) !== Math.round(orig * 100) };
-  }, [answers, form, svc.vendorCost, svc.markupPct, svc.worktype, svc.subtype, svc.scope]);
+  }, [answers, form, svcPriced.vendorCost, svcPriced.markupPct, svc.worktype, svc.subtype, svc.scope]);
 
-  const editableCostDetail = svc.vendorCost != null ? (
+  const editableCostDetail = svcPriced.vendorCost != null ? (
     <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">
-      <CostVendorRows svc={svc} total={liveCost.vendor} />
+      <CostVendorRows svc={svcPriced} total={liveCost.vendor} />
       {isInternal && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{liveCost.markup}%</span></div>}
       {isInternal && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(liveCost.client)}</span></div>}
       {liveCost.changed && liveCost.reason && (
-        <div className="text-[12px] text-amber-700 pt-1">{liveCost.reason} — was {money(svc.vendorCost)}.</div>
+        <div className="text-[12px] text-amber-700 pt-1">{liveCost.reason} — was {money(svcPriced.vendorCost)}.</div>
       )}
       {/* Same admin pricing override as the view mode — available in every status. */}
-      {isInternal && svc.live && <PricingEditor svc={svc} />}
+      {isInternal && svc.live && <PricingEditor svc={svcPriced} onSaved={setPricingOverride} />}
     </CollapsibleSection>
   ) : null;
 
@@ -1663,7 +1676,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
         </CollapsibleSection>
       )}
       {isInternal && svc.originalOrder && (
-        <OriginalVisitCard oo={svc.originalOrder} bidVendor={svc.vendorCost ?? 0} bidClient={svc.clientCost} bidMarkup={svc.markupPct} isInternal={isInternal} />
+        <OriginalVisitCard oo={svc.originalOrder} bidVendor={svcPriced.vendorCost ?? 0} bidClient={svcPriced.clientCost} bidMarkup={svcPriced.markupPct} isInternal={isInternal} />
       )}
     </>
   ) : null;
