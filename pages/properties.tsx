@@ -493,7 +493,7 @@ export default function PropertiesPage({ initialProperties, regionOptions, userN
           {/* Count + freshness hint */}
           {fullLoaded && filtered.length > 0 && (
             <div className="text-[12px] text-gray-400">
-              Showing {pageStart + 1}–{Math.min(pageStart + pageSize, filtered.length)} of {filtered.length}
+              Showing {(pageStart + 1).toLocaleString('en-US')}–{Math.min(pageStart + pageSize, filtered.length).toLocaleString('en-US')} of {filtered.length.toLocaleString('en-US')}
               {syncing ? ' · updating…' : ''}
             </div>
           )}
@@ -536,7 +536,7 @@ export default function PropertiesPage({ initialProperties, regionOptions, userN
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
                   Back
                 </button>
-                <span className="text-xs font-heading text-gray-600 whitespace-nowrap">Page {currentPage} of {totalPages}</span>
+                <span className="text-xs font-heading text-gray-600 whitespace-nowrap">Page {currentPage.toLocaleString('en-US')} of {totalPages.toLocaleString('en-US')}</span>
                 <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}
                   className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-3 py-1.5 border border-gray-300 rounded-md bg-white disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
                   Next
