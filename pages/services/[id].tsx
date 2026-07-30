@@ -1020,11 +1020,8 @@ function OriginalVisitCard({ oo, bidVendor, bidClient, bidMarkup, isInternal }: 
   const cols = showClient ? 'grid-cols-[1fr_auto_auto]' : 'grid-cols-[1fr_auto]';
   const cell = 'text-[13px] tabular-nums text-right';
   return (
-    <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="font-heading font-bold text-[14px] text-ink">Visit summary</div>
-        <Link href={`/services/${encodeURIComponent(oo.id)}`} className="text-[12px] text-brand font-heading font-semibold underline shrink-0">View original order →</Link>
-      </div>
+    <CollapsibleSection title="Visit summary" bodyClass="space-y-3"
+      right={<Link href={`/services/${encodeURIComponent(oo.id)}`} onClick={(e) => e.stopPropagation()} className="text-[12px] text-brand font-heading font-semibold underline shrink-0">View original order →</Link>}>
       <div className={`grid ${cols} gap-x-4 gap-y-1.5 items-baseline`}>
         <div />
         <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 text-right">Vendor</div>
@@ -1051,7 +1048,7 @@ function OriginalVisitCard({ oo, bidVendor, bidClient, bidMarkup, isInternal }: 
       <p className="text-[12px] text-gray-500">
         The original order already paid the vendor {money(oo.vendorCost)}. Compare it against this bid to tell real added work from a trip fee — the two stay separate orders.
       </p>
-    </section>
+    </CollapsibleSection>
   );
 }
 
@@ -1653,6 +1650,24 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     </CollapsibleSection>
   ) : null;
 
+  // Bid-item context — the bid request + (internal-only) Visit summary comparing
+  // this bid to the original visit. Rendered BELOW the completion form while a bid
+  // item is being completed, and at the TOP of the read-only view (bid review /
+  // after submit). The Visit summary is internal-only — vendors never see it.
+  const bidContext = svc.isBidItem ? (
+    <>
+      {svc.description && (
+        <CollapsibleSection title="Bid request" bodyClass="">
+          <p className="text-[13px] text-gray-700 whitespace-pre-line">{svc.description}</p>
+          <p className="text-[12px] text-gray-400 mt-1.5">Submitted by {svc.vendor || 'the vendor'} while completing a {worktypeLabel(svc.worktype)} service.</p>
+        </CollapsibleSection>
+      )}
+      {isInternal && svc.originalOrder && (
+        <OriginalVisitCard oo={svc.originalOrder} bidVendor={svc.vendorCost ?? 0} bidClient={svc.clientCost} bidMarkup={svc.markupPct} isInternal={isInternal} />
+      )}
+    </>
+  ) : null;
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Swipe-down refresh — re-pulls the record (fresh notes/status/photos).
@@ -1829,20 +1844,6 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
               </div>
             )}
 
-            {/* Bid-item context — the bid request + how it compares to the original
-                visit. Shown in EVERY phase (estimated bid review, assigned
-                completion, and after submit) so the crew always sees what the extra
-                work is; the completion form / read-only view renders below. */}
-            {svc.isBidItem && svc.description && (
-              <CollapsibleSection title="Bid request" bodyClass="">
-                <p className="text-[13px] text-gray-700 whitespace-pre-line">{svc.description}</p>
-                <p className="text-[12px] text-gray-400 mt-1.5">Submitted by {svc.vendor || 'the vendor'} while completing a {worktypeLabel(svc.worktype)} service.</p>
-              </CollapsibleSection>
-            )}
-            {svc.isBidItem && svc.originalOrder && (
-              <OriginalVisitCard oo={svc.originalOrder} bidVendor={svc.vendorCost ?? 0} bidClient={svc.clientCost} bidMarkup={svc.markupPct} isInternal={isInternal} />
-            )}
-
             {editable ? (
               /* ── Editable completion form (assigned crew) ── */
               <>
@@ -1955,6 +1956,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 </CollapsibleSection>
                 )}
 
+                {/* Bid request + (internal) Visit summary — below the checklist so the
+                    completion checklist stays the top section. */}
+                {bidContext}
+
                 <CollapsibleSection title="Photos" subtitle={photoGuidance(svc.worktype, svc.subtype)}>
                   {/* When a proof-of-service invoice is attached, before/after photos are
                       no longer required — dim the requirement asterisk to reflect that. */}
@@ -2018,8 +2023,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 {!svc.isBidItem && svc.bids && svc.bids.length > 0 && (
                   <SubmittedBidsCard bids={svc.bids} isInternal={isInternal} />
                 )}
-                {/* (Bid request + Visit summary now render above the editable/read-only
-                    split so they also show while an assigned bid item is being completed.) */}
+                {/* Bid request + (internal) Visit summary — at the top of the read-only
+                    view so the reviewer/crew have the context first (bid review, after
+                    submit, completed). */}
+                {bidContext}
                 {isInternal && (svc.aiVerdict || svc.aiNotes) && (
                   <CollapsibleSection title="AI review" bodyClass=""
                     right={svc.aiVerdict ? chip(svc.aiVerdict === 'clean' ? 'Clean' : 'Needs review', svc.aiVerdict === 'clean' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700') : undefined}>
