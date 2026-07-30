@@ -147,16 +147,19 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
               {localityLine && (
                 <p className="text-[13px] text-gray-500 break-words leading-snug mt-0.5">{localityLine}</p>
               )}
-              {/* Vendor's estimated completion date, once they've set one (still-open
-                  orders only — moot after it's done/canceled). */}
+            </div>
+            {/* Status pill, and — right beneath it — the vendor's estimated
+                completion date (still-open orders only). Keeping the ECD in the
+                right column saves a row of card height. */}
+            <div className="shrink-0 flex flex-col items-end gap-1">
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>
+                {serviceStatusText(s.status, isAdmin)}
+                {isAdmin && s.status === 'submitted' && <AiSparkle className="w-3 h-3" />}
+              </span>
               {s.estimatedCompletionDate && s.status !== 'completed' && s.status !== 'canceled' && (
-                <p className="text-xs text-sky-800 mt-0.5">ECD {fmtMDY(s.estimatedCompletionDate)}</p>
+                <span className="text-xs text-sky-800 whitespace-nowrap">ECD {fmtMDY(s.estimatedCompletionDate)}</span>
               )}
             </div>
-            <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>
-              {serviceStatusText(s.status, isAdmin)}
-              {isAdmin && s.status === 'submitted' && <AiSparkle className="w-3 h-3" />}
-            </span>
           </div>
           {/* Meta row: date (left) · property status (center, muted) · vendor
               (right) — three EQUAL cells so the center sits at the true middle. */}
