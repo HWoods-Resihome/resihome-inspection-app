@@ -147,6 +147,11 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
               {localityLine && (
                 <p className="text-[13px] text-gray-500 break-words leading-snug mt-0.5">{localityLine}</p>
               )}
+              {/* Vendor's estimated completion date, once they've set one (still-open
+                  orders only — moot after it's done/canceled). */}
+              {s.estimatedCompletionDate && s.status !== 'completed' && s.status !== 'canceled' && (
+                <p className="text-[12px] font-heading font-semibold text-brand mt-0.5">Est. completion {fmtMDY(s.estimatedCompletionDate)}</p>
+              )}
             </div>
             <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>
               {serviceStatusText(s.status, isAdmin)}

@@ -1887,7 +1887,7 @@ export async function inspectServiceLikeObjects(): Promise<any> {
 // ── Services Phase 1: read Service Work Orders (falls back to null when the
 // object isn't configured yet, so the UI can use sample data in the meantime) ──
 const SERVICE_LIST_PROPS = [
-  'service_name', 'worktype', 'subtype', 'status', 'is_bid_item', 'scope', 'due_date',
+  'service_name', 'worktype', 'subtype', 'status', 'is_bid_item', 'scope', 'due_date', 'estimated_completion_date',
   'region_snapshot', 'portfolio_snapshot', 'address_snapshot', 'locality_snapshot', 'community_name',
   'property_status_snapshot', 'latitude', 'longitude', 'vendor_name', 'pet_stations',
   'property_id_ref', 'community_id_ref', 'submitted_at', 'completed_at', 'ontime',
@@ -1922,6 +1922,7 @@ function mapServiceRow(r: any): ServiceRecord {
     vendor: p.vendor_name || null,
     dueDate: normServiceDate(p.due_date),
   };
+  { const ec = normServiceDate(p.estimated_completion_date); if (ec) rec.estimatedCompletionDate = ec; }
   if (String(p.vendor_email || '').trim()) rec.vendorEmail = String(p.vendor_email).trim();
   if (p.is_bid_item === 'true') rec.isBidItem = true;
   if (String(p.master_service_id || '').trim()) rec.masterServiceId = String(p.master_service_id).trim();
@@ -2071,6 +2072,11 @@ export async function searchServicesForPicker(limit = 300): Promise<{ id: string
 async function searchServiceWorkOrdersLive(limit = 3000, vendorEmail?: string, vendorName?: string): Promise<ServiceRecord[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
   if (!typeId) return null;
+  // Make sure the (new, optional) estimated_completion_date property exists before
+  // requesting it — else HubSpot search 400s the whole list. If it can't be
+  // provisioned, drop it from the projection (the card just won't show the EC date).
+  const listProps = (await ensureServiceEtaProp().catch(() => false))
+    ? SERVICE_LIST_PROPS : SERVICE_LIST_PROPS.filter((p) => p !== 'estimated_completion_date');
   try {
     const items: ServiceRecord[] = [];
     const refById = new Map<string, string>();   // service id → property_id_ref
@@ -2091,7 +2097,7 @@ async function searchServiceWorkOrdersLive(limit = 3000, vendorEmail?: string, v
         method: 'POST',
         body: JSON.stringify({
           limit: 100, after,
-          properties: SERVICE_LIST_PROPS,
+          properties: listProps,
           ...(filterGroups ? { filterGroups } : {}),
           sorts: [{ propertyName: 'due_date', direction: 'DESCENDING' }],
         }),
@@ -2496,7 +2502,7 @@ export async function createServiceWorkOrder(props: Record<string, any>): Promis
 const SERVICE_DETAIL_PROPS = [
   'service_name', 'worktype', 'subtype', 'status', 'scope', 'is_bid_item',
   'service_description', 'due_date', 'region_snapshot', 'portfolio_snapshot', 'address_snapshot',
-  'locality_snapshot', 'community_name', 'property_status_snapshot',
+  'locality_snapshot', 'community_name', 'property_status_snapshot', 'estimated_completion_date',
   'vendor_name', 'vendor_email', 'pet_stations', 'vendor_cost', 'markup_pct',
   'client_cost', 'vendor_cost_adjustment', 'vendor_cost_adjustment_reason',
   'submitted_at', 'completed_at', 'ai_verdict', 'ai_notes',
@@ -2632,6 +2638,10 @@ export async function searchServiceWorkOrdersByStatus(
   const hi = bound(opts.completedTo || '', true, 2 * DAY);
   if (lo) filters.push({ propertyName: 'completed_at', operator: 'GTE', value: lo });
   if (hi) filters.push({ propertyName: 'completed_at', operator: 'LTE', value: hi });
+  // Provision the new optional prop before requesting it, else drop it (see the
+  // list search) so a pre-provision read never 400s.
+  const detailProps = (await ensureServiceEtaProp().catch(() => false))
+    ? SERVICE_DETAIL_PROPS : SERVICE_DETAIL_PROPS.filter((p) => p !== 'estimated_completion_date');
   try {
     const out: { id: string; props: Record<string, any> }[] = [];
     let after: string | undefined;
@@ -2644,7 +2654,7 @@ export async function searchServiceWorkOrdersByStatus(
         // billing snapshot (built with a 5000 cap, no date bound) miss the last
         // few days entirely (the "no services in the last 7 days" bug). Rows with
         // no completed_at (e.g. a 'submitted' scan) just sort together at the end.
-        body: JSON.stringify({ limit: 100, after, properties: SERVICE_DETAIL_PROPS, filterGroups: [{ filters }], sorts: [{ propertyName: 'completed_at', direction: 'DESCENDING' }] }),
+        body: JSON.stringify({ limit: 100, after, properties: detailProps, filterGroups: [{ filters }], sorts: [{ propertyName: 'completed_at', direction: 'DESCENDING' }] }),
       });
       for (const r of resp.results || []) out.push({ id: String(r.id), props: r.properties || {} });
       after = resp.paging?.next?.after;
@@ -4704,6 +4714,42 @@ export async function ensureCompletionEmailedProperty(): Promise<boolean> {
     _completionEmailedPropEnsured = true; return true;
   } catch (e) {
     console.warn('[completion-email] ensure property failed:', e);
+    return false;
+  }
+}
+
+let _svcEtaPropEnsured = false;
+/** Ensure the service object's `estimated_completion_date` DATE property exists
+ *  (idempotent, memoized). Called before the service searches include it in their
+ *  projection and before the eta write, so this brand-new property can never 400 a
+ *  read or write in the window before the admin schema-apply runs. Returns true
+ *  when the property is present/created. */
+export async function ensureServiceEtaProp(): Promise<boolean> {
+  if (_svcEtaPropEnsured) return true;
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return false;
+  try {
+    await hubspotFetch(`/crm/v3/properties/${typeId}/estimated_completion_date`);
+    _svcEtaPropEnsured = true; return true; // already exists
+  } catch { /* not found → create below */ }
+  let groupName = 'service_work_order_information';
+  try {
+    const ref = await hubspotFetch(`/crm/v3/properties/${typeId}/status`);
+    if (ref?.groupName) groupName = String(ref.groupName);
+  } catch { /* fall back to the default guess */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${typeId}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'estimated_completion_date', label: 'Estimated Completion Date',
+        type: 'date', fieldType: 'date', groupName,
+        description: "Vendor's own estimate of when they expect to complete the order (optional).",
+      }),
+    });
+    _svcEtaPropEnsured = true; return true;
+  } catch (e) {
+    if (isConflict(e)) { _svcEtaPropEnsured = true; return true; }
+    console.warn('[services] ensure estimated_completion_date failed:', e);
     return false;
   }
 }

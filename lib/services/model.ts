@@ -45,6 +45,7 @@ export interface ServiceRecord {
   vendor: string | null;
   vendorEmail?: string | null; // assigned vendor's email — used to scope a vendor's view to their own
   dueDate: string;        // ISO date (YYYY-MM-DD)
+  estimatedCompletionDate?: string; // ISO date — vendor's own estimate of when they'll finish (optional)
   estimatedAt?: string;   // ISO date — when an estimated (bid) service was created
   completedAt?: string;   // ISO datetime — completed services only (drives day-view route order)
   updatedAt?: string;     // ISO datetime — last modified (create/submit/edit all bump it); drives the "Updated" sort

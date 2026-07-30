@@ -57,6 +57,8 @@ export const SERVICE_OBJECT: ObjectSpec = {
     SEL('scope', 'Coverage Scope', SCOPE_OPTS),
     TA('service_description', 'Service Description'),
     DATE('due_date', 'Due Date'),
+    // Vendor-submitted estimate of when they expect to complete the order (optional).
+    DATE('estimated_completion_date', 'Estimated Completion Date'),
     // Move-in-clean lease-anchored scheduling: stamped from the rule so the
     // re-sync cron can recompute the due (or cancel) as the lease start date
     // populates — WITHOUT re-reading the rule. 'lease_start' = anchored.

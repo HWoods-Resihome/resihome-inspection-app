@@ -39,6 +39,7 @@ interface ServiceView {
   address: string; locality: string; vendor: string | null; dueDate: string;
   petStations: boolean; status: string; propertyRecordId: string; isBidItem: boolean;
   estimatedAt: string;
+  estimatedCompletionDate: string;   // vendor's own estimate of when they'll finish ('' = unset)
   moveInDate?: string | null;   // property scope: tenant lease start (Listing → Deal → lease_start_date)
   vendorCost: number | null; markupPct: number | null; clientCost: number | null;
   vendorCostAdjustment: number | null; adjustmentReason: string;
@@ -136,6 +137,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         petStations: p.pet_stations === 'true', status: p.status || 'assigned',
         propertyRecordId: p.property_id_ref || '', isBidItem: p.is_bid_item === 'true',
         estimatedAt: normDate(p.hs_createdate),
+        estimatedCompletionDate: normDate(p.estimated_completion_date),
         description: p.service_description || '',
         vendorCost: num(p.vendor_cost), markupPct: num(p.markup_pct), clientCost: num(p.client_cost),
         vendorCostAdjustment: num(p.vendor_cost_adjustment), adjustmentReason: p.vendor_cost_adjustment_reason || '',
@@ -566,6 +568,53 @@ function PricingEditor({ svc }: { svc: ServiceView }) {
           className="text-[12px] font-heading font-semibold text-white bg-brand disabled:opacity-40 rounded px-3 py-1.5">{saving ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
+  );
+}
+
+// Estimated Completion Date — the vendor's own estimate of when they'll finish
+// (optional). Its own section above the completion checklist. Editable (branded
+// calendar, auto-saves on pick) while the order is open; read-only display after.
+function fmtEtaDate(s: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
+  return m ? `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}` : s;
+}
+function EtaSection({ svc, editable }: { svc: ServiceView; editable: boolean }) {
+  const router = useRouter();
+  const [date, setDate] = useState(svc.estimatedCompletionDate || '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { setDate(svc.estimatedCompletionDate || ''); }, [svc.estimatedCompletionDate]);
+  const save = async (next: string) => {
+    const prev = date;
+    setDate(next); setErr(''); setSaving(true);
+    try {
+      const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/eta`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: next }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(j?.error || 'Save failed.'); setDate(prev); }
+      else router.replace(router.asPath, undefined, { scroll: false }).catch(() => {}); // reflect on the card
+    } catch (e: any) { setErr(String(e?.message || e)); setDate(prev); }
+    setSaving(false);
+  };
+  // Read-only (submitted/review/completed, or not the assigned vendor): only show
+  // when a date was actually set — it's optional, so no empty section otherwise.
+  if (!editable) {
+    if (!date) return null;
+    return (
+      <CollapsibleSection title="Estimated Completion Date" bodyClass="text-[13px]">
+        <span className="font-semibold text-ink tabular-nums">{fmtEtaDate(date)}</span>
+        <span className="ml-2 text-[12px] text-gray-400">vendor estimate</span>
+      </CollapsibleSection>
+    );
+  }
+  return (
+    <CollapsibleSection title="Estimated Completion Date" subtitle="When do you expect to finish? Optional." bodyClass="space-y-2">
+      <DatePicker value={date} onChange={save} min={easternTodayISO()}
+        placeholder="Tap to set your estimated completion date" ariaLabel="Estimated completion date" />
+      {saving && <div className="text-[12px] text-gray-400">Saving…</div>}
+      {err && <div className="text-[12px] text-red-600">{err}</div>}
+    </CollapsibleSection>
   );
 }
 
@@ -1759,6 +1808,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 <Link href={`/services/${encodeURIComponent(svc.masterServiceId)}`} className="font-heading font-bold text-brand shrink-0">View master →</Link>
               </div>
             )}
+
+            {/* Estimated Completion Date — its own section, above the checklist.
+                Editable while open (assigned vendor / internal), read-only after. */}
+            {svc.live && !svc.isBidItem && <EtaSection svc={svc} editable={editable} />}
 
             {editable ? (
               /* ── Editable completion form (assigned crew) ── */

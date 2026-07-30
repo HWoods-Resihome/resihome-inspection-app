@@ -75,9 +75,9 @@ export async function notifyServiceAssigned(o: {
     await sendNotificationEmail({
       to, subject: `New Service Assigned — ${addr}`,
       heading: 'New Service Assigned',
-      intro: `A new ${o.worktypeLabel} (${o.subtypeLabel}) service has been assigned to you.`,
+      intro: `A new ${o.worktypeLabel} (${o.subtypeLabel}) service has been assigned to you. Please log in to ResiWalk and submit your estimated completion date so we know when to expect the work.`,
       rows: [['Property', addr], ['Service', `${o.worktypeLabel} (${o.subtypeLabel})`], ['Due', fmtMDY(o.dueDate)], ['Vendor', o.vendorName || '']],
-      linkUrl: `${o.baseUrl}/services/${encodeURIComponent(o.serviceId)}`, linkLabel: 'Open Service',
+      linkUrl: `${o.baseUrl}/services/${encodeURIComponent(o.serviceId)}`, linkLabel: 'Open Service & Set Completion Date',
     });
   } catch (e: any) { console.warn('[notify] service_assigned failed:', String(e?.message || e).slice(0, 160)); }
 }
