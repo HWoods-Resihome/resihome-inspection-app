@@ -29,8 +29,16 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
     Promise.allSettled([usersP, vendorsP]).finally(() => setLoading(false));
   }, []);
 
-  // The full searchable list: impersonatable users + the service vendors.
-  const rows = useMemo<Row[]>(() => [...users, ...vendors], [users, vendors]);
+  // The full searchable list: internal users + the service vendors. A vendor who
+  // has logged in also lands in the login-activity user roster, so the SAME
+  // company would otherwise appear twice (once as User, once as Vendor). Drop any
+  // user whose email matches a vendor's (case-insensitive) — vendors show only as
+  // Vendor, keeping the User side to genuine internal ResiHome users.
+  const rows = useMemo<Row[]>(() => {
+    const vendorEmails = new Set(vendors.map((v) => v.email.trim().toLowerCase()).filter(Boolean));
+    const internalUsers = users.filter((u) => !vendorEmails.has(u.email.trim().toLowerCase()));
+    return [...internalUsers, ...vendors];
+  }, [users, vendors]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
