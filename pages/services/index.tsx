@@ -67,6 +67,9 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
 // prevention / stop-cancel still treat pending as open; that's separate.)
 const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'review'];
 
+// Whole-number formatter with thousands separators (chip counts, "of N", pages).
+const fmtN = (n: number) => n.toLocaleString('en-US');
+
 // Service card with press-and-hold to cancel (internal only, live records) —
 // mirrors the inspection card's long-press. A ~500ms hold prompts to cancel; a
 // normal tap opens the service. The click after a long-press is swallowed.
@@ -497,7 +500,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
     <button type="button" onClick={() => selectStatus(val)}
       className={`w-full text-center text-[11px] font-heading font-semibold px-2 py-1.5 rounded-full border transition whitespace-nowrap ${
         status === val && !pastDueOnly ? 'bg-brand text-white border-brand' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
-      {label}{val === 'all' ? ` (${counts.all})` : counts[val] ? ` (${counts[val]})` : ''}
+      {label}{val === 'all' ? ` (${fmtN(counts.all)})` : counts[val] ? ` (${fmtN(counts[val])})` : ''}
     </button>
   );
   const allChip = (
@@ -505,7 +508,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
       title="Tap again to toggle All ↔ All Open (hide completed)"
       className={`w-full text-center text-[11px] font-heading font-semibold px-2 py-1.5 rounded-full border transition whitespace-nowrap ${
         (status === 'all' || status === 'all_open') && !pastDueOnly ? 'bg-brand text-white border-brand' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
-      {status === 'all_open' ? `All Open (${counts.all_open})` : `All (${counts.all})`}
+      {status === 'all_open' ? `All Open (${fmtN(counts.all_open)})` : `All (${fmtN(counts.all)})`}
     </button>
   );
   const pickerCls = (active: boolean) =>
@@ -584,13 +587,13 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
         {/* Summary bubbles — dynamic; Past Due is a clickable filter. */}
         <div className="grid grid-cols-3 gap-2 mb-3">
           <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-center">
-            <div className="text-2xl font-heading font-extrabold text-ink tabular-nums leading-none">{listLoading ? '—' : summary.open}</div>
+            <div className="text-2xl font-heading font-extrabold text-ink tabular-nums leading-none">{listLoading ? '—' : fmtN(summary.open)}</div>
             <div className="text-[10.5px] text-gray-500 mt-1 font-semibold uppercase tracking-wide">Total Open</div>
           </div>
           <button type="button" onClick={() => setPastDueOnly((v) => !v)}
             title="Show only open work orders that are past due"
             className={`bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-center transition ${pastDueOnly ? bubbleActiveRing : 'hover:border-brand/40'}`}>
-            <div className={`text-2xl font-heading font-extrabold tabular-nums leading-none ${summary.pastDue > 0 ? 'text-red-600' : 'text-ink'}`}>{listLoading ? '—' : summary.pastDue}</div>
+            <div className={`text-2xl font-heading font-extrabold tabular-nums leading-none ${summary.pastDue > 0 ? 'text-red-600' : 'text-ink'}`}>{listLoading ? '—' : fmtN(summary.pastDue)}</div>
             <div className="text-[10.5px] text-gray-500 mt-1 font-semibold uppercase tracking-wide">Past Due</div>
           </button>
           <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-center">
@@ -747,7 +750,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
                 Back
               </button>
-              <span className="text-xs font-heading text-gray-600 whitespace-nowrap">Page {currentPage} of {totalPages}</span>
+              <span className="text-xs font-heading text-gray-600 whitespace-nowrap">Page {fmtN(currentPage)} of {fmtN(totalPages)}</span>
               <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}
                 className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-3 py-1.5 border border-gray-300 rounded-md bg-white disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
                 Next

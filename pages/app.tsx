@@ -43,6 +43,8 @@ function isCancelledStatus(s?: string): boolean {
   const x = (s || '').trim().toLowerCase();
   return x === 'cancelled' || x === 'canceled';
 }
+// Whole-number formatter with thousands separators (chip counts, "of N", pages).
+const fmtN = (n: number) => n.toLocaleString('en-US');
 // Which status-chip bucket an inspection counts toward (null = cancelled/other).
 function statusBucket(s?: string): keyof Omit<StatusCounts, 'all'> | null {
   const x = (s || '').trim().toLowerCase();
@@ -947,16 +949,16 @@ export default function Home() {
             <div className="flex gap-1.5">
               <FilterChip className="flex-1"
                 label={countsKnown
-                  ? (statusFilter === 'open' ? `All Open (${counts.all - counts.completed})` : `All (${counts.all})`)
+                  ? (statusFilter === 'open' ? `All Open (${fmtN(counts.all - counts.completed)})` : `All (${fmtN(counts.all)})`)
                   : (statusFilter === 'open' ? 'All Open' : 'All')}
                 active={statusFilter === 'all' || statusFilter === 'open'}
                 onClick={() => setStatusFilter(statusFilter === 'all' ? 'open' : 'all')} />
-              <FilterChip className="flex-1" label={countsKnown ? `Scheduled (${counts.scheduled})` : 'Scheduled'} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter(statusFilter === 'scheduled' ? 'all' : 'scheduled')} />
-              <FilterChip className="flex-1" label={countsKnown ? `In Progress (${counts.in_progress})` : 'In Progress'} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter(statusFilter === 'in_progress' ? 'all' : 'in_progress')} />
+              <FilterChip className="flex-1" label={countsKnown ? `Scheduled (${fmtN(counts.scheduled)})` : 'Scheduled'} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter(statusFilter === 'scheduled' ? 'all' : 'scheduled')} />
+              <FilterChip className="flex-1" label={countsKnown ? `In Progress (${fmtN(counts.in_progress)})` : 'In Progress'} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter(statusFilter === 'in_progress' ? 'all' : 'in_progress')} />
             </div>
             <div className="flex gap-1.5">
-              <FilterChip className="flex-1" label={countsKnown ? `Pending Approval (${counts.pending_approval})` : 'Pending Approval'} active={statusFilter === 'pending_approval'} onClick={() => setStatusFilter(statusFilter === 'pending_approval' ? 'all' : 'pending_approval')} />
-              <FilterChip className="flex-1" label={countsKnown ? `Completed (${counts.completed})` : 'Completed'} active={statusFilter === 'completed'} onClick={() => setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed')} />
+              <FilterChip className="flex-1" label={countsKnown ? `Pending Approval (${fmtN(counts.pending_approval)})` : 'Pending Approval'} active={statusFilter === 'pending_approval'} onClick={() => setStatusFilter(statusFilter === 'pending_approval' ? 'all' : 'pending_approval')} />
+              <FilterChip className="flex-1" label={countsKnown ? `Completed (${fmtN(counts.completed)})` : 'Completed'} active={statusFilter === 'completed'} onClick={() => setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed')} />
             </div>
           </div>
 
@@ -1083,8 +1085,8 @@ export default function Home() {
               {loading
                 ? 'Loading...'
                 : total === 0
-                ? `0 of ${counts.all} inspection${counts.all === 1 ? '' : 's'}`
-                : `Showing ${pageStart + 1}–${Math.min(pageStart + pageSize, total)} of ${total}`}
+                ? `0 of ${fmtN(counts.all)} inspection${counts.all === 1 ? '' : 's'}`
+                : `Showing ${fmtN(pageStart + 1)}–${fmtN(Math.min(pageStart + pageSize, total))} of ${fmtN(total)}`}
             </div>
             {!loading && !error && inspections.length > 0 && (
               selectMode ? (
@@ -1231,7 +1233,7 @@ export default function Home() {
                   Back
                 </button>
                 <span className="text-xs font-heading text-gray-600 whitespace-nowrap">
-                  Page {currentPage} of {totalPages}
+                  Page {fmtN(currentPage)} of {fmtN(totalPages)}
                 </span>
                 <button
                   type="button"
