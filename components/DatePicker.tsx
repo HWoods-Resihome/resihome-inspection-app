@@ -22,7 +22,7 @@ const fmtMDY = (s: string) => {
 };
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
-export function DatePicker({ value, onChange, className, placeholder = 'Select date', min, clearable = true, ariaLabel }: {
+export function DatePicker({ value, onChange, className, placeholder = 'Select date', min, clearable = true, ariaLabel, align = 'left' }: {
   value: string;
   onChange: (v: string) => void;
   className?: string;
@@ -30,6 +30,7 @@ export function DatePicker({ value, onChange, className, placeholder = 'Select d
   min?: string;             // 'YYYY-MM-DD' — earliest selectable day
   clearable?: boolean;
   ariaLabel?: string;
+  align?: 'left' | 'center';   // center = the value text is centered in the trigger
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<Date>(() => parseYMD(value) || new Date());
@@ -52,7 +53,7 @@ export function DatePicker({ value, onChange, className, placeholder = 'Select d
   return (
     <>
       <button type="button" onClick={openIt} aria-label={ariaLabel} className={base}>
-        <span className={value ? '' : 'opacity-50'}>{value ? fmtMDY(value) : placeholder}</span>
+        <span className={`${align === 'center' ? 'flex-1 text-center' : ''} ${value ? '' : 'opacity-50'}`}>{value ? fmtMDY(value) : placeholder}</span>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-gray-400"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
       </button>
       {open && (

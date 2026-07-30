@@ -608,12 +608,14 @@ function EtaSection({ svc, editable }: { svc: ServiceView; editable: boolean }) 
     );
   }
   // Its own bubble, one line: label left · branded date picker right. No helper text.
+  // Draw the vendor's attention with a pink border until a date is entered.
+  const attention = !date;
   return (
-    <section className="bg-white border border-gray-200 rounded-2xl px-4 py-3">
+    <section className={`bg-white rounded-2xl px-4 py-3 border ${attention ? 'border-brand ring-1 ring-brand/30' : 'border-gray-200'}`}>
       <div className="flex items-center justify-between gap-3">
         {label}
         <div className="w-36 shrink-0">
-          <DatePicker value={date} onChange={save} min={easternTodayISO()} placeholder="Set date" ariaLabel="Estimated completion date"
+          <DatePicker value={date} onChange={save} min={easternTodayISO()} placeholder="Set date" ariaLabel="Estimated completion date" align="center"
             className="w-full text-[13px] border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-ink focus:outline-none focus:border-brand flex items-center justify-between gap-1" />
         </div>
       </div>
