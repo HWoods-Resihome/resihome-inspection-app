@@ -3711,19 +3711,45 @@ export function RateCardForm(props: RateCardFormProps) {
         // (the documented exemption). We persist the deferral and retry ONCE, so
         // a legitimate close-out is never trapped behind the gate.
         const timingBody: Record<string, 'now' | 'later'> = { ...resolutionTimings };
+        // Poll the record for a completed status — used when a finalize is running
+        // but we didn't get its response (dropped connection, or a 409 in-progress
+        // lock). Finalize flips status to 'completed' when it lands, so this confirms
+        // success WITHOUT re-POSTing (which would just collide with the running
+        // finalize's own lock).
+        const pollCompleted = async (maxMs: number): Promise<boolean> => {
+          const start = Date.now();
+          while (Date.now() - start < maxMs) {
+            await new Promise((res) => setTimeout(res, 5000));
+            try {
+              const cr = await fetch(`/api/inspections/${props.inspectionRecordId}`);
+              if (cr.ok) {
+                const cd = await cr.json().catch(() => ({} as any));
+                const st = String(cd?.inspection?.status || '').toLowerCase();
+                if (st === 'completed' || st === 'complete') return true;
+              }
+            } catch { /* keep polling */ }
+          }
+          return false;
+        };
         let r: Response | null = null;
+        let inProgress = false; // a finalize is running (our request landed, or another device's)
         for (let attempt = 0; attempt < 2; attempt++) {
-          // Retry the finalize over weak signal (network / timeout / 5xx, and the
-          // "in progress" lock 409). Finalize is safe to re-run — it regenerates the
-          // PDFs and skips the one-time email/ticket on a re-finalize — so a lost
-          // response no longer strands a completed scope. postJsonWithRetry returns
-          // the final Response for the escape-hatch handling below (400 missing
-          // after-photos, 423 self-approval lockout).
-          r = await postJsonWithRetry(`/api/inspections/${props.inspectionRecordId}/finalize`,
-            // Send the timing map so same-device finalize honors "Complete Later"
-            // even for inspections submitted before the map was persisted.
-            { resolutionTimings: timingBody, zeroDollarTurn: zeroDollar }, { retry409: true });
+          // Finalize is long-running (renders PDFs, 10-30s) and guarded by a server
+          // in-progress lock, so send it ONCE — never auto re-POST. A retry would
+          // collide with our OWN still-running finalize's lock and surface a false
+          // "already being finalized on another device". On a dropped connection or a
+          // 409 lock we poll for completion below instead of re-POSTing.
+          try {
+            r = await postJsonWithRetry(`/api/inspections/${props.inspectionRecordId}/finalize`,
+              // Send the timing map so same-device finalize honors "Complete Later"
+              // even for inspections submitted before the map was persisted.
+              { resolutionTimings: timingBody, zeroDollarTurn: zeroDollar }, { tries: 1, timeoutMs: 180_000 });
+          } catch (e: any) {
+            if (e instanceof OfflineError) throw e;       // offline → outer catch messages it
+            inProgress = true; r = null; break;           // network dropped mid-finalize → poll below
+          }
           if (r.ok) break;
+          if (r.status === 409) { inProgress = true; break; } // lock held → poll for completion
           let j: any = null;
           try { j = await r.json(); } catch { /* non-JSON */ }
           const missingIds: string[] = Array.isArray(j?.missingAfterPhotoLineIds) ? j.missingAfterPhotoLineIds : [];
@@ -3746,6 +3772,21 @@ export function RateCardForm(props: RateCardFormProps) {
           const err: any = new Error(j?.error || `HTTP ${r.status}`); err.status = r.status;
           throw err;
         }
+
+        // A finalize is running but we didn't get its response (lost connection or a
+        // 409 lock). Don't re-POST — poll for the completed status; finalize is
+        // idempotent server-side and flips to 'completed' when it lands.
+        if (inProgress) {
+          const done = await pollCompleted(90_000);
+          if (done) {
+            flashApi.flash('Inspection finalized ✔️', 'success', 7000);
+            if (typeof window !== 'undefined') window.location.reload();
+            return;
+          }
+          await dialog.alert('This inspection is still finalizing — its PDFs are generating, which can take up to a minute. It’ll show as Completed shortly; no need to finalize again. Refresh in a moment to confirm.');
+          return;
+        }
+
         if (!r || !r.ok) { const err: any = new Error('Finalize failed. Please try again.'); throw err; }
         const data = await r.json();
         setFinalizeResult(data as FinalizeResult);
