@@ -282,6 +282,7 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
   // edit preserves the schedule's OWN filters rather than the page's current ones).
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editFilters, setEditFilters] = useState<{ regions: string[]; portfolios: string[]; inspectors: string[]; types: string[] } | null>(null);
+  const [diag, setDiag] = useState<any>(null);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -330,6 +331,28 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
       setMsg(`Test sent (${d.rows} rows).`);
     } catch (e: any) { setMsg(`Test failed: ${e?.message || e}`); }
     finally { setBusy(false); }
+  }
+  async function diagnose() {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/insights/report-schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'diagnose' }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setDiag(d);
+    } catch (e: any) { setMsg(`Diagnose failed: ${e?.message || e}`); }
+    finally { setBusy(false); }
+  }
+  // Human-readable verdict from the diagnose payload — the one line that says why
+  // scheduled sends are (or aren't) going out.
+  function diagVerdict(d: any): { tone: 'ok' | 'warn' | 'bad'; text: string } {
+    const tick = d?.lastCronTick; const run = d?.lastCronRun;
+    const ageMin = tick?.at ? Math.round((Date.now() - new Date(tick.at).getTime()) / 60000) : Infinity;
+    if (!tick || ageMin > 130) return { tone: 'bad', text: `The hourly cron isn’t firing (last tick ${tick?.at ? `${ageMin} min ago` : 'never'}). This is a Vercel cron registration/plan issue — the app can’t send on schedule until Vercel invokes it.` };
+    if (run?.outcome === 'unauthorized') return { tone: 'bad', text: 'The cron IS firing but CRON_SECRET doesn’t match — Vercel’s bearer token ≠ the CRON_SECRET env var. Fix the env var and redeploy.' };
+    if (run?.outcome === 'skipped_no_secret') return { tone: 'bad', text: 'CRON_SECRET isn’t set, so the scheduled send is disabled. Set CRON_SECRET in the Vercel project env and redeploy.' };
+    if (run?.outcome === 'error') return { tone: 'bad', text: `The last cron run errored: ${run?.error || 'unknown'}.` };
+    const anyDueSoon = (d?.schedules || []).some((s: any) => s.enabled && s.recipients > 0);
+    if (!anyDueSoon) return { tone: 'warn', text: 'The cron is healthy, but no enabled schedule with recipients exists — save the schedule (not just Send test), and make sure it has recipients.' };
+    return { tone: 'ok', text: `The cron is healthy (last run ${run?.outcome || '—'}${run?.sent != null ? `, sent ${run.sent}` : ''}). Each schedule below shows whether it’s due right now and why.` };
   }
   async function testSaved(s: Sched) {
     setBusy(true); setMsg(null);
@@ -406,8 +429,44 @@ function ScheduleManager({ object, personLabel, facets, current, onClose }: {
           <div className="flex gap-2">
             <button type="button" onClick={() => void saveNew()} disabled={busy} className="text-[13px] font-heading font-bold px-4 py-2 rounded-lg bg-[#ff0060] text-white disabled:opacity-60">{editingId ? 'Update schedule' : 'Save schedule'}</button>
             <button type="button" onClick={() => void sendTest()} disabled={busy} className="text-[13px] font-heading font-semibold px-4 py-2 rounded-lg bg-[#232329] border border-white/10 disabled:opacity-60">Send test now</button>
+            <button type="button" onClick={() => void diagnose()} disabled={busy} className="text-[13px] font-heading font-semibold px-4 py-2 rounded-lg text-[#a1a1aa] hover:text-[#f4f4f5]" title="Check why scheduled sends are or aren't firing">Diagnose scheduling</button>
             {editingId && <button type="button" onClick={resetForm} disabled={busy} className="text-[13px] font-heading font-semibold px-4 py-2 rounded-lg text-[#a1a1aa] hover:text-[#f4f4f5]">Cancel edit</button>}
           </div>
+
+          {diag && (() => {
+            const v = diagVerdict(diag);
+            const tone = v.tone === 'ok' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+              : v.tone === 'warn' ? 'border-amber-500/40 bg-amber-500/10 text-amber-100'
+              : 'border-[#ff0060]/40 bg-[#ff0060]/10 text-[#ffd6e6]';
+            return (
+              <div className={`rounded-lg border px-3 py-2.5 text-[12px] ${tone}`}>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-heading font-bold">Scheduling health</span>
+                  <button type="button" onClick={() => setDiag(null)} className="text-[11px] opacity-70 hover:opacity-100">Dismiss</button>
+                </div>
+                <div className="mb-2">{v.text}</div>
+                <div className="text-[11px] opacity-80 space-y-0.5">
+                  <div>Now (ET): hour {diag?.nowET?.hour}, {diag?.nowET?.today}</div>
+                  <div>Last cron tick: {diag?.lastCronTick?.at ? new Date(diag.lastCronTick.at).toLocaleString() : 'never'}</div>
+                  <div>Last cron run: {diag?.lastCronRun ? `${diag.lastCronRun.outcome}${diag.lastCronRun.due != null ? ` · due ${diag.lastCronRun.due}, sent ${diag.lastCronRun.sent}, failed ${diag.lastCronRun.failed}` : ''}` : '—'}</div>
+                </div>
+                {Array.isArray(diag?.schedules) && diag.schedules.filter((s: any) => s.object === object || s.object === undefined).length > 0 && (
+                  <div className="mt-2 border-t border-white/10 pt-2 space-y-1">
+                    {diag.schedules.map((s: any) => (
+                      <div key={s.id} className="text-[11px]">
+                        <span className="font-heading font-semibold">{s.name}</span> — {s.dueNow ? 'due now ✓' : 'not due'}
+                        {!s.dueNow && (
+                          <span className="opacity-80">
+                            {' '}({!s.checks?.enabled ? 'disabled' : !s.checks?.hasRecipients ? 'no recipients' : s.checks?.alreadyRanToday ? 'already sent today' : !s.checks?.hourReached ? `waiting for ${s.hourET}:00 ET` : !s.checks?.dayMatch ? 'not its day' : 'ready — will send when the hour is reached'})
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="border-t border-white/10 pt-3">
             <div className="text-[12px] font-heading font-semibold text-[#a1a1aa] mb-1.5">Existing schedules</div>
