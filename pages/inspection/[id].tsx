@@ -319,7 +319,23 @@ export default function ExistingInspection() {
             throw netErr;
           }
         }
-        const data = await r.json();
+        const data = await r.json().catch(() => ({} as any));
+        // A definitive server 404 means the record is GONE (deleted / archived /
+        // reassigned) — the server was reachable and answered "not found". Do NOT
+        // fall back to the stale offline cache here: rendering the cached form mounts
+        // a QC / Scope view whose OWN data fetch then 404s, stranding the inspector
+        // on a blank "Could not load: HTTP 404" screen (the reported failure). Show
+        // an actionable not-found message instead. Real offline use is a network
+        // THROW (handled in the catch below), never a 404 response, so caching still
+        // works there.
+        if (r.status === 404) {
+          if (!cancelled) {
+            setErrorMsg('This inspection couldn’t be found on the server. It may have been deleted, archived, or reassigned in HubSpot. Go back to your list and reopen it — if it’s no longer there, it was removed.');
+            setStage('error');
+            reportError(new Error('Inspection not found (404)'), { kind: 'inspection_load', inspectionId });
+          }
+          return;
+        }
         if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
         if (cancelled) return;
         saveCachedInspection(inspectionId, data); // warm the offline cache for dead-zone re-opens

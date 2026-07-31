@@ -999,7 +999,28 @@ export function QcReinspectForm(props: Props) {
   }
 
   if (loading) return <div className="text-sm text-gray-500 py-8 text-center">Loading inspection...</div>;
-  if (loadError) return <div className="text-sm text-red-600 py-8 text-center">Could not load: {loadError}</div>;
+  if (loadError) {
+    // A 404 means the re-inspection record is gone (deleted / archived / reassigned)
+    // — say so plainly with a way back, instead of the cryptic "HTTP 404".
+    const notFound = /\b404\b/.test(loadError);
+    return (
+      <div className="max-w-md mx-auto text-center py-10 px-5">
+        <div className="text-sm text-red-600 font-heading font-semibold mb-1">
+          {notFound ? 'This re-inspection couldn’t be found.' : 'Could not load this re-inspection.'}
+        </div>
+        <div className="text-[13px] text-gray-500 mb-4">
+          {notFound
+            ? 'It may have been deleted, archived, or reassigned in HubSpot. Go back to your list and reopen it — if it’s no longer there, it was removed.'
+            : `Something went wrong loading it (${loadError}). Check your connection and try again.`}
+        </div>
+        <div className="flex items-center justify-center gap-4">
+          <button type="button" onClick={() => { if (typeof window !== 'undefined') window.location.reload(); }}
+            className="px-3 py-1.5 rounded-lg bg-brand text-white font-heading font-semibold text-xs hover:bg-brand-dark">Try again</button>
+          <a href="/app" className="text-brand underline text-xs font-heading font-semibold">Back to Inspections List</a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 md:pb-24">
