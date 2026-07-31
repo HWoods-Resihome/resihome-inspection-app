@@ -23,6 +23,7 @@ import { reportError } from '@/lib/clientErrorReporter';
 import { isNetworkError } from '@/lib/netError';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 import { getPhotoWindow, clearPhotoWindow } from '@/lib/photoCaptureWindow';
+import { postJsonWithRetry, OfflineError } from '@/lib/net/resilientPost';
 import { loadMe } from '@/lib/me';
 import { PullToRefresh } from '@/components/PullToRefresh';
 
@@ -380,16 +381,29 @@ export default function ExistingInspection() {
       // stamp it and the metric falls back to the classic turnaround.
       const photoWindow = getPhotoWindow(inspectionId);
 
-      const r = await fetch(`/api/inspections/${inspectionId}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // Retry the terminal submit over weak signal, and treat an already-completed
+      // 409 as success — a lost response after the server completed it must not read
+      // as a failure (the completed inspection then "vanishing" into Completed).
+      let r: Response;
+      try {
+        r = await postJsonWithRetry(`/api/inspections/${inspectionId}/submit`, {
           totalQuestionsAnswered, totalPhotos, inspectionResult: meta?.inspectionResult ?? null,
           ...(photoWindow ? { firstPhotoAt: photoWindow.first, lastPhotoAt: photoWindow.last } : {}),
-        }),
-      });
-      const data = await r.json();
-      if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
+        }, { retry409: true });
+      } catch (e: any) {
+        const offline = e instanceof OfflineError || (typeof navigator !== 'undefined' && navigator.onLine === false);
+        setErrorMsg(offline
+          ? 'You’re offline, so the inspection couldn’t be submitted yet. Your answers and photos are saved — move to signal and tap Submit again. Nothing is lost.'
+          : `The submit didn’t go through (${String(e?.message || e).slice(0, 160)}). Your work is saved — wait a moment and tap Submit again.`);
+        setStage('error');
+        return;
+      }
+      const data = await r.json().catch(() => ({} as any));
+      // Already completed (this run's lost response, or a prior attempt) → the
+      // submit DID happen. Don't treat it as an error; fall through so the PDF
+      // still (re)generates for the completed record and we land on the done screen.
+      const alreadyDone = r.status === 409 && !!(data as any)?.alreadyCompleted;
+      if (!alreadyDone && (!r.ok || data.error)) throw new Error(data.error || `HTTP ${r.status}`);
       clearPhotoWindow(inspectionId);
       setSubmitResultUrl(data.hubspotUrl || '');
 

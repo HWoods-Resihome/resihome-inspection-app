@@ -39,6 +39,7 @@ import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 const FC_PHOTO_SECTION = '__final_checklist__';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError } from '@/lib/offlineOutbox';
 import { reportSyncOutcome } from '@/lib/syncTelemetry';
+import { postJsonWithRetry, OfflineError } from '@/lib/net/resilientPost';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
 import { removePhotoAttachByUrl } from '@/lib/photoAttachOutbox';
 import { isLocalInspectionId } from '@/lib/pendingInspections';
@@ -3712,13 +3713,16 @@ export function RateCardForm(props: RateCardFormProps) {
         const timingBody: Record<string, 'now' | 'later'> = { ...resolutionTimings };
         let r: Response | null = null;
         for (let attempt = 0; attempt < 2; attempt++) {
-          r = await fetch(`/api/inspections/${props.inspectionRecordId}/finalize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+          // Retry the finalize over weak signal (network / timeout / 5xx, and the
+          // "in progress" lock 409). Finalize is safe to re-run — it regenerates the
+          // PDFs and skips the one-time email/ticket on a re-finalize — so a lost
+          // response no longer strands a completed scope. postJsonWithRetry returns
+          // the final Response for the escape-hatch handling below (400 missing
+          // after-photos, 423 self-approval lockout).
+          r = await postJsonWithRetry(`/api/inspections/${props.inspectionRecordId}/finalize`,
             // Send the timing map so same-device finalize honors "Complete Later"
             // even for inspections submitted before the map was persisted.
-            body: JSON.stringify({ resolutionTimings: timingBody, zeroDollarTurn: zeroDollar }),
-          });
+            { resolutionTimings: timingBody, zeroDollarTurn: zeroDollar }, { retry409: true });
           if (r.ok) break;
           let j: any = null;
           try { j = await r.json(); } catch { /* non-JSON */ }
@@ -3767,6 +3771,9 @@ export function RateCardForm(props: RateCardFormProps) {
       } catch (e: any) {
         // The self-approval lockout (423) is an expected workflow state, not a failure.
         if (e?.status === 423) await dialog.alert(e.message);
+        else if (e instanceof OfflineError || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+          await dialog.alert('You’re offline, so the scope couldn’t be finalized yet. Nothing changed — move to signal and tap Finalize again.');
+        }
         else await dialog.alert(`Finalize failed: ${e?.message || e}\n\nThe inspection status was NOT changed. You can try again.`);
       } finally {
         setFinalizing(false);
@@ -3778,16 +3785,24 @@ export function RateCardForm(props: RateCardFormProps) {
     setSubmitting(true);
     submitGuardRef.current = true;
     try {
-      const r = await fetch(`/api/inspections/${props.inspectionRecordId}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // Persist the per-line "Complete Now/Later" choices so the approver (any
-        // device) and the finalize gate honor them.
-        body: JSON.stringify({ resolutionTimings }),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`HTTP ${r.status}: ${text.slice(0, 200)}`);
+      // Retry over weak signal; an already-submitted/completed 409 means it landed.
+      let r: Response;
+      try {
+        r = await postJsonWithRetry(`/api/inspections/${props.inspectionRecordId}/submit`,
+          // Persist the per-line "Complete Now/Later" choices so the approver (any
+          // device) and the finalize gate honor them.
+          { resolutionTimings }, { retry409: true });
+      } catch (e: any) {
+        const offline = e instanceof OfflineError || (typeof navigator !== 'undefined' && navigator.onLine === false);
+        await dialog.alert(offline
+          ? 'You’re offline, so the scope couldn’t be submitted yet. Your work is saved — move to signal and tap Submit again. Nothing is lost.'
+          : `The submit didn’t go through (${String(e?.message || e).slice(0, 160)}). Your work is saved — wait a moment and tap Submit again.`);
+        return;
+      }
+      const j: any = await r.json().catch(() => ({}));
+      // Already submitted/completed (a lost response, or a prior attempt) → success.
+      if (!(r.status === 409 && j?.alreadyCompleted) && !r.ok) {
+        throw new Error(`HTTP ${r.status}: ${(j?.error || '').slice(0, 200)}`);
       }
       // Confirmation toast — it lives at the app root, so it stays visible after
       // onSubmit() routes back to the inspections home screen (app + desktop).
