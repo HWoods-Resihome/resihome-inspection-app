@@ -917,13 +917,63 @@ export function QcReinspectForm(props: Props) {
     }
     try {
       await burnTaggedLabelsQc();
-      const r = await fetch(`/api/inspections/${props.inspectionRecordId}/qc-finalize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verdict, overallNote: verdict === 'fail' ? overallNote.trim() : '' }),
-      });
-      if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 300)}`); }
-      const finalizeData = await r.json();
+      // Finalize is the terminal write (renders the PDF, flips status → completed,
+      // emails the report). On the weak signal common at some properties
+      // (Covington/Rex), a SINGLE attempt often failed AFTER the server had already
+      // completed it — the inspector saw "Submit failed" but the QC was actually
+      // done (then seemed to "vanish" because it moved to the Completed bucket).
+      // Retry with backoff, and treat an "already completed" 409 as SUCCESS. The
+      // server's in-flight + durable locks make retries safe against duplicate
+      // reports/emails.
+      const finalizeBody = JSON.stringify({ verdict, overallNote: verdict === 'fail' ? overallNote.trim() : '' });
+      let finalizeData: any = null;
+      let alreadyCompleted = false;
+      let lastErr = '';
+      const MAX_FINALIZE_TRIES = 3;
+      for (let attempt = 0; attempt < MAX_FINALIZE_TRIES; attempt++) {
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 90000);
+        try {
+          const r = await fetch(`/api/inspections/${props.inspectionRecordId}/qc-finalize`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: finalizeBody, signal: ctrl.signal,
+          });
+          if (r.ok) { finalizeData = await r.json(); break; }
+          const bodyText = await r.text().catch(() => '');
+          let bodyJson: any = null; try { bodyJson = JSON.parse(bodyText); } catch { /* not json */ }
+          if (r.status === 409 && bodyJson?.alreadyCompleted) { alreadyCompleted = true; break; }
+          if (r.status === 409) {
+            // A finalize is already running (an earlier attempt from this device, or
+            // another instance). Wait, then retry — it either finishes (the next try
+            // sees alreadyCompleted) or the lock frees.
+            lastErr = 'A submit is already in progress.';
+            await new Promise((res) => setTimeout(res, 3500));
+            continue;
+          }
+          if (r.status === 401 || r.status === 403) throw new Error(`Your session expired (HTTP ${r.status}) — sign in again and re-submit.`);
+          if (r.status >= 400 && r.status < 500 && r.status !== 429) throw new Error(`HTTP ${r.status}: ${bodyText.slice(0, 200)}`);
+          lastErr = `HTTP ${r.status}: ${bodyText.slice(0, 160)}`; // 5xx / 429 — retry
+        } catch (e: any) {
+          const msg = String(e?.message || e);
+          if (/session expired|HTTP 4\d\d/.test(msg)) throw e; // non-retryable — surface it
+          lastErr = /abort/i.test(msg) ? 'The connection timed out.' : msg; // network / timeout — retry
+        } finally {
+          clearTimeout(to);
+        }
+        if (attempt < MAX_FINALIZE_TRIES - 1) await new Promise((res) => setTimeout(res, 2500 * (attempt + 1)));
+      }
+
+      if (alreadyCompleted) {
+        void dialog.alert('This re-inspection was already submitted — it’s completed. You’ll find it under the Completed filter.');
+        props.onSubmit();
+        return;
+      }
+      if (!finalizeData) {
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+        void dialog.alert(offline
+          ? 'You’re offline, so the re-inspection couldn’t be submitted yet. Your answers and photos are saved on the device — move to an area with signal and tap Submit again. Nothing is lost.'
+          : `The submit didn’t go through (${lastErr || 'weak connection'}). Your work is saved — wait a moment and tap Submit again. If it keeps failing, move to better signal before retrying.`);
+        return;
+      }
       // Raise a maintenance ticket for the NEW items (best-effort — never blocks
       // completion). The QC is already finalized at this point; surface the result.
       let ticket: { ok: boolean; url?: string | null; error?: string } | null = null;
