@@ -13,7 +13,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { canViewInsights } from '@/lib/insightsAccess';
-import { listSchedules, upsertSchedule, deleteSchedule, normalizeSchedule, sendScheduleNow, isScheduleDue, markScheduleRun, etParts, getLastCronTick, type ReportSchedule } from '@/lib/reportSchedules';
+import { listSchedules, upsertSchedule, deleteSchedule, normalizeSchedule, sendScheduleNow, isScheduleDue, markScheduleRun, etParts, getLastCronTick, getLastCronRun, type ReportSchedule } from '@/lib/reportSchedules';
 
 export const config = { maxDuration: 60 };
 
@@ -50,7 +50,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // A recent `at` = cron is firing (self-heal will cover any missed hour); a
       // stale/null tick = the cron isn't running (a platform/registration issue).
       const lastCronTick = await getLastCronTick();
-      return res.status(200).json({ nowET: { hour: p.hour, dow: p.dow, today: todayET }, lastCronTick, schedules });
+      // lastCronRun: what the most recent invocation actually DID. Together with the
+      // tick this disambiguates every failure mode — stale tick = Vercel isn't
+      // firing it; fresh tick + outcome 'unauthorized' = CRON_SECRET mismatch;
+      // outcome 'skipped_no_secret' = CRON_SECRET unset; outcome 'ok' with due:0 =
+      // no schedule matched (check the per-schedule `checks` below).
+      const lastCronRun = await getLastCronRun();
+      return res.status(200).json({ nowET: { hour: p.hour, dow: p.dow, today: todayET }, lastCronTick, lastCronRun, schedules });
     }
     // Manual run: send a saved schedule NOW and stamp it (mirrors the cron), so a
     // missed send can be recovered on demand. Wrapped so a build/fetch/email

@@ -195,6 +195,33 @@ export async function getLastCronTick(): Promise<{ at: string; hourET: number; d
   } catch { return null; }
 }
 
+// Last-run OUTCOME (distinct from the bare tick): what the most recent cron
+// invocation actually DID — skipped (no secret) / unauthorized (bad secret) / ok
+// with due+sent+failed counts. This is what makes a silent miss diagnosable: a
+// fresh tick + `unauthorized` outcome = the cron IS firing but the CRON_SECRET is
+// wrong; a fresh tick + `ok` with due:0 = the schedule simply isn't matching.
+const CRON_RUN_KEY = 'report-schedules/last-cron-run.json';
+export type CronRunOutcome = {
+  at: string; hourET: number;
+  outcome: 'skipped_no_secret' | 'unauthorized' | 'ok' | 'error';
+  due?: number; sent?: number; failed?: number; error?: string;
+};
+export async function recordCronRun(summary: CronRunOutcome): Promise<void> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return;
+  try {
+    await put(CRON_RUN_KEY, JSON.stringify(summary),
+      { access: 'public', contentType: 'application/json', addRandomSuffix: false, allowOverwrite: true });
+  } catch { /* best-effort */ }
+}
+export async function getLastCronRun(): Promise<CronRunOutcome | null> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
+  try {
+    const h = await head(CRON_RUN_KEY);
+    const r = await fetch(h.url, { cache: 'no-store' });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
 /** Build + email a schedule's report right now (used by the cron and the
  *  "Send test" button). Resolves the relative range, builds the .xlsx, and
  *  emails it to every recipient from the system mailbox. Returns rows sent. */
