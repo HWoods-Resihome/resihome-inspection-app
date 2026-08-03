@@ -2,17 +2,19 @@
  * POST /api/services/admin/migrate-community-nov-weekly — one-click cadence fix.
  *
  * For every COMMUNITY LANDSCAPING (grass cut) rule (active AND paused), move
- * NOVEMBER out of its slower cadence and into the 7-day (weekly) cadence, then
- * recompute the per-service costs the rule bills:
- *   1. Ensure the friendly inputs exist — derive monthly_cut_cost / annual contract
- *      from the CURRENT per-service × the OLD jobs/year (so the annual total the
- *      contract represents is preserved across the cadence change).
- *   2. Move November (month 10) into the weekly cadence, out of every other one.
- *   3. Recompute vendor_cost = monthly × 12 ÷ NEW jobs/year, and
- *      common_area_cost = annual ÷ NEW jobs/year.
+ * NOVEMBER into the 7-day (weekly) cadence and re-base the CONTRACT math on the
+ * new jobs-per-year — while keeping the per-service cost CONSTANT:
+ *   1. Move November (month 10) into the weekly cadence, out of every other one.
+ *   2. Recompute jobs/year (e.g. 47 → 48).
+ *   3. Keep vendor_cost (per-cut) and common_area_cost (per-service) EXACTLY as
+ *      they are, and recompute the friendly INPUTS from them × the NEW jobs/year:
+ *        monthly_cut_cost            = vendor_cost × jobs/yr ÷ 12
+ *        common_area_annual_contract = common_area_cost × jobs/yr
+ *   So the contract total / monthly cost now reflect 48 jobs, and the per-service
+ *   price the crew is paid is unchanged.
  *
  * Note: existing OPEN orders keep the price they were generated with (dispatched
- * work isn't re-priced) — only future generated orders use the new rate.
+ * work isn't re-priced) — only future generated orders use the (unchanged) rate.
  *
  * Default is a DRY RUN. Pass { apply: true } to write. Admin-gated. Idempotent —
  * once November is weekly, a re-run reports "already weekly" and changes nothing.
@@ -22,7 +24,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { searchServiceRuleRecords, upsertServiceRuleRecord } from '@/lib/hubspot';
-import { jobsPerYear, perServiceFromMonthly, perServiceFromAnnual, monthlyFromPerService, annualFromPerService } from '@/lib/services/cadenceJobs';
+import { jobsPerYear, monthlyFromPerService, annualFromPerService } from '@/lib/services/cadenceJobs';
 
 const NOV = 10; // month index (Jan = 0)
 const parseArr = (s: any): any[] => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
@@ -76,26 +78,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const newJpy = jobsPerYear(newCads, skip);
       item.oldJobsPerYear = oldJpy; item.newJobsPerYear = newJpy;
 
-      // Preserve the annual total: fill the friendly inputs from the CURRENT
-      // per-service × OLD jobs/year when they aren't set yet.
-      let monthly = numOrNull(p.monthly_cut_cost);
-      let annual = numOrNull(p.common_area_annual_contract);
+      // Keep the per-service cost CONSTANT (vendor_cost / common_area_cost are NOT
+      // rewritten). Re-base the friendly INPUTS on that constant per-service × the
+      // NEW jobs/year — so the monthly cost / annual contract now reflect 48 jobs.
       const vendorCost = numOrNull(p.vendor_cost);
       const commonCost = numOrNull(p.common_area_cost);
       const commonOn = p.include_common_areas === 'true';
-      if (monthly == null && vendorCost != null) monthly = monthlyFromPerService(vendorCost, oldJpy);
-      if (annual == null && commonOn && commonCost != null) annual = annualFromPerService(commonCost, oldJpy);
 
       const write: Record<string, any> = { cadences_json: JSON.stringify(newCads) };
-      if (monthly != null) {
-        write.monthly_cut_cost = monthly;
-        write.vendor_cost = perServiceFromMonthly(monthly, newJpy);
-        item.monthly_cut_cost = monthly; item.vendor_cost_before = vendorCost; item.vendor_cost_after = write.vendor_cost;
+      if (vendorCost != null) {
+        write.monthly_cut_cost = monthlyFromPerService(vendorCost, newJpy);   // per-cut × jobs/yr ÷ 12
+        item.per_cut_constant = vendorCost; item.monthly_cut_cost = write.monthly_cut_cost;
       }
-      if (annual != null && commonOn) {
-        write.common_area_annual_contract = annual;
-        write.common_area_cost = perServiceFromAnnual(annual, newJpy);
-        item.common_area_annual_contract = annual; item.common_area_cost_before = commonCost; item.common_area_cost_after = write.common_area_cost;
+      if (commonOn && commonCost != null) {
+        write.common_area_annual_contract = annualFromPerService(commonCost, newJpy);   // per-service × jobs/yr
+        item.per_service_constant = commonCost; item.common_area_annual_contract = write.common_area_annual_contract;
       }
 
       if (!apply) { item.action = 'WOULD-UPDATE'; updated++; items.push(item); continue; }
