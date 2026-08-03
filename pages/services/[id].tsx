@@ -1525,6 +1525,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   // only BEFORE the vendor submits — once it's submitted/review/completed the due
   // window is settled.
   const canEditDue = isInternal && svc.live && ['estimated', 'pending', 'assigned'].includes(svc.status);
+  // Internal/full-access users (never a vendor — the whole menu is isInternal-gated)
+  // can cancel a still-open service from the settings wheel.
+  const canCancel = isInternal && svc.live && !['completed', 'canceled'].includes(svc.status);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [canceling, setCanceling] = useState(false);
   const [dueOpen, setDueOpen] = useState(false);
   const [newDue, setNewDue] = useState(svc.dueDate || '');
   const [dueReason, setDueReason] = useState('');
@@ -1588,6 +1593,20 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});   // refresh with the new due date
     } catch { setSettingsMsg('Couldn’t reach the server. Try again.'); }
     finally { setSavingDue(false); }
+  };
+  const doCancel = async () => {
+    setCanceling(true); setSettingsMsg('');
+    try {
+      // Reuse the internal-only bulk-cancel (never a vendor) with this one id.
+      const r = await fetch('/api/services/bulk-cancel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [svc.id] }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || (d.failed && !d.canceled)) { setSettingsMsg(d.error || 'Could not cancel this service.'); return; }
+      setCancelOpen(false);
+      router.replace(router.asPath, undefined, { scroll: false }).catch(() => {});   // reflect the canceled status
+    } catch { setSettingsMsg('Couldn’t reach the server. Try again.'); }
+    finally { setCanceling(false); }
   };
 
   // Optimistic pricing: an admin's edit shows the new numbers INSTANTLY, before the
@@ -1711,6 +1730,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   {canReassign && <button type="button" onClick={() => { setSettingsOpen(false); setReassignVendor(svc.vendor || ''); setReassignQuery(''); setSettingsMsg(''); setReassignOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Reassign Vendor</button>}
                   {canEditDue && <button type="button" onClick={() => { setSettingsOpen(false); setNewDue(svc.dueDate || ''); setSettingsMsg(''); setDueOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Change Due Date</button>}
                   <button type="button" onClick={() => { setSettingsOpen(false); setAiResult(null); setAiMsg(''); setAiOpen(true); runAiReview(false); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Re-run AI Review</button>
+                  {canCancel && <button type="button" onClick={() => { setSettingsOpen(false); setSettingsMsg(''); setCancelOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm font-heading font-semibold text-brand hover:bg-brand/5 border-t border-gray-100">Cancel Service</button>}
                 </div></>)}
             </div>
           )}
@@ -2316,6 +2336,24 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
               <button type="button" onClick={() => { setDueOpen(false); setDueReason(''); }} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
               <button type="button" disabled={savingDue || !newDue || newDue === svc.dueDate} onClick={doChangeDue}
                 className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{savingDue ? '…' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Service confirm (internal / full-access only). */}
+      {cancelOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setCancelOpen(false)}>
+          <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="font-heading font-bold text-[15px] text-ink">Cancel this service?</div>
+            <p className="text-[13px] text-gray-500 -mt-1">
+              This marks <b className="text-ink">{svc.address || `SVC #${svc.id}`}</b> as canceled. Any assigned vendor is dropped and it won’t be billed. This can’t be undone from here.
+            </p>
+            {settingsMsg && <div className="text-xs text-red-600">{settingsMsg}</div>}
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={() => setCancelOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Keep</button>
+              <button type="button" disabled={canceling} onClick={doCancel}
+                className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{canceling ? '…' : 'Cancel Service'}</button>
             </div>
           </div>
         </div>
