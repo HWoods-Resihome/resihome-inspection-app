@@ -1091,16 +1091,12 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
               values. Dry run first, then Apply. Idempotent. */}
           <div className="mb-1 flex flex-wrap items-center gap-2 text-[12px] text-gray-500">
             <span className="font-heading font-semibold">Community landscaping costs:</span>
-            <button type="button" disabled={migBusy} onClick={() => void runCostBackfill(false)} className="font-heading font-semibold text-gray-600 hover:text-brand underline disabled:opacity-50">Dry run backfill</button>
-            <span className="text-gray-300">·</span>
-            <button type="button" disabled={migBusy} onClick={() => void runCostBackfill(true)} className="font-heading font-semibold text-brand hover:underline disabled:opacity-50">Apply backfill</button>
+            <button type="button" disabled={migBusy} onClick={() => void runCostBackfill(true)} className="font-heading font-semibold text-brand hover:underline disabled:opacity-50">Backfill from per-service</button>
             {migBusy && <span className="text-gray-400">working…</span>}
           </div>
           <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-gray-500">
             <span className="font-heading font-semibold">Move November to weekly + recompute:</span>
-            <button type="button" disabled={migBusy} onClick={() => void runNovWeekly(false)} className="font-heading font-semibold text-gray-600 hover:text-brand underline disabled:opacity-50">Dry run</button>
-            <span className="text-gray-300">·</span>
-            <button type="button" disabled={migBusy} onClick={() => void runNovWeekly(true)} className="font-heading font-semibold text-brand hover:underline disabled:opacity-50">Apply</button>
+            <button type="button" disabled={migBusy} onClick={() => void runNovWeekly(true)} className="font-heading font-semibold text-brand hover:underline disabled:opacity-50">Run</button>
           </div>
           {migMsg && <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700">{migMsg}</div>}
 
