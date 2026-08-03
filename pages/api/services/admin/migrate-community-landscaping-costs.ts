@@ -62,9 +62,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Verify the writes actually STUCK — upsert silently drops a prop it can't
+    // provision (no schema scope), which would make a "successful" apply change
+    // nothing. Re-read and confirm the inputs are now present.
+    let persisted = 0;
+    if (apply && updated > 0) {
+      const after = await searchServiceRuleRecords().catch(() => null);
+      if (after) {
+        const byId = new Map(after.map((r) => [r.id, r.props]));
+        for (const it of items) {
+          if (it.action !== 'updated') continue;
+          const p = byId.get(it.id) || {};
+          const okMonthly = it.monthly_cut_cost == null || (p.monthly_cut_cost != null && p.monthly_cut_cost !== '');
+          const okAnnual = it.common_area_annual_contract == null || (p.common_area_annual_contract != null && p.common_area_annual_contract !== '');
+          it.persisted = okMonthly && okAnnual;
+          if (it.persisted) persisted++;
+        }
+      }
+    }
+
     return res.status(200).json({
       ok: true, mode: apply ? 'apply' : 'dry-run',
-      communityLandscapingRules: targets.length, updated, skipped, failed, items,
+      communityLandscapingRules: targets.length, updated, skipped, failed, persisted,
+      // When persisted < updated, the new properties couldn't be created in HubSpot
+      // (the app lacks schema scope) — run the Services provisioner (/admin) first.
+      provisionWarning: apply && updated > 0 && persisted < updated
+        ? 'Some values did NOT persist — the monthly_cut_cost / common_area_annual_contract properties are not provisioned. Run the Services schema provisioner, then re-run this backfill.'
+        : undefined,
+      items,
     });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });

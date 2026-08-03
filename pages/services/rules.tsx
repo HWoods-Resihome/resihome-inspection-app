@@ -457,9 +457,15 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      setMigMsg(apply
-        ? `Backfill applied — updated ${d.updated}, skipped ${d.skipped}${d.failed ? `, failed ${d.failed}` : ''} of ${d.communityLandscapingRules} community landscaping rule(s). Reopen a rule to see the values.`
-        : `Dry run — would update ${d.updated}, skip ${d.skipped} of ${d.communityLandscapingRules} community landscaping rule(s). Click Apply to write.`);
+      if (!apply) {
+        setMigMsg(`Dry run — would update ${d.updated}, skip ${d.skipped} of ${d.communityLandscapingRules} community landscaping rule(s). Click Apply to write.`);
+        return;
+      }
+      if (d.provisionWarning) { setMigMsg(d.provisionWarning); return; }
+      // The open page holds the rules from its initial load — reload so the freshly
+      // written monthly / annual inputs actually show on each rule.
+      setMigMsg(`Backfill applied — updated ${d.updated} (persisted ${d.persisted}), skipped ${d.skipped}${d.failed ? `, failed ${d.failed}` : ''}. Reloading…`);
+      if (typeof window !== 'undefined') setTimeout(() => window.location.reload(), 800);
     } catch (e: any) { setMigMsg(`Backfill failed: ${e?.message || e}`); }
     finally { setMigBusy(false); }
   };
