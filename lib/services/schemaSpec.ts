@@ -151,6 +151,14 @@ export const SERVICE_RULE_OBJECT: ObjectSpec = {
     // the master total, prorated across the per-property children on split).
     BOOL('include_common_areas', 'Include Common Areas'),
     NUM('common_area_cost', 'Common Area Cost'),
+    // Friendly cost INPUTS for community landscaping (grass cut). The per-service
+    // fields above (vendor_cost = per-property rate, common_area_cost) stay the
+    // "end result" generation reads; these are what the user actually enters and
+    // the rule divides by the cadence's jobs-per-year to produce them:
+    //   monthly_cut_cost × 12 ÷ jobs/yr → vendor_cost (per-property rate)
+    //   common_area_annual_contract ÷ jobs/yr → common_area_cost (per service)
+    NUM('monthly_cut_cost', 'Monthly Cut Cost (per property)'),
+    NUM('common_area_annual_contract', 'Common Area Annual Contract'),
     // Grass-cut tier payouts (property grass cuts only). Configured in the rule's
     // pricing section; generation stamps them onto each created service.
     NUM('grass_rate_standard', 'Grass Rate — Standard'),

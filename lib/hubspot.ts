@@ -2249,6 +2249,9 @@ const RULE_PROPS = [
   // Community grass-cut common areas + property grass-cut tier payouts. These were
   // written on save but NOT read back here, so they vanished on reload/generate.
   'include_common_areas', 'common_area_cost',
+  // Community-landscaping friendly cost INPUTS (must be read back or the rule
+  // reopens blank and the backfill would look like it never ran).
+  'monthly_cut_cost', 'common_area_annual_contract',
   'grass_rate_standard', 'grass_rate_overgrown', 'grass_rate_heavy',
   // Move-in-clean lease-anchored scheduling.
   'due_anchor', 'days_before_lease_start',

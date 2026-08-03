@@ -8,6 +8,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { descriptionFor, defaultRateFor, mergeWorktypes, type Worktype, type CustomWorktypeDef } from '@/lib/services/worktypes';
 import { DEFAULT_GRASS_TIERS } from '@/lib/services/grassPricing';
+import { jobsPerYear, perServiceFromMonthly, perServiceFromAnnual } from '@/lib/services/cadenceJobs';
 import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
 import { DatePicker } from '@/components/DatePicker';
@@ -130,6 +131,12 @@ interface Rule {
   // Community grass-cut only: optionally include a common-area cut with its own
   // cost, folded into the master total and prorated across the per-property lines.
   includeCommonAreas: boolean; commonAreaCost: string;
+  // Community landscaping (grass cut) FRIENDLY cost inputs. The user enters these;
+  // the rule divides them by the cadence's jobs-per-year to derive the per-service
+  // values above (vendorCost = per-property rate, commonAreaCost). Blank on other
+  // combos. monthlyCutCost = cost to cut ONE property per MONTH; commonAreaAnnualContract
+  // = the common-area service contract per YEAR.
+  monthlyCutCost: string; commonAreaAnnualContract: string;
   // Grass-cut tier payouts (property grass cuts only) — optional; blank/undefined
   // falls back to DEFAULT_GRASS_TIERS at generation.
   grassStandard?: string; grassOvergrown?: string; grassHeavy?: string;
@@ -216,7 +223,7 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'landscaping', subtype: 'cut', petStations: false, scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('landscaping', 'cut'),
+    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', monthlyCutCost: '', commonAreaAnnualContract: '', vendors: [], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [
       { id: 11, unit: 'days', interval: '14', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
@@ -229,7 +236,7 @@ const SEED: Rule[] = [
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('landscaping', 'cut'),
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', monthlyCutCost: '', commonAreaAnnualContract: '', vendors: [], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [{ id: 21, unit: 'days', interval: '7', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', dueAnchor: 'enroll', daysBeforeLeaseStart: '', skipMonths: [],
@@ -243,7 +250,7 @@ const SEED: Rule[] = [
     // Deal Stage carried no generator logic; enroll on Property Status until an
     // event trigger is actually built.)
     id: 3, name: 'ATL Move-In Cleans', active: true, worktype: 'cleaning', subtype: 'move_in_clean', petStations: false, scope: 'property',
-    portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('cleaning', 'move_in_clean'),
+    portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', includeCommonAreas: false, commonAreaCost: '', monthlyCutCost: '', commonAreaAnnualContract: '', vendors: [], description: descriptionFor('cleaning', 'move_in_clean'),
     recurring: false,
     cadences: [],
     initialDueDays: '3', dueAnchor: 'lease_start', daysBeforeLeaseStart: '2', skipMonths: [],
@@ -301,6 +308,8 @@ function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule 
     propsMode: p.props_mode === 'list' ? 'list' : 'all', includedProps: parseArr(p.included_props_json),
     vendorCost: p.vendor_cost != null ? String(p.vendor_cost) : '', markupPct: p.markup_pct != null ? String(p.markup_pct) : '',
     includeCommonAreas: p.include_common_areas === 'true', commonAreaCost: p.common_area_cost != null ? String(p.common_area_cost) : '',
+    monthlyCutCost: p.monthly_cut_cost != null ? String(p.monthly_cut_cost) : '',
+    commonAreaAnnualContract: p.common_area_annual_contract != null ? String(p.common_area_annual_contract) : '',
     grassStandard: p.grass_rate_standard != null ? String(p.grass_rate_standard) : undefined,
     grassOvergrown: p.grass_rate_overgrown != null ? String(p.grass_rate_overgrown) : undefined,
     grassHeavy: p.grass_rate_heavy != null ? String(p.grass_rate_heavy) : undefined,
@@ -350,6 +359,10 @@ function ruleToProps(r: Rule): Record<string, any> {
   // Community grass-cut common areas (persisted always; only used for that combo).
   props.include_common_areas = r.includeCommonAreas ? 'true' : 'false';
   if (r.commonAreaCost !== '') props.common_area_cost = Number(r.commonAreaCost);
+  // Friendly cost INPUTS (community landscaping) — persisted alongside the derived
+  // per-service values above so the rule reopens with what the user entered.
+  if (r.monthlyCutCost !== '') props.monthly_cut_cost = Number(r.monthlyCutCost);
+  if (r.commonAreaAnnualContract !== '') props.common_area_annual_contract = Number(r.commonAreaAnnualContract);
   // Persist grass tiers only for property grass cuts (and only when set).
   if (r.scope === 'property' && r.worktype === 'landscaping' && r.subtype === 'cut') {
     if (r.grassStandard != null && r.grassStandard !== '') props.grass_rate_standard = Number(r.grassStandard);
@@ -432,6 +445,24 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   const [masterCoverage, setMasterCoverage] = useState<number | null>(null); // community grass-cut: properties the master covers
   const [coveredLive, setCoveredLive] = useState<number | null>(null);   // accurate applicable-property count (live query)
   const [wcReload, setWcReload] = useState(0);
+  // One-time backfill: derive the friendly cost inputs (monthly cut / annual
+  // contract) for existing community landscaping rules from their per-service values.
+  const [migBusy, setMigBusy] = useState(false);
+  const [migMsg, setMigMsg] = useState<string>('');
+  const runCostBackfill = async (apply: boolean) => {
+    setMigBusy(true); setMigMsg('');
+    try {
+      const r = await fetch('/api/services/admin/migrate-community-landscaping-costs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apply }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setMigMsg(apply
+        ? `Backfill applied — updated ${d.updated}, skipped ${d.skipped}${d.failed ? `, failed ${d.failed}` : ''} of ${d.communityLandscapingRules} community landscaping rule(s). Reopen a rule to see the values.`
+        : `Dry run — would update ${d.updated}, skip ${d.skipped} of ${d.communityLandscapingRules} community landscaping rule(s). Click Apply to write.`);
+    } catch (e: any) { setMigMsg(`Backfill failed: ${e?.message || e}`); }
+    finally { setMigBusy(false); }
+  };
   const [openId, setOpenId] = useState<number | null>(null);   // null = list view; else editing that rule
   const [propsOpen, setPropsOpen] = useState(false);
   const [propSearch, setPropSearch] = useState('');
@@ -662,7 +693,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, includeCommonAreas: false, commonAreaCost: '', vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', dueAnchor: 'enroll', daysBeforeLeaseStart: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', startDelayDays: '', stopEnabled: false, stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, includeCommonAreas: false, commonAreaCost: '', monthlyCutCost: '', commonAreaAnnualContract: '', vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', dueAnchor: 'enroll', daysBeforeLeaseStart: '', skipMonths: [], enrollVals: [], enrollCriteria: [], enrollCombinator: 'and', startDate: '', startDelayDays: '', stopEnabled: false, stopCriteria: [{ field: 'Property Status', op: 'is', vals: [] }], stopCombinator: 'and' }]);
     openRule(id);
   };
   const duplicateRule = async () => {
@@ -768,6 +799,29 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rule?.id, rule?.worktype, rule?.subtype, rule?.scope]);
+
+  // Community landscaping (grass cut): the per-property rate + common area are
+  // priced from friendly inputs (monthly cost / annual contract) divided by the
+  // cadence's jobs-per-year. jpy re-derives whenever the cadence/skip months change.
+  const isCommunityLandscapingCut = !!rule && rule.scope === 'community' && rule.worktype === 'landscaping' && rule.subtype === 'cut';
+  const jpy = useMemo(() => (rule ? jobsPerYear(rule.cadences, rule.skipMonths) : 0), [rule?.cadences, rule?.skipMonths]);
+  // Keep the stored per-service values (vendorCost / commonAreaCost — what generation
+  // reads) in lock-step with the friendly inputs. Guarded so it only writes on a real
+  // change (no render loop).
+  useEffect(() => {
+    if (!rule || !isCommunityLandscapingCut) return;
+    const next: Partial<Rule> = {};
+    if (rule.monthlyCutCost !== '') {
+      const v = perServiceFromMonthly(Number(rule.monthlyCutCost), jpy).toFixed(2);
+      if (v !== rule.vendorCost) next.vendorCost = v;
+    }
+    if (rule.commonAreaAnnualContract !== '') {
+      const v = perServiceFromAnnual(Number(rule.commonAreaAnnualContract), jpy).toFixed(2);
+      if (v !== rule.commonAreaCost) next.commonAreaCost = v;
+    }
+    if (Object.keys(next).length) patch(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCommunityLandscapingCut, jpy, rule?.monthlyCutCost, rule?.commonAreaAnnualContract]);
 
   const clientCost = rule ? (parseFloat(rule.vendorCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100)) : 0;
   const commonAreaClient = rule ? (parseFloat(rule.commonAreaCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100)) : 0;
@@ -1005,6 +1059,18 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
 
           <button onClick={addRule} className="w-full mb-3 text-brand bg-brand/5 border border-dashed border-brand/40 rounded-xl py-2.5 text-[13px] font-heading font-bold">+ New Rule</button>
 
+          {/* One-time: back-fill the friendly cost inputs (monthly cut / annual
+              contract) on existing community landscaping rules from their per-service
+              values. Dry run first, then Apply. Idempotent. */}
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-gray-500">
+            <span className="font-heading font-semibold">Community landscaping costs:</span>
+            <button type="button" disabled={migBusy} onClick={() => void runCostBackfill(false)} className="font-heading font-semibold text-gray-600 hover:text-brand underline disabled:opacity-50">Dry run backfill</button>
+            <span className="text-gray-300">·</span>
+            <button type="button" disabled={migBusy} onClick={() => void runCostBackfill(true)} className="font-heading font-semibold text-brand hover:underline disabled:opacity-50">Apply backfill</button>
+            {migBusy && <span className="text-gray-400">working…</span>}
+          </div>
+          {migMsg && <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700">{migMsg}</div>}
+
           <div className="space-y-2">
             {visibleRules.map((r) => (
               <div key={r.id} role="button" tabIndex={0} onClick={() => openRule(r.id)} onKeyDown={(e) => { if (e.key === 'Enter') openRule(r.id); }}
@@ -1212,6 +1278,23 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                   </div>
                   <p className="text-[11px] text-gray-400 mt-1.5">Vendor payout is set by the grass height at completion; the markup applies to each tier.</p>
                 </>
+              ) : isCommunityLandscapingCut ? (
+                <>
+                  {/* Community grass cut: crews are paid per PROPERTY per MONTH. Enter
+                      the monthly cost; the per-cut rate each order bills = monthly × 12
+                      ÷ the cadence's cuts-per-year. */}
+                  <div className="flex flex-nowrap items-end gap-3 sm:justify-start overflow-x-auto">
+                    <PriceField label="Cost / property / month" adorn="$" minDecimals={2} colClass="shrink-0 w-28" value={rule.monthlyCutCost} onChange={(v) => patch({ monthlyCutCost: v })} />
+                    <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
+                    <PriceField label="Per cut (auto)" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={(Number(rule.vendorCost) || 0).toFixed(2)} />
+                    <PriceField label="Client / cut" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1.5">
+                    {jpy > 0
+                      ? <>{jpy} cuts/yr from the cadence · per-property rate = monthly × 12 ÷ {jpy}. That rate is what each generated order bills per home.</>
+                      : <>Add a cadence to compute the cuts-per-year (the per-cut rate divides by it).</>}
+                  </p>
+                </>
               ) : (
                 <div className="flex flex-nowrap items-end justify-center gap-4 sm:justify-start">
                   <PriceField label="Vendor Cost" adorn="$" minDecimals={2} colClass="shrink-0 w-24" value={rule.vendorCost} onChange={(v) => patch({ vendorCost: v })} />
@@ -1230,12 +1313,20 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                   </div>
                   {rule.includeCommonAreas && (
                     <>
-                      <div className="flex flex-nowrap items-end justify-center gap-4 sm:justify-start mt-2">
-                        <PriceField label="Common Area" adorn="$" minDecimals={2} colClass="shrink-0 w-24" value={rule.commonAreaCost} onChange={(v) => patch({ commonAreaCost: v })} />
+                      {/* Common areas are a per-YEAR service contract. Enter the annual
+                          total; the per-service cost each order bills = annual ÷ the
+                          cadence's services-per-year. */}
+                      <div className="flex flex-nowrap items-end gap-3 sm:justify-start overflow-x-auto mt-2">
+                        <PriceField label="Annual contract ($/yr)" adorn="$" minDecimals={2} colClass="shrink-0 w-32" value={rule.commonAreaAnnualContract} onChange={(v) => patch({ commonAreaAnnualContract: v })} />
                         <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
-                        <PriceField label="Common Area Client" adorn="$" highlight readOnly colClass="shrink-0 w-28" value={commonAreaClient.toFixed(2)} />
+                        <PriceField label="Per service (auto)" adorn="$" highlight readOnly colClass="shrink-0 w-28" value={(Number(rule.commonAreaCost) || 0).toFixed(2)} />
+                        <PriceField label="Client / service" adorn="$" highlight readOnly colClass="shrink-0 w-28" value={commonAreaClient.toFixed(2)} />
                       </div>
-                      <p className="text-[11px] text-gray-400 mt-1.5">Added to the master total and prorated evenly across every home in the split.</p>
+                      <p className="text-[11px] text-gray-400 mt-1.5">
+                        {jpy > 0
+                          ? <>{jpy} services/yr · per-service = annual ÷ {jpy}. Added to the master total and prorated evenly across every home in the split.</>
+                          : <>Add a cadence to compute the services-per-year (the per-service cost divides by it).</>}
+                      </p>
                     </>
                   )}
                 </div>
