@@ -24,6 +24,7 @@ import { MultiFilter } from '@/components/MultiFilter';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { useAppDialog } from '@/components/AppDialog';
 import { parseRegions, joinRegions } from '@/lib/vendorRegions';
+import { SaveIndicator } from '@/components/inspection/SaveIndicator';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
@@ -235,18 +236,37 @@ export default function VendorManagement() {
 
   const activeFilterCount = regionFilter.length + recurringFilter.length + statusFilter.length;
 
+  // ── Per-vendor save status (auto-save assurance) ──
+  // Every field save funnels through patchVendor, so tracking it there gives the
+  // card a live "Saving… → ✓ Saved" chip. The "saved" chip auto-clears after a beat.
+  const [saveStatus, setSaveStatus] = useState<Record<string, 'saving' | 'saved' | 'error'>>({});
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const markSaving = (id: string) => { if (saveTimers.current[id]) clearTimeout(saveTimers.current[id]); setSaveStatus((s) => ({ ...s, [id]: 'saving' })); };
+  const markSaved = (id: string) => {
+    setSaveStatus((s) => ({ ...s, [id]: 'saved' }));
+    saveTimers.current[id] = setTimeout(() => setSaveStatus((s) => { const n = { ...s }; delete n[id]; return n; }), 2500);
+  };
+  const markSaveError = (id: string) => {
+    if (saveTimers.current[id]) clearTimeout(saveTimers.current[id]);
+    setSaveStatus((s) => ({ ...s, [id]: 'error' }));
+    saveTimers.current[id] = setTimeout(() => setSaveStatus((s) => { const n = { ...s }; delete n[id]; return n; }), 4000);
+  };
+
   // ── Mutations (optimistic + PATCH; reload only on failure) ──
   // Returns the response body on success (truthy — existing boolean callers keep
   // working) so save-verification data like `applied` reaches the caller.
   async function patchVendor(id: string, patch: Record<string, unknown>): Promise<Record<string, any> | false> {
+    markSaving(id);
     try {
       const r = await fetch(`/api/admin/vendors/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      markSaved(id);
       return d || {};
     } catch (e: any) {
+      markSaveError(id);
       void dialog.alert(`Update failed: ${e?.message || e}`);
       await load(true);
       return false;
@@ -502,6 +522,15 @@ export default function VendorManagement() {
                 </button>
               </div>
             )}
+
+            {/* Auto-save assurance — idle sets the expectation, then live
+                "Saving… → ✓ Saved" as any field on this card is edited. */}
+            <div className="flex items-center justify-end min-h-[16px]">
+              {saveStatus[v.id] === 'saving' ? <SaveIndicator phase="saving" />
+                : saveStatus[v.id] === 'error' ? <SaveIndicator phase="error" />
+                : saveStatus[v.id] === 'saved' ? <SaveIndicator phase="saved" />
+                : <span className="text-[11px] font-heading text-gray-400">Changes save automatically</span>}
+            </div>
 
             {/* Vendor Code (billing Company Code) — displayed + editable, below the
                 name/email line. Saves on blur/Enter; billing re-reads it live. */}
