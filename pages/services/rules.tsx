@@ -1318,7 +1318,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                   <div className="grid grid-cols-3 gap-2.5 items-end">
                     <PriceField label="Cost / property / month" adorn="$" minDecimals={2} colClass="w-full min-w-0" value={rule.monthlyCutCost} onChange={(v) => patch({ monthlyCutCost: v })} />
                     <PriceField label="Cadence (cuts/yr)" adorn="" muted readOnly minDecimals={0} colClass="w-full min-w-0" value={String(jpy)} />
-                    <PriceField label={<>Vendor ·<br />per cut</>} adorn="$" muted readOnly colClass="w-full min-w-0" value={(Number(rule.vendorCost) || 0).toFixed(2)} />
+                    <PriceField label={<>Vendor · <br className="sm:hidden" />per cut</>} adorn="$" muted readOnly colClass="w-full min-w-0" value={(Number(rule.vendorCost) || 0).toFixed(2)} />
                   </div>
                   {/* Second row centered (markup + client), matching the top columns. */}
                   <div className="flex justify-center gap-2.5 items-end mt-2.5">
@@ -1355,7 +1355,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                       <div className="grid grid-cols-3 gap-2.5 items-end mt-2">
                         <PriceField label="Annual contract ($/yr)" adorn="$" minDecimals={2} colClass="w-full min-w-0" value={rule.commonAreaAnnualContract} onChange={(v) => patch({ commonAreaAnnualContract: v })} />
                         <PriceField label="Cadence (services/yr)" adorn="" muted readOnly minDecimals={0} colClass="w-full min-w-0" value={String(jpy)} />
-                        <PriceField label={<>Vendor ·<br />per service</>} adorn="$" muted readOnly colClass="w-full min-w-0" value={(Number(rule.commonAreaCost) || 0).toFixed(2)} />
+                        <PriceField label={<>Vendor · <br className="sm:hidden" />per service</>} adorn="$" muted readOnly colClass="w-full min-w-0" value={(Number(rule.commonAreaCost) || 0).toFixed(2)} />
                       </div>
                       {/* Second row centered (markup + client). */}
                       <div className="flex justify-center gap-2.5 items-end mt-2.5">
