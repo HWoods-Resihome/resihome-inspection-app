@@ -47,6 +47,10 @@ export interface BillingFilters {
  *  the "inspector" column differs per dataset, handled in the column defs). */
 export interface BillingRow {
   externalId: string;
+  /** The HubSpot RECORD id — used to deep-link the ID column straight to the
+   *  inspection / service record (in the table, the xlsx export, and the emailed
+   *  report). Distinct from externalId (a human-readable code). */
+  recordId: string;
   entityId: string;
   fullAddress: string;
   propertyStatus: string;   // services: property status snapshotted at completion; '' for inspections
@@ -160,6 +164,7 @@ export async function fetchInspectionBillingRows(filters: BillingFilters = {}, p
     if (!inRange(completedDate, filters.from, filters.to)) continue;
     rows.push({
       externalId: r.inspectionIdExternal || r.recordId,
+      recordId: r.recordId || '',
       entityId: prop?.entityId || '',
       fullAddress: r.propertyAddress || prop?.address || '',
       propertyStatus: '',   // services-only column
@@ -220,6 +225,7 @@ export async function fetchServiceBillingRows(filters: BillingFilters = {}): Pro
     if (!inRange(completedDate, filters.from, filters.to)) continue;
     rows.push({
       externalId: serviceExternalId(id, completedDate),
+      recordId: String(id || ''),
       entityId: idValue,
       fullAddress: [String(p.address_snapshot || p.community_name || '').trim(), String(p.locality_snapshot || '').trim()].filter(Boolean).join(', '),
       // Property status snapshotted when the vendor submitted the completed work
@@ -281,4 +287,13 @@ export async function billingFacetsFast(object: 'inspections' | 'services'): Pro
 }
 export function billingColumns(object: 'inspections' | 'services'): readonly string[] {
   return object === 'services' ? SERVICE_COLUMNS : INSPECTION_COLUMNS;
+}
+
+/** App path to a billing row's record — inspection page vs service page. Empty
+ *  when the record id is missing. Prefix with an origin for an absolute link
+ *  (xlsx / email); use as-is for an in-app relative link. */
+export function billingRowPath(object: 'inspections' | 'services', recordId: string): string {
+  const id = String(recordId || '').trim();
+  if (!id) return '';
+  return object === 'services' ? `/services/${encodeURIComponent(id)}` : `/inspection/${encodeURIComponent(id)}`;
 }

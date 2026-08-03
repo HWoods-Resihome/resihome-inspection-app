@@ -14,8 +14,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { canViewInsights } from '@/lib/insightsAccess';
-import { fetchBillingRows, billingColumns, billingFacetsFast, rowToCells, type BillingFilters, type BillingRow } from '@/lib/insightsBilling';
+import { fetchBillingRows, billingColumns, billingFacetsFast, rowToCells, billingRowPath, type BillingFilters, type BillingRow } from '@/lib/insightsBilling';
 import { buildBillingXlsx, billingFilename } from '@/lib/insightsBillingXlsx';
+import { appBaseUrl } from '@/lib/notifications/send';
 import { readBillingSnapshot, filterBillingRows, type BillingFacets } from '@/lib/insightsBillingSnapshot';
 import { fetchPropertyCoverage, fetchRegionEnumOptions, fetchPortfolioEnumOptions } from '@/lib/hubspot';
 
@@ -85,7 +86,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Export the same filtered set — from the snapshot when present, else live.
       const snap = await readBillingSnapshot().catch(() => null);
       const rows = snap ? filterBillingRows(snap[object], filters).sort(byDateThenAddr) : await fetchBillingRows(object, filters);
-      const buf = await buildBillingXlsx(object, rows);
+      // Deep-link the ID column to each record inside the exported file too.
+      const buf = await buildBillingXlsx(object, rows, { baseUrl: appBaseUrl(req) });
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="${billingFilename(object)}"`);
       return res.status(200).send(buf);
@@ -94,7 +96,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Send pre-formatted CELL ARRAYS (M-D-YY dates, services Due Date, community
     // master_id / property entity_id) so the on-screen table matches the xlsx
     // exactly — both go through rowToCells.
-    return res.status(200).json({ object, columns: billingColumns(object), rows: rows.map((r) => rowToCells(r, object)), facets, total: rows.length, asOf });
+    // rowLinks[i] = in-app path to row i's record (for hyperlinking the ID column
+    // in the on-page table). Empty string when the record id is unknown (e.g. an
+    // older snapshot built before recordId was captured — reself-heals next rebuild).
+    return res.status(200).json({
+      object, columns: billingColumns(object),
+      rows: rows.map((r) => rowToCells(r, object)),
+      rowLinks: rows.map((r) => billingRowPath(object, r.recordId)),
+      facets, total: rows.length, asOf,
+    });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
   }

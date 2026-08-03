@@ -238,7 +238,8 @@ function titleCase(s: string): string {
 export async function sendScheduleNow(s: ReportSchedule, req?: { headers: Record<string, any> } | null, now: Date = new Date()): Promise<{ sent: boolean; rows: number; error?: string }> {
   const { from, to } = resolveRange(s.range, now, s.includeToday !== false);
   const rows = await fetchBillingRows(s.object, { regions: s.regions, portfolios: s.portfolios, inspectors: s.inspectors, types: s.types, from, to });
-  const buf = await buildBillingXlsx(s.object, rows);
+  // baseUrl → the ID column deep-links to each record, IN the emailed attachment too.
+  const buf = await buildBillingXlsx(s.object, rows, { baseUrl: appBaseUrl(req) });
   const [to0, ...alsoTo] = s.recipients;
   const objLabel = s.object === 'services' ? 'Services' : 'Inspections';
   // MM-DD-YY -> MM-DD-YY (or "All Time"), used identically in title + body.

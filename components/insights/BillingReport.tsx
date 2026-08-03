@@ -87,6 +87,8 @@ export function BillingReport({ object }: { object: Obj }) {
   const typeLabel = object === 'services' ? 'Service Type' : 'Inspection Type';
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
+  // rowLinks[i] = in-app path to row i's record (deep-links the ID column).
+  const [rowLinks, setRowLinks] = useState<string[]>([]);
   const [facets, setFacets] = useState<Facets>({ regions: [], portfolios: [], people: [], types: [] });
   const [asOf, setAsOf] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -134,6 +136,7 @@ export function BillingReport({ object }: { object: Obj }) {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setColumns(d.columns || []); setRows(d.rows?.length ? d.rows.map((row: any) => Array.isArray(row) ? row : rowFromObj(row)) : cellsFrom(d.rows));
+      setRowLinks(Array.isArray(d.rowLinks) ? d.rowLinks : []);
       if (d.facets) setFacets(d.facets);
       setAsOf(d.asOf || null);
     } catch (e: any) { setError(String(e?.message || e)); }
@@ -217,7 +220,14 @@ export function BillingReport({ object }: { object: Obj }) {
           <tbody>
             {rows.map((row, i) => (
               <tr key={i} className="hover:bg-white/5">
-                {row.map((cell, j) => <td key={j} className={`px-3 py-1.5 border-b border-white/5 text-[#e4e4e7] ${amountCols.has(j) ? 'tabular-nums text-right' : ''}`}>{amountCols.has(j) ? money(cell) : String(cell ?? '')}</td>)}
+                {row.map((cell, j) => (
+                  <td key={j} className={`px-3 py-1.5 border-b border-white/5 text-[#e4e4e7] ${amountCols.has(j) ? 'tabular-nums text-right' : ''}`}>
+                    {/* First column = the inspection / service ID → deep-link to the record. */}
+                    {j === 0 && rowLinks[i]
+                      ? <a href={rowLinks[i]} target="_blank" rel="noopener noreferrer" className="text-[#73E3DF] hover:underline font-heading font-semibold">{String(cell ?? '')}</a>
+                      : amountCols.has(j) ? money(cell) : String(cell ?? '')}
+                  </td>
+                ))}
               </tr>
             ))}
             {!loading && rows.length === 0 && <tr><td colSpan={columns.length || 1} className="px-3 py-8 text-center text-[#71717a]">No rows for these filters.</td></tr>}

@@ -4,9 +4,22 @@
  * the file as a Buffer for download or email attachment.
  */
 import ExcelJS from 'exceljs';
-import { rowToCells, billingColumns, type BillingRow } from '@/lib/insightsBilling';
+import { rowToCells, billingColumns, billingRowPath, type BillingRow } from '@/lib/insightsBilling';
 
-export async function buildBillingXlsx(object: 'inspections' | 'services', rows: BillingRow[], sheetName = 'Billing'): Promise<Buffer> {
+/**
+ * Build the billing .xlsx. When `baseUrl` is given, the first column (the
+ * inspection / service ID) becomes a clickable hyperlink to that record — so the
+ * deep-link survives into the downloaded file AND the scheduled email attachment.
+ * (An in-app relative link is useless in a downloaded file, so the ID link is
+ * ONLY added when an absolute base URL is supplied.)
+ */
+export async function buildBillingXlsx(
+  object: 'inspections' | 'services',
+  rows: BillingRow[],
+  opts: { sheetName?: string; baseUrl?: string } = {},
+): Promise<Buffer> {
+  const { sheetName = 'Billing', baseUrl = '' } = opts;
+  const base = String(baseUrl || '').replace(/\/+$/, '');
   const headers = billingColumns(object) as readonly string[];
   const wb = new ExcelJS.Workbook();
   wb.created = new Date();
@@ -14,7 +27,16 @@ export async function buildBillingXlsx(object: 'inspections' | 'services', rows:
   sheet.addRow(headers as string[]);
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
-  for (const r of rows) sheet.addRow(rowToCells(r, object));
+  for (const r of rows) {
+    const row = sheet.addRow(rowToCells(r, object));
+    // Deep-link the ID cell (column 1) to the record when we have an absolute base.
+    const path = base ? billingRowPath(object, r.recordId) : '';
+    if (path) {
+      const c = row.getCell(1);
+      c.value = { text: String(r.externalId || ''), hyperlink: `${base}${path}` };
+      c.font = { color: { argb: 'FF0563C1' }, underline: true };
+    }
+  }
   // Money format on the "… Amount" columns (1-indexed), wherever they sit.
   headers.forEach((h, i) => { if (/amount/i.test(String(h))) sheet.getColumn(i + 1).numFmt = '"$"#,##0.00'; });
   // Reasonable widths from header + sampled cell lengths.
