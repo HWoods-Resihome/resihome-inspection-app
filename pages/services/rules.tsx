@@ -469,6 +469,27 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
     } catch (e: any) { setMigMsg(`Backfill failed: ${e?.message || e}`); }
     finally { setMigBusy(false); }
   };
+  // One-click: move November onto the 7-day (weekly) cadence for every community
+  // landscaping grass-cut rule and recompute the per-service costs from the new
+  // jobs-per-year. Self-contained (fills the monthly/annual inputs if missing).
+  const runNovWeekly = async (apply: boolean) => {
+    setMigBusy(true); setMigMsg('');
+    try {
+      const r = await fetch('/api/services/admin/migrate-community-nov-weekly', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apply }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      if (!apply) {
+        setMigMsg(`Dry run — would move November to weekly on ${d.updated} rule(s), skip ${d.skipped} (already weekly / no 7-day cadence) of ${d.communityLandscapingRules}. Click Apply.`);
+        return;
+      }
+      if (d.provisionWarning) { setMigMsg(d.provisionWarning); return; }
+      setMigMsg(`November → weekly applied — updated ${d.updated} (persisted ${d.persisted}), skipped ${d.skipped}${d.failed ? `, failed ${d.failed}` : ''}. Reloading…`);
+      if (typeof window !== 'undefined') setTimeout(() => window.location.reload(), 800);
+    } catch (e: any) { setMigMsg(`November → weekly failed: ${e?.message || e}`); }
+    finally { setMigBusy(false); }
+  };
   const [openId, setOpenId] = useState<number | null>(null);   // null = list view; else editing that rule
   const [propsOpen, setPropsOpen] = useState(false);
   const [propSearch, setPropSearch] = useState('');
@@ -1068,12 +1089,18 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
           {/* One-time: back-fill the friendly cost inputs (monthly cut / annual
               contract) on existing community landscaping rules from their per-service
               values. Dry run first, then Apply. Idempotent. */}
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-gray-500">
+          <div className="mb-1 flex flex-wrap items-center gap-2 text-[12px] text-gray-500">
             <span className="font-heading font-semibold">Community landscaping costs:</span>
             <button type="button" disabled={migBusy} onClick={() => void runCostBackfill(false)} className="font-heading font-semibold text-gray-600 hover:text-brand underline disabled:opacity-50">Dry run backfill</button>
             <span className="text-gray-300">·</span>
             <button type="button" disabled={migBusy} onClick={() => void runCostBackfill(true)} className="font-heading font-semibold text-brand hover:underline disabled:opacity-50">Apply backfill</button>
             {migBusy && <span className="text-gray-400">working…</span>}
+          </div>
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-gray-500">
+            <span className="font-heading font-semibold">Move November to weekly + recompute:</span>
+            <button type="button" disabled={migBusy} onClick={() => void runNovWeekly(false)} className="font-heading font-semibold text-gray-600 hover:text-brand underline disabled:opacity-50">Dry run</button>
+            <span className="text-gray-300">·</span>
+            <button type="button" disabled={migBusy} onClick={() => void runNovWeekly(true)} className="font-heading font-semibold text-brand hover:underline disabled:opacity-50">Apply</button>
           </div>
           {migMsg && <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700">{migMsg}</div>}
 
