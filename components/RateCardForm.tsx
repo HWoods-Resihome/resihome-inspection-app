@@ -4786,7 +4786,11 @@ export function RateCardForm(props: RateCardFormProps) {
                 : aiApplying ? 'Applying AI review…'
                 : pendingSync > 0 ? 'Waiting for offline changes to finish syncing.'
                 : (pendingPhotos > 0 && !photosStuck) ? 'Waiting for photos to finish uploading.'
-                : (pendingPhotos > 0 && photosStuck) ? 'A photo keeps failing to upload — you can submit without it.'
+                // NOTE: a STUCK photo does NOT disable submit (see submitDisabled —
+                // it's `!photosStuck`), so it must never appear as a blocked reason.
+                // Showing "you can submit without it" while the button is actually
+                // blocked by another gate (Final Checklist / AI review) stranded the
+                // inspector. Fall through to the REAL blocker below.
                 : (fcEditable && fcGap) ? `Finish the Final Checklist — ${fcGap}`
                 : (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !reviewValid) ? 'Run the AI Review before submitting.'
                 : undefined
