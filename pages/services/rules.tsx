@@ -1289,11 +1289,14 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                   {/* Community grass cut: crews are paid per PROPERTY per MONTH. Enter
                       the monthly cost; the per-cut rate each order bills = monthly × 12
                       ÷ the cadence's cuts-per-year. */}
-                  <div className="flex flex-nowrap items-end gap-3 sm:justify-start overflow-x-auto">
-                    <PriceField label="Cost / property / month" adorn="$" minDecimals={2} colClass="shrink-0 w-28" value={rule.monthlyCutCost} onChange={(v) => patch({ monthlyCutCost: v })} />
-                    <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
-                    <PriceField label="Per cut (auto)" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={(Number(rule.vendorCost) || 0).toFixed(2)} />
-                    <PriceField label="Client / cut" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
+                  {/* 2×2 grid (no horizontal scroll on mobile): left column =
+                      monthly input then markup; right column = vendor per-cut then
+                      client per-cut. */}
+                  <div className="grid grid-cols-2 gap-3 items-end">
+                    <PriceField label="Cost / property / month" adorn="$" minDecimals={2} colClass="w-full min-w-0" value={rule.monthlyCutCost} onChange={(v) => patch({ monthlyCutCost: v })} />
+                    <PriceField label="Vendor · per cut (auto)" adorn="$" highlight readOnly colClass="w-full min-w-0" value={(Number(rule.vendorCost) || 0).toFixed(2)} />
+                    <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="w-full min-w-0" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
+                    <PriceField label="Client / cut (auto)" adorn="$" highlight readOnly colClass="w-full min-w-0" value={clientCost.toFixed(2)} />
                   </div>
                   <p className="text-[11px] text-gray-400 mt-1.5">
                     {jpy > 0
@@ -1322,11 +1325,13 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                       {/* Common areas are a per-YEAR service contract. Enter the annual
                           total; the per-service cost each order bills = annual ÷ the
                           cadence's services-per-year. */}
-                      <div className="flex flex-nowrap items-end gap-3 sm:justify-start overflow-x-auto mt-2">
-                        <PriceField label="Annual contract ($/yr)" adorn="$" minDecimals={2} colClass="shrink-0 w-32" value={rule.commonAreaAnnualContract} onChange={(v) => patch({ commonAreaAnnualContract: v })} />
-                        <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
-                        <PriceField label="Per service (auto)" adorn="$" highlight readOnly colClass="shrink-0 w-28" value={(Number(rule.commonAreaCost) || 0).toFixed(2)} />
-                        <PriceField label="Client / service" adorn="$" highlight readOnly colClass="shrink-0 w-28" value={commonAreaClient.toFixed(2)} />
+                      {/* 2×2 grid: left = annual contract input then markup; right =
+                          vendor per-service then client per-service. */}
+                      <div className="grid grid-cols-2 gap-3 items-end mt-2">
+                        <PriceField label="Annual contract ($/yr)" adorn="$" minDecimals={2} colClass="w-full min-w-0" value={rule.commonAreaAnnualContract} onChange={(v) => patch({ commonAreaAnnualContract: v })} />
+                        <PriceField label="Vendor · per service (auto)" adorn="$" highlight readOnly colClass="w-full min-w-0" value={(Number(rule.commonAreaCost) || 0).toFixed(2)} />
+                        <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="w-full min-w-0" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
+                        <PriceField label="Client / service (auto)" adorn="$" highlight readOnly colClass="w-full min-w-0" value={commonAreaClient.toFixed(2)} />
                       </div>
                       <p className="text-[11px] text-gray-400 mt-1.5">
                         {jpy > 0
