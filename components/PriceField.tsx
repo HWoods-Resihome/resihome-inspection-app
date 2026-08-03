@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { sanitizeNum, withCommas } from '@/lib/services/pricing';
 
 /**
@@ -14,7 +14,7 @@ import { sanitizeNum, withCommas } from '@/lib/services/pricing';
 export function PriceField({
   label, value, onChange, adorn, side = 'left', highlight, muted, readOnly, minDecimals, colClass = 'flex-1 min-w-0',
 }: {
-  label: string;
+  label: ReactNode;
   value: string;
   onChange?: (v: string) => void;
   adorn: string;                 // '$' or '%'
