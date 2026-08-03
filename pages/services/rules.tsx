@@ -988,7 +988,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   const pickerCls = (active: boolean) =>
     `w-full truncate text-[11px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-md bg-white flex items-center justify-between ${active ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`;
   // Section header: click to expand/collapse, with a rotating chevron.
-  const SecHead = ({ n, title }: { n: 1 | 2 | 3; title: string }) => (
+  const SecHead = ({ n, title }: { n: 1 | 2 | 3; title: React.ReactNode }) => (
     <button type="button" onClick={() => toggleSec(n)} aria-expanded={openSec[n]} className="w-full flex items-center justify-between gap-2 text-left">
       <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">{n}.</span> {title}</h3>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-gray-400 transition-transform ${openSec[n] ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
@@ -1312,18 +1312,20 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                   {/* Community grass cut: crews are paid per PROPERTY per MONTH. Enter
                       the monthly cost; the per-cut rate each order bills = monthly × 12
                       ÷ the cadence's cuts-per-year. */}
-                  {/* 2×2 grid (no horizontal scroll on mobile): left column =
-                      monthly input then markup; right column = vendor per-cut then
-                      client per-cut. */}
-                  <div className="grid grid-cols-2 gap-3 items-end">
+                  {/* 3 columns: top row = monthly input · cadence (cuts/yr) · vendor
+                      per-cut; bottom row = markup · (spacer) · client. Non-editable
+                      (derived) fields are greyed. */}
+                  <div className="grid grid-cols-3 gap-2.5 items-end">
                     <PriceField label="Cost / property / month" adorn="$" minDecimals={2} colClass="w-full min-w-0" value={rule.monthlyCutCost} onChange={(v) => patch({ monthlyCutCost: v })} />
-                    <PriceField label="Vendor · per cut (auto)" adorn="$" highlight readOnly colClass="w-full min-w-0" value={(Number(rule.vendorCost) || 0).toFixed(2)} />
+                    <PriceField label="Cadence (cuts/yr)" adorn="" muted readOnly minDecimals={0} colClass="w-full min-w-0" value={String(jpy)} />
+                    <PriceField label="Vendor · per cut" adorn="$" muted readOnly colClass="w-full min-w-0" value={(Number(rule.vendorCost) || 0).toFixed(2)} />
                     <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="w-full min-w-0" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
-                    <PriceField label="Client / cut (auto)" adorn="$" highlight readOnly colClass="w-full min-w-0" value={clientCost.toFixed(2)} />
+                    <div aria-hidden />
+                    <PriceField label="Client / cut" adorn="$" muted readOnly colClass="w-full min-w-0" value={clientCost.toFixed(2)} />
                   </div>
                   <p className="text-[11px] text-gray-400 mt-1.5">
                     {jpy > 0
-                      ? <>{jpy} cuts/yr from the cadence · per-property rate = monthly × 12 ÷ {jpy}. That rate is what each generated order bills per home.</>
+                      ? <>Per-property rate = monthly × 12 ÷ {jpy} cuts/yr — what each generated order bills per home.</>
                       : <>Add a cadence to compute the cuts-per-year (the per-cut rate divides by it).</>}
                   </p>
                 </>
@@ -1348,17 +1350,19 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                       {/* Common areas are a per-YEAR service contract. Enter the annual
                           total; the per-service cost each order bills = annual ÷ the
                           cadence's services-per-year. */}
-                      {/* 2×2 grid: left = annual contract input then markup; right =
-                          vendor per-service then client per-service. */}
-                      <div className="grid grid-cols-2 gap-3 items-end mt-2">
+                      {/* 3 columns: top row = annual contract · cadence (services/yr) ·
+                          vendor per-service; bottom row = markup · (spacer) · client. */}
+                      <div className="grid grid-cols-3 gap-2.5 items-end mt-2">
                         <PriceField label="Annual contract ($/yr)" adorn="$" minDecimals={2} colClass="w-full min-w-0" value={rule.commonAreaAnnualContract} onChange={(v) => patch({ commonAreaAnnualContract: v })} />
-                        <PriceField label="Vendor · per service (auto)" adorn="$" highlight readOnly colClass="w-full min-w-0" value={(Number(rule.commonAreaCost) || 0).toFixed(2)} />
+                        <PriceField label="Cadence (services/yr)" adorn="" muted readOnly minDecimals={0} colClass="w-full min-w-0" value={String(jpy)} />
+                        <PriceField label="Vendor · per service" adorn="$" muted readOnly colClass="w-full min-w-0" value={(Number(rule.commonAreaCost) || 0).toFixed(2)} />
                         <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="w-full min-w-0" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
-                        <PriceField label="Client / service (auto)" adorn="$" highlight readOnly colClass="w-full min-w-0" value={commonAreaClient.toFixed(2)} />
+                        <div aria-hidden />
+                        <PriceField label="Client / service" adorn="$" muted readOnly colClass="w-full min-w-0" value={commonAreaClient.toFixed(2)} />
                       </div>
                       <p className="text-[11px] text-gray-400 mt-1.5">
                         {jpy > 0
-                          ? <>{jpy} services/yr · per-service = annual ÷ {jpy}. Added to the master total and prorated evenly across every home in the split.</>
+                          ? <>Per-service = annual ÷ {jpy} services/yr. Added to the master total and prorated evenly across every home in the split.</>
                           : <>Add a cadence to compute the services-per-year (the per-service cost divides by it).</>}
                       </p>
                     </>
@@ -1391,7 +1395,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
 
           {/* SECTION 2 — cadence */}
           <section className={sec}>
-            <SecHead n={2} title="Cadence" />
+            {/* Live total annual visits from the current cadence selections — updates
+                on every edit (before save) so the schedule can be previewed. */}
+            <SecHead n={2} title={<>Cadence{rule.recurring && jpy > 0 ? <span className="text-gray-400 font-semibold"> — ({jpy} Annual Visits)</span> : null}</>} />
             {openSec[2] && (<div className="mt-3">
             {/* Move-in clean: ALWAYS lease-start anchored (no enrollment/cadence
                 choice). Due = a set number of days BEFORE the lease start date;
