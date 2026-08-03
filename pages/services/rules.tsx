@@ -1325,11 +1325,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                     <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="w-1/3 min-w-0" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
                     <PriceField label="Client / cut" adorn="$" muted readOnly colClass="w-1/3 min-w-0" value={clientCost.toFixed(2)} />
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-1.5">
-                    {jpy > 0
-                      ? <>Per-property rate = monthly × 12 ÷ {jpy} cuts/yr — what each generated order bills per home.</>
-                      : <>Add a cadence to compute the cuts-per-year (the per-cut rate divides by it).</>}
-                  </p>
+                  {jpy <= 0 && (
+                    <p className="text-[11px] text-gray-400 mt-1.5">Add a cadence to compute the cuts-per-year (the per-cut rate divides by it).</p>
+                  )}
                 </>
               ) : (
                 <div className="flex flex-nowrap items-end justify-center gap-4 sm:justify-start">
@@ -1364,11 +1362,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
                         <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="w-1/3 min-w-0" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
                         <PriceField label="Client / service" adorn="$" muted readOnly colClass="w-1/3 min-w-0" value={commonAreaClient.toFixed(2)} />
                       </div>
-                      <p className="text-[11px] text-gray-400 mt-1.5">
-                        {jpy > 0
-                          ? <>Per-service = annual ÷ {jpy} services/yr. Added to the master total and prorated evenly across every home in the split.</>
-                          : <>Add a cadence to compute the services-per-year (the per-service cost divides by it).</>}
-                      </p>
+                      {jpy <= 0 && (
+                        <p className="text-[11px] text-gray-400 mt-1.5">Add a cadence to compute the services-per-year (the per-service cost divides by it).</p>
+                      )}
                     </>
                   )}
                 </div>
