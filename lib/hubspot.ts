@@ -7441,6 +7441,41 @@ export async function findInspectionIdByExternalId(externalId: string): Promise<
 }
 
 /**
+ * Reverse-lookup: find the inspection whose stored HBMM ticket id matches
+ * `ticketId`, and report WHICH of the three scope tickets it is (turnkey /
+ * eviction / capex). Used by the finalize-backstop docs catch-up so an admin
+ * can re-attach documents to a ticket knowing ONLY its HoneyBadger id (the
+ * number in the ticket URL). Returns null if no inspection references it.
+ */
+export async function findInspectionByTicketId(
+  ticketId: number | string,
+): Promise<{ inspectionId: string; which: 'turnkey' | 'eviction' | 'capex' } | null> {
+  const val = String(ticketId).trim();
+  if (!val) return null;
+  const { inspection: typeId } = typeIds();
+  const props: Array<['turnkey' | 'eviction' | 'capex', string]> = [
+    ['turnkey', 'hbmm_ticket_id'],
+    ['eviction', 'hbmm_eviction_ticket_id'],
+    ['capex', 'hbmm_capex_ticket_id'],
+  ];
+  for (const [which, prop] of props) {
+    try {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+        method: 'POST',
+        body: JSON.stringify({
+          filterGroups: [{ filters: [{ propertyName: prop, operator: 'EQ', value: val }] }],
+          properties: [prop],
+          limit: 1,
+        }),
+      });
+      const hit = resp.results?.[0];
+      if (hit) return { inspectionId: String(hit.id), which };
+    } catch { /* try the next ticket-id prop */ }
+  }
+  return null;
+}
+
+/**
  * Update a Property record's properties. Used by the Final Checklist to write
  * back the confirmed air-filter quantity/types onto the property object.
  */

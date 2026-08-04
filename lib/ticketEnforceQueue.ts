@@ -18,6 +18,7 @@ export interface TicketEnforceJob {
   target: string;            // "Turnkey" | "Evictions"
   inspectionId?: string;     // for tracing (and the docs re-upload plan)
   docs?: boolean;            // also upload the inspection's PDFs into the ticket (backstop-created tickets)
+  which?: 'turnkey' | 'eviction' | 'capex'; // which scope ticket → which PDF set the docs sweep attaches (default turnkey)
   attempts: number;          // sweep attempts so far
   enqueuedAt: string;        // ISO
   lastAttemptAt?: string;    // ISO — used for the cron cooldown so overlapping runs don't stack
@@ -34,7 +35,7 @@ export async function listTicketEnforceJobs(): Promise<TicketEnforceJob[]> {
 }
 
 /** Add (or refresh) a ticket to the enforcement queue. Best-effort, never throws. */
-export async function enqueueTicketEnforcement(ticketId: number, target: string, inspectionId?: string, docs?: boolean): Promise<void> {
+export async function enqueueTicketEnforcement(ticketId: number, target: string, inspectionId?: string, docs?: boolean, which?: 'turnkey' | 'eviction' | 'capex'): Promise<void> {
   if (!Number.isFinite(ticketId) || ticketId <= 0) return;
   const t = (target || '').trim();
   if (!t) return;
@@ -42,7 +43,7 @@ export async function enqueueTicketEnforcement(ticketId: number, target: string,
   try {
     await mutateTicketEnforceQueue<TicketEnforceJob[]>((cur) => {
       const list = (Array.isArray(cur) ? cur : []).filter((j) => Number(j.ticketId) !== ticketId);
-      list.push({ ticketId, target: t, inspectionId, attempts: 0, enqueuedAt: nowIso, ...(docs ? { docs: true } : {}) });
+      list.push({ ticketId, target: t, inspectionId, attempts: 0, enqueuedAt: nowIso, ...(docs ? { docs: true } : {}), ...(which && which !== 'turnkey' ? { which } : {}) });
       // Bound the queue so a runaway can't bloat the property value.
       return list.slice(-200);
     });

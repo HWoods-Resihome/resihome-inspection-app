@@ -1125,11 +1125,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             // Persist the ticket id (durably — the re-finalize/resume dedup
             // depends on it) for visibility + background doc-upload retries.
             await storeTicketId('hbmm_ticket_id', ticketResult.ticketId);
-            // Queue the Turnkey type-enforcement SERVER-SIDE so it survives the
-            // user closing the tab — a cron drives the UI to completion no matter
-            // what (the client's live upload is just the fast path). See
-            // lib/ticketEnforceQueue + pages/api/cron/ticket-type-sweep.
-            if (ticketResult.ticketId) await enqueueTicketEnforcement(Number(ticketResult.ticketId), (process.env.HBMM_TICKET_TYPE_TARGET || 'Turnkey').trim(), id).catch(() => {});
+            // Queue the Turnkey type-enforcement AND the document upload
+            // SERVER-SIDE so both survive the user closing the tab / losing
+            // signal — a cron drives the UI to completion no matter what (the
+            // client's live upload is just the fast path). docs:true means the
+            // sweep also attaches the Master + trade PDFs, idempotently
+            // (skipIfHasDocs → it no-ops when the client upload already landed
+            // them). Without this, a failed client upload left the ticket with
+            // its type forced but NO documents (e.g. tickets 960275 / 961600).
+            // See lib/ticketEnforceQueue + pages/api/cron/ticket-type-sweep.
+            if (ticketResult.ticketId) await enqueueTicketEnforcement(Number(ticketResult.ticketId), (process.env.HBMM_TICKET_TYPE_TARGET || 'Turnkey').trim(), id, true, 'turnkey').catch(() => {});
           } else if (ticketResult.configured) {
             console.warn(`[finalize] maintenance ticket failed: ${ticketResult.error}`);
           } else {
@@ -1204,8 +1209,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             if (evictionTicketResult.ok) {
               console.log(`[finalize] eviction ticket created: #${evictionTicketResult.ticketId} (type ${TICKET_TYPE_EVICTION}) on property ${hbmmId}`);
               await storeTicketId('hbmm_eviction_ticket_id', evictionTicketResult.ticketId);
-              // Same durable enforcement for the Evictions-type ticket.
-              if (evictionTicketResult.ticketId) await enqueueTicketEnforcement(Number(evictionTicketResult.ticketId), (process.env.HBMM_TICKET_TYPE_TARGET_EVICTION || 'Evictions').trim(), id).catch(() => {});
+              // Same durable enforcement (type + docs) for the Evictions-type
+              // ticket — the sweep attaches this ticket's eviction PDF set.
+              if (evictionTicketResult.ticketId) await enqueueTicketEnforcement(Number(evictionTicketResult.ticketId), (process.env.HBMM_TICKET_TYPE_TARGET_EVICTION || 'Evictions').trim(), id, true, 'eviction').catch(() => {});
             } else if (evictionTicketResult.configured) {
               console.warn(`[finalize] eviction ticket failed: ${evictionTicketResult.error}`);
             }

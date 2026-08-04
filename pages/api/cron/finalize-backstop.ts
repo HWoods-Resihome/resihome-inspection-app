@@ -23,7 +23,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import {
   searchInspectionsMissingProp, readInspectionProps, updateInspection,
-  fetchInspectionWithPropertyRef,
+  fetchInspectionWithPropertyRef, findInspectionByTicketId,
 } from '@/lib/hubspot';
 import { createMaintenanceTicket, buildTicketDescription } from '@/lib/maintenanceAi';
 import { vendorTicketKind } from '@/lib/vendors';
@@ -170,6 +170,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       } catch (e: any) { queued.push({ id: iid, outcome: `error: ${String(e?.message || e).slice(0, 120)}` }); }
     }
     return res.status(200).json({ ok: true, queued });
+  }
+
+  // Docs catch-up BY TICKET ID: ?enqueueDocsByTicket=960275,961600 — for tickets
+  // an admin knows only by their HoneyBadger id (the number in the ticket URL),
+  // e.g. live-finalize tickets whose client-side upload failed so they carry the
+  // enforced type but NO documents. Resolves each ticket id back to its
+  // inspection (and which of the three scope tickets it is), then queues a docs
+  // job; the 2-minute type sweep drains it, attaching that kind's PDFs (idempotent
+  // via skipIfHasDocs). CapEx tickets have no type target so they can't ride the
+  // enforce queue — reported as such.
+  if (typeof req.query.enqueueDocsByTicket === 'string' && req.query.enqueueDocsByTicket.trim()) {
+    const out: { ticketId: string; outcome: string }[] = [];
+    for (const raw of req.query.enqueueDocsByTicket.split(',').map((x) => x.trim()).filter(Boolean)) {
+      if (!/^\d+$/.test(raw)) { out.push({ ticketId: raw, outcome: 'bad_id' }); continue; }
+      const tid = Number(raw);
+      try {
+        const found = await findInspectionByTicketId(tid);
+        if (!found) { out.push({ ticketId: raw, outcome: 'no_inspection_references_this_ticket' }); continue; }
+        const target = found.which === 'eviction'
+          ? (process.env.HBMM_TICKET_TYPE_TARGET_EVICTION || 'Evictions').trim()
+          : found.which === 'capex' ? ''
+          : (process.env.HBMM_TICKET_TYPE_TARGET || 'Turnkey').trim();
+        if (!target) { out.push({ ticketId: raw, outcome: `capex_ticket_not_queueable (inspection ${found.inspectionId}) — use the admin GET upload-ticket-docs?which=capex` }); continue; }
+        await enqueueTicketEnforcement(tid, target, found.inspectionId, true, found.which);
+        out.push({ ticketId: raw, outcome: `queued_docs_${found.which}_for_inspection_${found.inspectionId}` });
+      } catch (e: any) { out.push({ ticketId: raw, outcome: `error: ${String(e?.message || e).slice(0, 140)}` }); }
+    }
+    return res.status(200).json({ ok: true, enqueueDocsByTicket: out });
   }
 
   // One-off repair (wrong-environment creates): ?unstamp=<inspectionId>:<ticketId>,...
