@@ -972,8 +972,17 @@ export interface CoverageCatalog {
 }
 let _coverageCache: { at: number; cap: number; data: CoverageCatalog } | null = null;
 const COVERAGE_TTL_MS = 10 * 60 * 1000;
+// The scan cap MUST exceed the live count of ACTIVE (non-excluded) properties, or
+// the newest ones — paged last, in creation order — get truncated and a
+// just-onboarded portfolio (e.g. a new "…LLC Portfolio" of Under-Construction
+// homes) never appears as a selectable rules-engine option even though its
+// properties exist. `portfolio` is a free-text field, so HubSpot can't DISTINCT
+// it — the full scan is the only way to enumerate every portfolio. Portal was
+// ~10k active and growing when this was raised from 6000; keep it well above the
+// active count and env-overridable so it can be bumped without a deploy.
+const COVERAGE_SCAN_CAP = Math.max(6000, Number(process.env.SERVICES_COVERAGE_SCAN_CAP) || 25000);
 
-export async function fetchPropertyCoverage(cap = 6000): Promise<CoverageCatalog | null> {
+export async function fetchPropertyCoverage(cap = COVERAGE_SCAN_CAP): Promise<CoverageCatalog | null> {
   if (_coverageCache && _coverageCache.cap === cap && Date.now() - _coverageCache.at < COVERAGE_TTL_MS) return _coverageCache.data;
   const { property: typeId } = typeIds();
   const pf = new Map<string, number>();

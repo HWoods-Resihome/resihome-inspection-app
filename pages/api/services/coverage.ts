@@ -9,6 +9,12 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { fetchPropertyCoverage, listServiceCommunities, fetchPropertyStatusOptions } from '@/lib/hubspot';
 
+// A cold rebuild pages the ENTIRE active Property set (~100+ serial LIST calls at
+// 100/page for a 10k+ portal), so give it real headroom over the default function
+// timeout. It's single-flighted + cached (5-min endpoint, 10-min in-module), so
+// this full scan runs at most a couple of times per warm window.
+export const config = { maxDuration: 60 };
+
 // The coverage catalog is a full Property scan — slow (a few seconds). It changes
 // rarely, so cache the built payload in-process for a few minutes. This is what
 // makes the rules page's property counts land fast on repeat visits (the client
