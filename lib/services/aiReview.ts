@@ -33,6 +33,30 @@ const PHOTO_EDGE = 768;
 // server module never imports the browser/canvas stamp code.
 const PROXIMITY_THRESHOLD_M = Number(process.env.NEXT_PUBLIC_PROXIMITY_THRESHOLD_M) || 250;
 
+// Community-level (common-area) auto-complete bar. A community grass cut covers a
+// whole common area (boulevard strips, entrances, amenity zones), so a lone
+// before/after pair or a sub-minute visit is too thin to auto-complete — a clean
+// verdict that doesn't clear these minimums is HELD for manual review instead
+// (per-property services are unaffected). Env-overridable so the bar can be tuned
+// without a deploy.
+const COMMUNITY_MIN_BEFORE = Number(process.env.SERVICE_COMMUNITY_MIN_BEFORE) || 2;
+const COMMUNITY_MIN_AFTER = Number(process.env.SERVICE_COMMUNITY_MIN_AFTER) || 2;
+const COMMUNITY_MIN_ONSITE_MIN = Number(process.env.SERVICE_COMMUNITY_MIN_ONSITE_MIN) || 3;
+
+// Parse elapsed minutes from the model's free-text time-on-site string, e.g.
+// "7:49 AM → 8:41 AM (~52 min)" → 52, "(~1 hr 5 min)" → 65, "(~40 sec)" → 0.67.
+// Only the parenthetical elapsed span is read (never the wall-clock times, which
+// would false-match). Returns null when there's no readable span.
+export function parseOnSiteMinutes(s: string): number | null {
+  const span = String(s || '').match(/\(([^)]*)\)/)?.[1];
+  if (!span) return null;
+  const hr = span.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i);
+  const min = span.match(/(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/i);
+  const sec = span.match(/(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/i);
+  if (!hr && !min && !sec) return null;
+  return (hr ? Number(hr[1]) * 60 : 0) + (min ? Number(min[1]) : 0) + (sec ? Number(sec[1]) / 60 : 0);
+}
+
 // ── Batch API (opt-in via SERVICE_AI_REVIEW_BATCH) ───────────────────────────
 // The nightly backlog drain can submit its whole queue to the Message Batches
 // API (50% cheaper) instead of calling the model inline. Because a batch can take
@@ -443,15 +467,41 @@ async function applyVerdict(
   v: ServiceVerdict, apply: boolean, todayISO: string,
 ): Promise<{ clean: boolean; item: ReviewResult['items'][number] }> {
   const service = String(order.props.address_snapshot || order.props.service_name || order.id);
-  const clean = v.verdict === 'clean';
+  const rawClean = v.verdict === 'clean';
+  // Community-level (common-area) hold: a clean verdict on a community service
+  // only auto-completes when it clears the minimum photo count AND time-on-site;
+  // otherwise it's held for manual review. Proof-of-service (vendor invoice)
+  // submissions are exempt — the document is the evidence, not before/after
+  // photos. Per-property services are never held here.
+  const isCommunity = String(order.props.scope || 'property') === 'community';
+  let communityHoldReason = '';
+  if (rawClean && isCommunity && !v.hasProof) {
+    const beforeN = splitUrls(order.props.before_photo_urls).length;
+    const afterN = splitUrls(order.props.after_photo_urls).length;
+    const mins = parseOnSiteMinutes(v.timeOnSite);
+    const photoOk = beforeN >= COMMUNITY_MIN_BEFORE && afterN >= COMMUNITY_MIN_AFTER;
+    const timeOk = mins != null && mins >= COMMUNITY_MIN_ONSITE_MIN;
+    if (!photoOk || !timeOk) {
+      const bits: string[] = [];
+      if (!photoOk) bits.push(`only ${beforeN} before / ${afterN} after photo(s) — need ≥${COMMUNITY_MIN_BEFORE} before and ≥${COMMUNITY_MIN_AFTER} after`);
+      if (!timeOk) bits.push(mins == null ? 'time on site could not be read from the photo stamps' : `~${Math.round(mins)} min on site — need ≥${COMMUNITY_MIN_ONSITE_MIN} min`);
+      communityHoldReason = bits.join('; ');
+    }
+  }
+  const communityHold = !!communityHoldReason;
+  // Effective completion decision (community hold downgrades a clean verdict).
+  const clean = rawClean && !communityHold;
   if (apply) {
     const workPrefix = v.workEvidenced ? '' : '⚠ Work not evidenced: before/after photos don’t clearly show the work was done — verify before completing.\n\n';
     const geoPrefix = v.geofenceOk ? '' : '⚠ Geofence: photo location/timing evidence is off-site or missing — verify before completing.\n\n';
+    const holdPrefix = communityHold ? `⚠ Community QC hold: a common-area service needs more evidence to auto-complete — ${communityHoldReason}. Verify and complete manually.\n\n` : '';
     const timePrefix = v.timeOnSite ? `⏱ Time on site: ${v.timeOnSite}\n\n` : '';
     const notes = [v.notes, ...(v.issues.length ? ['Issues:', ...v.issues.map((i) => `• ${i}`)] : [])].join('\n');
     const props: Record<string, any> = {
+      // Record the AI's raw verdict; the community hold is reflected in status +
+      // the hold note, not by rewriting what the model actually concluded.
       ai_verdict: v.verdict === 'clean' ? 'clean' : 'needs_review',
-      ai_notes: timePrefix.concat(workPrefix).concat(geoPrefix).concat(notes).slice(0, 2000),
+      ai_notes: timePrefix.concat(holdPrefix).concat(workPrefix).concat(geoPrefix).concat(notes).slice(0, 2000),
       status: clean ? 'completed' : 'review',
     };
     if (v.proofSummary) props.proof_summary = v.proofSummary;
@@ -470,8 +520,12 @@ async function applyVerdict(
     await patchServiceWorkOrder(order.id, props);
     void recordServiceAudit({
       serviceId: order.id, action: 'ai_review', actorName: 'AI Review',
-      detail: clean ? 'AI review clean → Completed' : `AI review flagged → Review${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).length ? ` (${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).join(', ')})` : ''}`,
-      meta: { verdict: v.verdict, workEvidenced: v.workEvidenced, geofenceOk: v.geofenceOk },
+      detail: clean
+        ? 'AI review clean → Completed'
+        : communityHold
+          ? `AI review clean but held → Review (community evidence: ${communityHoldReason})`
+          : `AI review flagged → Review${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).length ? ` (${[!v.workEvidenced ? 'work' : '', !v.geofenceOk ? 'geofence' : ''].filter(Boolean).join(', ')})` : ''}`,
+      meta: { verdict: v.verdict, workEvidenced: v.workEvidenced, geofenceOk: v.geofenceOk, communityHold },
     });
     // Services team inbox: the AI just moved this order into Review. AWAIT — an
     // un-awaited promise is frozen the moment the serverless handler returns, so
