@@ -26,6 +26,7 @@ import { getPhotoWindow, clearPhotoWindow } from '@/lib/photoCaptureWindow';
 import { postJsonWithRetry, OfflineError } from '@/lib/net/resilientPost';
 import { loadMe } from '@/lib/me';
 import { PullToRefresh } from '@/components/PullToRefresh';
+import { ChangePropertyControl } from '@/components/ChangePropertyControl';
 
 
 // The three inspection forms are heavy and MUTUALLY EXCLUSIVE — exactly one
@@ -69,6 +70,7 @@ export default function ExistingInspection() {
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [isFinalizeAdmin, setIsFinalizeAdmin] = useState(false);
   const [isExternal, setIsExternal] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => {
     let cancelled = false;
     loadMe()
@@ -77,6 +79,7 @@ export default function ExistingInspection() {
         if (d.user?.email) setCurrentUserEmail(String(d.user.email));
         setIsFinalizeAdmin(!!d.isFinalizeAdmin);
         setIsExternal(!!d.isExternal);
+        setIsAdmin(!!d.isAdmin);
       })
       .catch(() => { /* non-fatal: lockout still enforced server-side */ });
     return () => { cancelled = true; };
@@ -704,6 +707,22 @@ export default function ExistingInspection() {
           autosave continuously, so a reload is safe. PullToRefresh reads the
           gesture's own scroll container, so it works inside #page-scroll. */}
       <PullToRefresh onRefresh={() => { window.location.reload(); }} />
+      {/* Admin-only strip: reassign this inspection to a different property.
+          Shown at every stage (scheduled / in-progress / completed). Hidden on
+          Community/Visit inspections, which reference a community, not a property. */}
+      {isAdmin && inspection.templateType !== 'pm_community_inspection' && (
+        <div className="bg-gray-50 border-b border-gray-200">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 py-1 flex items-center justify-between">
+            <span className="text-[11px] uppercase tracking-wide font-heading font-bold text-gray-400">Admin</span>
+            <ChangePropertyControl
+              inspectionId={inspectionId}
+              currentAddress={inspection.propertyAddressSnapshot}
+              isCompleted={isCompleted}
+              onDone={() => window.location.reload()}
+            />
+          </div>
+        </div>
+      )}
       {externalViewOnly && (
         <div className="bg-sky-50 border-b border-sky-200 py-2">
           <div className="max-w-7xl mx-auto px-3 sm:px-6 text-xs sm:text-sm text-sky-900 font-heading font-semibold">

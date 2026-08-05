@@ -238,7 +238,7 @@ export async function buildReportPdfBuffer(id: string, origin?: string): Promise
   return { ok: true, buf: Buffer.from(buf as any), inspectionName: insp.inspectionName, inspectionIdExternal: insp.inspectionIdExternal };
 }
 
-async function regenerateOne(id: string, origin?: string): Promise<{ id: string; ok: boolean; pdfUrl?: string; error?: string }> {
+export async function regenerateOne(id: string, origin?: string): Promise<{ id: string; ok: boolean; pdfUrl?: string; error?: string }> {
   const r = await buildReportPdfBuffer(id, origin);
   if (!r.ok) return { id, ok: false, error: r.error };
   const safeName = (r.inspectionName || 'Inspection').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60);

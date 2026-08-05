@@ -2607,6 +2607,75 @@ export async function fetchPropertyLockInfo(recordId: string): Promise<{ status:
   } catch (e) { console.warn('[services] lock info fetch failed:', e); return null; }
 }
 
+/**
+ * Read the snapshot fields an inspection copies from its property, for the admin
+ * "Change Property" reassignment. Returns the formatted address plus the region /
+ * portfolio / locality / status / bed / bath values so the reassigned inspection
+ * reflects the NEW property immediately (before any downstream sync runs).
+ */
+export async function fetchPropertyReassignSnapshot(recordId: string): Promise<
+  { addressSnapshot: string; region: string; portfolio: string; locality: string; status: string; bedrooms: number | null; bathrooms: number | null } | null
+> {
+  if (!recordId) return null;
+  const { property: typeId } = typeIds();
+  const numOrNull = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: [{ filters: [{ propertyName: 'hs_object_id', operator: 'EQ', value: recordId }] }],
+        properties: ['name', 'address', 'city', 'state', 'state_code', 'zip', 'zip_code', 'region', 'portfolio', 'bedrooms', 'bathrooms', PROPERTY_STATUS_PROPERTY],
+        limit: 1,
+      }),
+    });
+    const p = resp?.results?.[0]?.properties;
+    if (!p) return null;
+    const street = String(p.address || p.name || '').trim();
+    const city = String(p.city || '').trim();
+    const state = String(p.state_code || p.state || '').trim();
+    const zip = String(p.zip_code || p.zip || '').trim();
+    // Match how the create flow + property picker format the address snapshot
+    // ("<street>, <City>, <ST> <ZIP>") and locality ("<City>, <ST>, <ZIP>").
+    const stateZip = [state, zip].filter(Boolean).join(' ');
+    const addressSnapshot = [street, city, stateZip].filter(Boolean).join(', ');
+    const locality = [city, state, zip].filter(Boolean).join(', ');
+    return {
+      addressSnapshot: addressSnapshot || street,
+      region: String(p.region || '').trim(),
+      portfolio: String(p.portfolio || '').trim(),
+      locality,
+      status: String(p[PROPERTY_STATUS_PROPERTY] || '').trim(),
+      bedrooms: numOrNull(p.bedrooms), bathrooms: numOrNull(p.bathrooms),
+    };
+  } catch (e) { console.warn('[change-property] property snapshot fetch failed:', e); return null; }
+}
+
+/**
+ * Re-point an inspection's property association: archive every existing
+ * inspection→property association, then associate the new property. The
+ * property_id_ref field is the app's primary linkage (set by the caller); this
+ * keeps the HubSpot object association in sync so the record shows the right
+ * property and the compliance-ticket association fallback resolves correctly.
+ * Best-effort — returns false if the association type can't be resolved.
+ */
+export async function repointInspectionProperty(inspectionId: string, newPropertyId: string): Promise<boolean> {
+  if (!inspectionId || !newPropertyId) return false;
+  const { inspection, property } = typeIds();
+  // Archive any current inspection→property associations (usually one).
+  try {
+    const resp = await hubspotFetch(`/crm/v4/objects/${inspection}/${inspectionId}/associations/${property}?limit=100`);
+    const existing: string[] = (resp?.results || []).map((r: any) => String(r.toObjectId ?? r.id ?? '')).filter(Boolean);
+    for (const oldId of existing) {
+      if (oldId === newPropertyId) continue; // already pointed here
+      try {
+        await hubspotFetch(`/crm/v4/objects/${inspection}/${inspectionId}/associations/${property}/${oldId}`, { method: 'DELETE' });
+      } catch (e) { console.warn(`[change-property] could not archive old association ${oldId}:`, e); }
+    }
+  } catch (e) { console.warn('[change-property] read existing associations failed (continuing):', e); }
+  // Associate the new property (idempotent — HubSpot no-ops a duplicate).
+  return associateInspectionToProperty(inspectionId, newPropertyId);
+}
+
 /** Patch a Service Work Order's properties. Returns false when not configured. */
 export async function patchServiceWorkOrder(id: string, props: Record<string, any>): Promise<boolean> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
@@ -7332,6 +7401,18 @@ export async function updateInspection(recordId: string, props: Record<string, a
     method: 'PATCH',
     body: JSON.stringify({ properties: props }),
   });
+}
+
+/**
+ * Like updateInspection, but resilient to properties that don't exist on the
+ * inspection object: on a 400 the rejected prop names are stripped and the write
+ * retries (via writeObjectResilient). Use when patching an OPTIONAL mix of
+ * snapshot fields whose provisioning may vary by environment — so one missing
+ * field can't fail the whole write. Returns the names actually dropped (if any).
+ */
+export async function updateInspectionResilient(recordId: string, props: Record<string, any>): Promise<void> {
+  const { inspection: typeId } = typeIds();
+  await writeObjectResilient(typeId, recordId, props);
 }
 
 // ── One-time backfill: rewrite stored RAW Vercel Blob URLs → branded /m/ URLs ──
