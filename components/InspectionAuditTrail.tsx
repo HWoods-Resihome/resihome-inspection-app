@@ -65,7 +65,7 @@ export function InspectionAuditTrail({ open, onClose, inspectionId }: Props) {
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-gray-200 flex items-center justify-between gap-3">
           <div className="font-heading font-bold text-ink text-base flex items-center gap-2">
-            <span className="text-brand">🕑</span> Audit Trail
+            <span className="text-brand">🕑</span> Audit Log
           </div>
           <button type="button" onClick={onClose} className="text-sm text-gray-500 hover:text-gray-800 shrink-0">Close</button>
         </div>

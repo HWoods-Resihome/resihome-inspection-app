@@ -2151,8 +2151,8 @@ export function QuestionForm({
             <button
               type="button"
               onClick={() => { if (canChangeProperty) setShowHeaderMenu((v) => !v); else setShowAuditTrail(true); }}
-              aria-label={canChangeProperty ? 'Inspection options' : 'Inspection history'}
-              title={canChangeProperty ? 'Inspection options' : 'Inspection history'}
+              aria-label={canChangeProperty ? 'Inspection options' : 'Audit Log'}
+              title={canChangeProperty ? 'Inspection options' : 'Audit Log'}
               aria-expanded={canChangeProperty ? showHeaderMenu : undefined}
               className="inline-flex items-center justify-center w-8 h-8 text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white transition-colors"
             >
@@ -2167,7 +2167,7 @@ export function QuestionForm({
                 <div className="absolute right-0 mt-1.5 z-50 w-48 rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 overflow-hidden py-1">
                   <button type="button" onClick={() => { setShowHeaderMenu(false); setShowAuditTrail(true); }} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                    Inspection history
+                    Audit Log
                   </button>
                   <button type="button" onClick={() => { setShowHeaderMenu(false); setShowChangeProperty(true); }} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>

@@ -3972,7 +3972,7 @@ export function RateCardForm(props: RateCardFormProps) {
               </span>
             )}
             {/* Settings gear — always shown. On a read-only (completed) inspection
-                only the Audit Trail item remains (Manage Sections / Refresh Pricing
+                only the Audit Log item remains (Manage Sections / Refresh Pricing
                 are edit-only), so history stays reachable after completion. */}
             {(
               <div className="relative order-3">
@@ -4039,7 +4039,7 @@ export function RateCardForm(props: RateCardFormProps) {
                         <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0">
                           <circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" />
                         </svg>
-                        Audit Trail
+                        Audit Log
                       </button>
                       {props.isAdmin && (
                         <button
