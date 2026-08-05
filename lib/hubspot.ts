@@ -359,7 +359,7 @@ export async function fetchQuestionsForTemplate(
   const properties = [
     'question_id_external', 'question_text', 'section', 'section_order',
     'display_order', 'response_type', 'response_options', 'default_value',
-    'note_required_on_values', 'has_assigned_to', 'assigned_to_options',
+    'note_required_on_values', 'photo_required_on_values', 'has_assigned_to', 'assigned_to_options',
     'repeats_per_room_type', 'applies_to_templates', 'is_required', 'help_text',
     'is_enabled', 'requires_photo', 'requires_note',
   ];
@@ -446,6 +446,7 @@ export async function fetchQuestionsForTemplate(
         responseOptions: (p.response_options || '').split('|').map((s: string) => s.trim()).filter(Boolean),
         defaultValue: p.default_value || '',
         noteRequiredOnValues: (p.note_required_on_values || '').split('|').map((s: string) => s.trim()).filter(Boolean),
+        photoRequiredOnValues: (p.photo_required_on_values || '').split('|').map((s: string) => s.trim()).filter(Boolean),
         hasAssignedTo: String(p.has_assigned_to).toLowerCase() === 'true',
         assignedToOptions: (p.assigned_to_options || '').split('|').map((s: string) => s.trim()).filter(Boolean),
         repeatsPerRoomType: p.repeats_per_room_type || '',
@@ -8742,6 +8743,12 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   });
   await ensureProp(question, 'requires_note', {
     name: 'requires_note', label: 'Requires Note', type: 'bool', fieldType: 'booleancheckbox', groupName: 'inspection_question_info', options: boolOpts,
+  });
+  // Conditional photo requirement: pipe-delimited answer values that force a
+  // photo (analog of note_required_on_values) — e.g. photos required only on
+  // "Fail - Needs Attention". Blank = fall back to the requires_photo boolean.
+  await ensureProp(question, 'photo_required_on_values', {
+    name: 'photo_required_on_values', label: 'Photo Required On Values', type: 'string', fieldType: 'textarea', groupName: 'inspection_question_info',
   });
 
   // QC failure note on the Answer object (required when a QC line is failed).

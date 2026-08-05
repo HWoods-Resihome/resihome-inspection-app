@@ -6,6 +6,7 @@ import { createComplianceTicketsOnSubmit } from '@/lib/complianceTickets';
 import { postListingPriceAlertOnSubmit } from '@/lib/listingPriceAlert';
 import { postGrassFailAlertOnSubmit } from '@/lib/grassFailAlert';
 import { postPoolFailAlertOnSubmit } from '@/lib/poolFailAlert';
+import { postListingPhotosFailAlertOnSubmit } from '@/lib/listingPhotosFailAlert';
 import { postScopePendingApproval } from '@/lib/scopeApprovalSlack';
 import { fcSmartHomeStamps, fcPoolStamps, parseFcAnswers } from '@/lib/finalChecklist';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -251,6 +252,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           console.log(`[submit] 1099 grass-fail alert for ${id}: ${grass.posted ? `posted to ${grass.channel}` : `skipped (${grass.reason || grass.error})`}`);
         } catch (e) {
           console.warn('[submit] grass-fail alert skipped (continuing):', e);
+        }
+
+        // Listing-photos → listings Slack alert: when "Listing Photos Accurate?"
+        // is marked Fail - Needs Attention, post the property + note + photos to
+        // the per-POD PASS (listings) channel for the property's region so the
+        // listings team can fix them. Best-effort; gated per inspection (admin
+        // table key 'listing_photos_fail').
+        try {
+          const baseUrl = reqOriginOf(req) || undefined;
+          const listing = await postListingPhotosFailAlertOnSubmit(
+            {
+              recordId: id,
+              propertyAddressSnapshot: existing?.propertyAddressSnapshot || '',
+              inspectorName: existing?.inspectorName || '',
+              propertyRecordId: existing?.propertyRecordId || null,
+            },
+            answers,
+            { baseUrl },
+          );
+          console.log(`[submit] 1099 listing-photos alert for ${id}: ${listing.posted ? `posted to ${listing.channel}` : `skipped (${listing.reason || listing.error})`}`);
+        } catch (e) {
+          console.warn('[submit] listing-photos alert skipped (continuing):', e);
         }
       }
     }

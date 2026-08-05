@@ -77,6 +77,7 @@ const applyDraft = (base: Partial<Question>, d: Draft): Question => ({
   responseOptions: toOptions(d.responseOptionsText),
   defaultValue: base.defaultValue || '',
   noteRequiredOnValues: base.noteRequiredOnValues || [],
+  photoRequiredOnValues: base.photoRequiredOnValues || [],
   hasAssignedTo: base.hasAssignedTo ?? false,
   assignedToOptions: base.assignedToOptions || [],
   repeatsPerRoomType: base.repeatsPerRoomType || '',

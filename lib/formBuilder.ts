@@ -69,6 +69,7 @@ export interface QuestionInput {
   responseOptions?: string[];
   defaultValue?: string;
   noteRequiredOnValues?: string[];
+  photoRequiredOnValues?: string[];
   hasAssignedTo?: boolean;
   assignedToOptions?: string[];
   repeatsPerRoomType?: string;
@@ -93,6 +94,7 @@ export function questionInputToProps(input: QuestionInput): Record<string, strin
   if (input.responseOptions !== undefined) props.response_options = pipe(input.responseOptions);
   if (input.defaultValue !== undefined) props.default_value = String(input.defaultValue).slice(0, 500);
   if (input.noteRequiredOnValues !== undefined) props.note_required_on_values = pipe(input.noteRequiredOnValues);
+  if (input.photoRequiredOnValues !== undefined) props.photo_required_on_values = pipe(input.photoRequiredOnValues);
   if (input.hasAssignedTo !== undefined) props.has_assigned_to = input.hasAssignedTo ? 'true' : 'false';
   if (input.assignedToOptions !== undefined) props.assigned_to_options = pipe(input.assignedToOptions);
   if (input.repeatsPerRoomType !== undefined) props.repeats_per_room_type = String(input.repeatsPerRoomType).slice(0, 60);

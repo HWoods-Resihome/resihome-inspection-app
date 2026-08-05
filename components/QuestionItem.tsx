@@ -55,10 +55,17 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
     question.noteRequiredOnValues.includes(answer.answerValue)
     || (failSelected && question.noteRequiredOnValues.some((v) => answerTone(v) === 'fail'))
   );
+  // Conditional photo requirement (photoRequiredOnValues) — the photo analog of
+  // `triggered`: a photo is forced only on specific answer values (e.g.
+  // "Fail - Needs Attention"), tone-aware like the note trigger.
+  const photoTriggered = !!answer.answerValue && !naSelected && (
+    question.photoRequiredOnValues.includes(answer.answerValue)
+    || (failSelected && question.photoRequiredOnValues.some((v) => answerTone(v) === 'fail'))
+  );
   // Form-builder "Require note" / "Require photo": once a (non-N/A) answer is
   // picked, force the panel open so the inspector can add the required note/photo.
   const noteRequired = !!question.requiresNote && !!answer.answerValue && !naSelected;
-  const photoRequired = !!question.requiresPhoto && !!answer.answerValue && !naSelected;
+  const photoRequired = (!!question.requiresPhoto || photoTriggered) && !!answer.answerValue && !naSelected;
   const noteMandatory = triggered || noteRequired;
   // The panel is forced open (and the Notes/Photos toggle hidden) when an answer
   // demands a note or a photo. Deselect / switch back to a non-triggering answer

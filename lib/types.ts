@@ -29,6 +29,10 @@ export interface Question {
   responseOptions: string[];
   defaultValue: string;
   noteRequiredOnValues: string[];
+  // Require at least one photo ONLY when the answer is one of these values
+  // (conditional analog of requiresPhoto — e.g. photos required on
+  // "Fail - Needs Attention" but not on "Good - No Issues").
+  photoRequiredOnValues: string[];
   hasAssignedTo: boolean;
   assignedToOptions: string[];
   repeatsPerRoomType: string;

@@ -62,6 +62,7 @@ function mkQ(p: {
     responseOptions: p.responseOptions ?? [],
     defaultValue: '',
     noteRequiredOnValues: [],
+    photoRequiredOnValues: [],
     hasAssignedTo: false,
     assignedToOptions: [],
     repeatsPerRoomType: '',

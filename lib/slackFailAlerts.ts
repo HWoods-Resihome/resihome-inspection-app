@@ -15,7 +15,7 @@
  * blob in lockstep with the pool custom-code action's `leave_note` value.
  */
 
-export type FailReviewType = 'Grass' | 'Pool';
+export type FailReviewType = 'Grass' | 'Pool' | 'Listing';
 
 export const PINK = '#FF0066'; // ResiHome hot pink — NEW / needs action
 
@@ -115,8 +115,30 @@ function poolBlocks(c: FailNoteCtx): any[] {
   return blocks;
 }
 
+/** Listing-photos card (1099): the inspector flagged the listing photos as
+ *  needing attention. Same layout family as grass; framed for the listings team. */
+function listingBlocks(c: FailNoteCtx): any[] {
+  const blocks: any[] = [
+    { type: 'header', text: { type: 'plain_text', text: '📸 Listing Photos — Needs Attention', emoji: true } },
+    { type: 'section', fields: [
+      { type: 'mrkdwn', text: `*Property:*\n${c.address || '(address n/a)'}` },
+      { type: 'mrkdwn', text: `*Listing photos:*\n🔻 ${c.response || 'Fail - Needs Attention'}` },
+      { type: 'mrkdwn', text: `*Inspector:*\n${c.inspector || '—'}` },
+      { type: 'mrkdwn', text: `*Photos:*\n${c.photosCount ? `${c.photosCount} attached (see thread)` : 'none'}` },
+    ] },
+  ];
+  if (c.inspectorNote) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Inspector note:*\n>${c.inspectorNote.replace(/\n/g, '\n>')}` } });
+  const els: any[] = [];
+  if (c.openUrl && /^https?:/i.test(c.openUrl)) els.push(viewReportBtn(c.openUrl));
+  els.push(leaveNoteBtn(c));
+  blocks.push({ type: 'actions', elements: els });
+  return blocks;
+}
+
 /** Build the PINK attachment for a fail card (layout per reviewType). */
 export function buildFailAttachment(c: FailNoteCtx): any[] {
-  const blocks = c.reviewType === 'Pool' ? poolBlocks(c) : grassBlocks(c);
+  const blocks = c.reviewType === 'Pool' ? poolBlocks(c)
+    : c.reviewType === 'Listing' ? listingBlocks(c)
+    : grassBlocks(c);
   return [{ color: PINK, fallback: `${c.reviewType} review FAILED — ${c.address}`, blocks }];
 }

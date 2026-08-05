@@ -1414,12 +1414,23 @@ export function QuestionForm({
         // countQueuedPhotos gate (which blocks until it uploads, with a
         // genuinely-stuck override). Requiring a REAL url here would block before
         // the flush runs and strand an inspector whose photo can't upload.
-        if (q.requiresPhoto && a?.answerValue && !isNA(a.answerValue) && (a.photoUrls?.length || 0) === 0) {
-          return {
-            message: `Photo required: ${locTag}${q.questionText}`,
-            scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
-            instanceKey: inst.instanceKey,
-          };
+        // Photo required either unconditionally (requiresPhoto) OR only on
+        // specific answer values (photoRequiredOnValues — e.g. a photo forced on
+        // "Fail - Needs Attention" but not on "Good - No Issues"). Same tone-aware
+        // fallback the note check uses, so a Good/Fail relabel can't starve it.
+        if (a?.answerValue && !isNA(a.answerValue) && (a.photoUrls?.length || 0) === 0) {
+          const failSelP = answerTone(a.answerValue) === 'fail';
+          const triggeredPhoto = q.photoRequiredOnValues.length > 0 && (
+            q.photoRequiredOnValues.includes(a.answerValue)
+            || (failSelP && q.photoRequiredOnValues.some((v) => answerTone(v) === 'fail'))
+          );
+          if (q.requiresPhoto || triggeredPhoto) {
+            return {
+              message: `Photo required: ${locTag}${q.questionText}`,
+              scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
+              instanceKey: inst.instanceKey,
+            };
+          }
         }
         // Require a note when this value is configured (robust to the Good/Fail
         // relabel — a "Fail …" answer still triggers a value whose tone is fail)
@@ -1920,7 +1931,11 @@ export function QuestionForm({
           const val = a.answerValue;
           const na = isNA(val);
           if (isListingPriceQuestion(q) && wantsRecommendedPrice(val) && a.recommendedAmount == null) return false;
-          if (q.requiresPhoto && !na && countRealPhotos(a.photoUrls) === 0) return false;
+          const triggeredPhotoC = q.photoRequiredOnValues.length > 0 && !na && (
+            q.photoRequiredOnValues.includes(val)
+            || (answerTone(val) === 'fail' && q.photoRequiredOnValues.some((v) => answerTone(v) === 'fail'))
+          );
+          if ((q.requiresPhoto || triggeredPhotoC) && !na && countRealPhotos(a.photoUrls) === 0) return false;
           if (!na) {
             const failSel = answerTone(val) === 'fail';
             const triggeredNote = q.noteRequiredOnValues.length > 0 && (
@@ -1943,7 +1958,11 @@ export function QuestionForm({
           const val = a.answerValue;
           const na = isNA(val);
           if (isListingPriceQuestion(q) && wantsRecommendedPrice(val)) return true;
-          if (q.requiresPhoto && !na) return true;
+          const triggeredPhotoO = q.photoRequiredOnValues.length > 0 && !na && (
+            q.photoRequiredOnValues.includes(val)
+            || (answerTone(val) === 'fail' && q.photoRequiredOnValues.some((v) => answerTone(v) === 'fail'))
+          );
+          if ((q.requiresPhoto || triggeredPhotoO) && !na) return true;
           if (!na) {
             const failSel = answerTone(val) === 'fail';
             const triggeredNote = q.noteRequiredOnValues.length > 0 && (
