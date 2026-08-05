@@ -58,6 +58,8 @@ import {
 } from '@/lib/sections';
 import { SectionsManager } from '@/components/SectionsManager';
 import { InspectionAuditTrail } from '@/components/InspectionAuditTrail';
+import { ChangePropertyModal } from '@/components/ChangePropertyModal';
+import { isCompletedStatus } from '@/lib/userAccess';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { PhotoThumb } from '@/components/PhotoThumb';
 import { isVideoEntry } from '@/lib/media';
@@ -165,6 +167,8 @@ interface RateCardFormProps {
    *  in-app viewer; the xlsx downloads. Empty/absent → falls back to pdfUrl. */
   reportLinks?: { label: string; url: string; isPdf: boolean; primary?: boolean }[];
   readOnly?: boolean;
+  /** App admin? Unlocks the settings gear's "Change Property" reassignment. */
+  isAdmin?: boolean;
   onSubmit: () => void;
   onCancel: () => void;
   /** Prev/next pager: save-then-navigate to another inspection id. */
@@ -235,6 +239,7 @@ export function RateCardForm(props: RateCardFormProps) {
   const [showPdfMenu, setShowPdfMenu] = useState(false);
   // Audit trail modal (who submitted/approved/reopened/cancelled, and when).
   const [showAuditTrail, setShowAuditTrail] = useState(false);
+  const [showChangeProperty, setShowChangeProperty] = useState(false);
   // Keys of line rows whose edit modal is open — used to hide the floating mic
   // (it should never float over a modal/other screen when idle).
   const [openEditors, setOpenEditors] = useState<Set<string>>(new Set());
@@ -4036,6 +4041,19 @@ export function RateCardForm(props: RateCardFormProps) {
                         </svg>
                         Audit Trail
                       </button>
+                      {props.isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => { setShowSettingsMenu(false); setShowChangeProperty(true); }}
+                          className="w-full text-left px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors border-t border-gray-100"
+                          title="Reassign this inspection to a different property."
+                        >
+                          <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0">
+                            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
+                          </svg>
+                          Change Property
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
@@ -4857,6 +4875,16 @@ export function RateCardForm(props: RateCardFormProps) {
         onClose={() => setShowAuditTrail(false)}
         inspectionId={props.inspectionRecordId}
       />
+      {props.isAdmin && (
+        <ChangePropertyModal
+          open={showChangeProperty}
+          onClose={() => setShowChangeProperty(false)}
+          inspectionId={props.inspectionRecordId}
+          currentAddress={props.propertyName}
+          isCompleted={isCompletedStatus(props.inspectionStatus || '')}
+          onDone={() => window.location.reload()}
+        />
+      )}
       {/* AI review "Decline — Add Items": the manual Add Line Item editor, added
           to Whole House. The review modal hides while it's open (cameraOpen). */}
       {aiAddItemsOpen && (() => {

@@ -35,6 +35,8 @@ import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
 import { InspectionAuditTrail } from '@/components/InspectionAuditTrail';
+import { ChangePropertyModal } from '@/components/ChangePropertyModal';
+import { isCompletedStatus } from '@/lib/userAccess';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { FitText } from '@/components/FitText';
 import { SaveIndicator } from '@/components/inspection/SaveIndicator';
@@ -89,6 +91,8 @@ interface Props {
   /** Completed QC report — shown as an in-app "View PDF Report" link. */
   pdfUrl?: string;
   readOnly: boolean;
+  /** App admin? Unlocks the header gear's "Change Property" reassignment. */
+  isAdmin?: boolean;
   onSubmit: () => void;
   onCancel: () => void;
   /** Prev/next pager: navigate to another inspection id (QC persists per-change). */
@@ -161,6 +165,11 @@ export function QcReinspectForm(props: Props) {
   // Inspection history (audit trail) — reachable from the header gear on every
   // status, including completed/read-only.
   const [showAuditTrail, setShowAuditTrail] = useState(false);
+  // Header gear dropdown (History + admin "Change Property") and the reassign
+  // modal. QC is always property-backed, so admin alone unlocks it.
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const [showChangeProperty, setShowChangeProperty] = useState(false);
+  const canChangeProperty = !!props.isAdmin;
   // In-flight QC writes (line pass/fail, room verdict/note, photo tags). The
   // submit gate waits for this to reach 0 so a verdict/note save can't be lost
   // to an in-flight write at finalize. Bumped via markSaving/markSaved/markSaveError.
@@ -1054,19 +1063,39 @@ export function QcReinspectForm(props: Props) {
             {statusLabel && (
               <span className={`inline-flex items-center shrink-0 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold border whitespace-nowrap ${statusLabel.color}`}>{statusLabel.label}</span>
             )}
-            {/* History gear — inspection audit trail; shown on every status. */}
-            <button
-              type="button"
-              onClick={() => setShowAuditTrail(true)}
-              aria-label="Inspection history"
-              title="Inspection history"
-              className="inline-flex items-center justify-center w-8 h-8 text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white transition-colors"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
+            {/* Header gear — Inspection history (every status) + admin "Change
+                Property". Acts as a direct History button when there's no admin
+                action, preserving the one-tap common case. */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => { if (canChangeProperty) setShowHeaderMenu((v) => !v); else setShowAuditTrail(true); }}
+                aria-label={canChangeProperty ? 'Inspection options' : 'Inspection history'}
+                title={canChangeProperty ? 'Inspection options' : 'Inspection history'}
+                aria-expanded={canChangeProperty ? showHeaderMenu : undefined}
+                className="inline-flex items-center justify-center w-8 h-8 text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white transition-colors"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </button>
+              {canChangeProperty && showHeaderMenu && (
+                <>
+                  <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setShowHeaderMenu(false)} />
+                  <div className="absolute right-0 mt-1.5 z-50 w-48 rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 overflow-hidden py-1">
+                    <button type="button" onClick={() => { setShowHeaderMenu(false); setShowAuditTrail(true); }} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                      Inspection history
+                    </button>
+                    <button type="button" onClick={() => { setShowHeaderMenu(false); setShowChangeProperty(true); }} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+                      Change Property
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
             <InspectionPager currentId={props.inspectionRecordId} onNavigate={(id) => props.onNavigateTo?.(id)} />
             {!props.readOnly && (
               <UnlockButton
@@ -1812,6 +1841,16 @@ export function QcReinspectForm(props: Props) {
         onClose={() => setShowAuditTrail(false)}
         inspectionId={props.inspectionRecordId}
       />
+      {canChangeProperty && (
+        <ChangePropertyModal
+          open={showChangeProperty}
+          onClose={() => setShowChangeProperty(false)}
+          inspectionId={props.inspectionRecordId}
+          currentAddress={props.propertyName}
+          isCompleted={isCompletedStatus(props.inspectionStatus)}
+          onDone={() => window.location.reload()}
+        />
+      )}
     </div>
   );
 }
