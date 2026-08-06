@@ -445,51 +445,6 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
   const [masterCoverage, setMasterCoverage] = useState<number | null>(null); // community grass-cut: properties the master covers
   const [coveredLive, setCoveredLive] = useState<number | null>(null);   // accurate applicable-property count (live query)
   const [wcReload, setWcReload] = useState(0);
-  // One-time backfill: derive the friendly cost inputs (monthly cut / annual
-  // contract) for existing community landscaping rules from their per-service values.
-  const [migBusy, setMigBusy] = useState(false);
-  const [migMsg, setMigMsg] = useState<string>('');
-  const runCostBackfill = async (apply: boolean) => {
-    setMigBusy(true); setMigMsg('');
-    try {
-      const r = await fetch('/api/services/admin/migrate-community-landscaping-costs', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apply }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      if (!apply) {
-        setMigMsg(`Dry run — would update ${d.updated}, skip ${d.skipped} of ${d.communityLandscapingRules} community landscaping rule(s). Click Apply to write.`);
-        return;
-      }
-      if (d.provisionWarning) { setMigMsg(d.provisionWarning); return; }
-      // The open page holds the rules from its initial load — reload so the freshly
-      // written monthly / annual inputs actually show on each rule.
-      setMigMsg(`Backfill applied — updated ${d.updated} (persisted ${d.persisted}), skipped ${d.skipped}${d.failed ? `, failed ${d.failed}` : ''}. Reloading…`);
-      if (typeof window !== 'undefined') setTimeout(() => window.location.reload(), 800);
-    } catch (e: any) { setMigMsg(`Backfill failed: ${e?.message || e}`); }
-    finally { setMigBusy(false); }
-  };
-  // One-click: move November onto the 7-day (weekly) cadence for every community
-  // landscaping grass-cut rule and recompute the per-service costs from the new
-  // jobs-per-year. Self-contained (fills the monthly/annual inputs if missing).
-  const runNovWeekly = async (apply: boolean) => {
-    setMigBusy(true); setMigMsg('');
-    try {
-      const r = await fetch('/api/services/admin/migrate-community-nov-weekly', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apply }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      if (!apply) {
-        setMigMsg(`Dry run — would move November to weekly on ${d.updated} rule(s), skip ${d.skipped} (already weekly / no 7-day cadence) of ${d.communityLandscapingRules}. Click Apply.`);
-        return;
-      }
-      if (d.provisionWarning) { setMigMsg(d.provisionWarning); return; }
-      setMigMsg(`November → weekly applied — updated ${d.updated} (persisted ${d.persisted}), skipped ${d.skipped}${d.failed ? `, failed ${d.failed}` : ''}. Reloading…`);
-      if (typeof window !== 'undefined') setTimeout(() => window.location.reload(), 800);
-    } catch (e: any) { setMigMsg(`November → weekly failed: ${e?.message || e}`); }
-    finally { setMigBusy(false); }
-  };
   const [openId, setOpenId] = useState<number | null>(null);   // null = list view; else editing that rule
   const [propsOpen, setPropsOpen] = useState(false);
   const [propSearch, setPropSearch] = useState('');
@@ -1085,20 +1040,6 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy, 
           )}
 
           <button onClick={addRule} className="w-full mb-3 text-brand bg-brand/5 border border-dashed border-brand/40 rounded-xl py-2.5 text-[13px] font-heading font-bold">+ New Rule</button>
-
-          {/* One-time: back-fill the friendly cost inputs (monthly cut / annual
-              contract) on existing community landscaping rules from their per-service
-              values. Dry run first, then Apply. Idempotent. */}
-          <div className="mb-1 flex flex-wrap items-center gap-2 text-[12px] text-gray-500">
-            <span className="font-heading font-semibold">Community landscaping costs:</span>
-            <button type="button" disabled={migBusy} onClick={() => void runCostBackfill(true)} className="font-heading font-semibold text-brand hover:underline disabled:opacity-50">Backfill from per-service</button>
-            {migBusy && <span className="text-gray-400">working…</span>}
-          </div>
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-gray-500">
-            <span className="font-heading font-semibold">Move November to weekly + recompute:</span>
-            <button type="button" disabled={migBusy} onClick={() => void runNovWeekly(true)} className="font-heading font-semibold text-brand hover:underline disabled:opacity-50">Run</button>
-          </div>
-          {migMsg && <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700">{migMsg}</div>}
 
           <div className="space-y-2">
             {visibleRules.map((r) => (
