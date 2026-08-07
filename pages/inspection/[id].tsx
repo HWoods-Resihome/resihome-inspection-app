@@ -97,6 +97,9 @@ export default function ExistingInspection() {
   }, []);
 
   const [inspection, setInspection] = useState<InspectionSummary | null>(null);
+  // Bumped to force the client fetch effect to re-run WITHOUT changing the id
+  // (e.g. after a reopen, so the freshly-in_progress record is re-pulled).
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [propertyRecordId, setPropertyRecordId] = useState<string>('');
   const [propertySquareFootage, setPropertySquareFootage] = useState<number | null>(null);
   const [propertyZip, setPropertyZip] = useState<string | null>(null);
@@ -370,7 +373,7 @@ export default function ExistingInspection() {
       }
     })();
     return () => { cancelled = true; };
-  }, [inspectionId]);
+  }, [inspectionId, reloadNonce]);
 
   async function handleSubmit(answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>, meta?: QuestionFormSubmitMeta) {
     if (!inspection) return;
@@ -524,8 +527,13 @@ export default function ExistingInspection() {
         const data = await r.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${r.status}`);
       }
-      // Re-run SSR in place (no white-flash full reload, keeps scroll/SPA state).
-      await router.replace(router.asPath, undefined, { scroll: false }).catch(() => window.location.reload());
+      // This page loads its record via a CLIENT fetch (no getServerSideProps), so
+      // router.replace(asPath) would NOT re-pull it and the form would stay
+      // read-only. Flip the local status to in_progress right away so the form is
+      // instantly editable/re-savable, then bump the fetch nonce to re-pull the
+      // now-in_progress record from the server (direct read → consistent).
+      setInspection((prev) => (prev ? { ...prev, status: 'in_progress', completedAt: null } : prev));
+      setReloadNonce((n) => n + 1);
     } catch (e: any) {
       void dialog.alert(`Reopen failed: ${e.message || e}`);
     }
