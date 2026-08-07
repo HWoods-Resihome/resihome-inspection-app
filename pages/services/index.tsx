@@ -254,7 +254,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
   // Keep the list fresh WITHOUT a manual pull-to-refresh: re-run SSR when the tab
   // regains focus / the device reconnects / the page becomes visible again (a
   // teammate may have changed a service, or a just-created one is now indexed).
-  // Same call the mutation handlers use; the vendorOverrides/cancelledIds overlays
+  // Same call the mutation handlers use; the overrides/cancelledIds overlays
   // protect against a momentarily-stale SSR paint.
   useEffect(() => {
     let last = 0;
@@ -295,21 +295,35 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
   const [bulkVendorCost, setBulkVendorCost] = useState('');
   const [bulkDueDate, setBulkDueDate] = useState('');
   const [bulkNote, setBulkNote] = useState('');
-  // Optimistic vendor overlay: after a bulk reassign, HubSpot's search index (and
-  // the 30s server-side list cache) can lag, so an immediate SSR re-fetch may still
-  // return the OLD vendor. Overlay the new name locally per-id so the card updates
-  // right away; each entry is dropped once the SSR-fetched record confirms it.
-  const [vendorOverrides, setVendorOverrides] = useState<Record<string, string>>({});
+  // Optimistic overlay: after a bulk action (reassign / price / due date),
+  // HubSpot's search index (and the 30s server-side list cache) can lag, so an
+  // immediate SSR re-fetch may still return the OLD values. Overlay the changed
+  // fields locally per-id so the card updates right away; each field is dropped
+  // once the SSR-fetched record confirms it (so we never mask a later real edit).
+  const [overrides, setOverrides] = useState<Record<string, Partial<ServiceRecord>>>({});
+  const addOverrides = (ids: string[], patch: Partial<ServiceRecord>) =>
+    setOverrides((prev) => { const next = { ...prev }; for (const id of ids) next[id] = { ...next[id], ...patch }; return next; });
   useEffect(() => {
-    setVendorOverrides((prev) => {
-      let changed = false; const next = { ...prev };
-      for (const s of services) { if (next[s.id] !== undefined && (s.vendor || '') === next[s.id]) { delete next[s.id]; changed = true; } }
+    setOverrides((prev) => {
+      if (Object.keys(prev).length === 0) return prev;
+      const byId = new Map(services.map((s) => [s.id, s] as const));
+      let changed = false; const next: Record<string, Partial<ServiceRecord>> = {};
+      for (const [id, ov] of Object.entries(prev)) {
+        const rec = byId.get(id);
+        if (!rec) { next[id] = ov; continue; }   // off the current page — keep the overlay
+        const remaining: Partial<ServiceRecord> = {};
+        for (const [k, v] of Object.entries(ov)) {
+          if ((rec as any)[k] === v) changed = true;            // SSR now matches → drop this field
+          else (remaining as any)[k] = v;
+        }
+        if (Object.keys(remaining).length) next[id] = remaining; else changed = true;
+      }
       return changed ? next : prev;
     });
   }, [services]);
   const servicesView = useMemo(
-    () => (Object.keys(vendorOverrides).length === 0 ? services : services.map((s) => (vendorOverrides[s.id] !== undefined ? { ...s, vendor: vendorOverrides[s.id] } : s))),
-    [services, vendorOverrides],
+    () => (Object.keys(overrides).length === 0 ? services : services.map((s) => (overrides[s.id] ? { ...s, ...overrides[s.id] } : s))),
+    [services, overrides],
   );
   const canSelect = isAdmin && live;
   const isSelectable = (s: ServiceRecord) => canSelect && !['completed', 'canceled'].includes(s.status);
@@ -352,7 +366,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
       // Optimistically show the new vendor on the cards that actually changed — the
       // SSR re-fetch below can lag behind the write (search index + list cache).
       const changedIds: string[] = Array.isArray(d.results) ? d.results.filter((x: any) => x?.outcome === 'reassigned').map((x: any) => String(x.id)) : [];
-      if (changedIds.length) setVendorOverrides((prev) => { const next = { ...prev }; for (const id of changedIds) next[id] = String(d.vendorName); return next; });
+      if (changedIds.length) addOverrides(changedIds, { vendor: String(d.vendorName) });
       exitSelect();
       refreshList();
     } catch { setActionMsg({ status: 'error', msg: 'Reassign — couldn’t reach the server. Try again.' }); }
@@ -372,6 +386,8 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
       if (!r.ok) { setActionMsg({ status: 'error', msg: `Price — ${d.error || 'failed.'}` }); return; }
       const parts = [`${d.updated} updated to $${Number(d.vendorCost).toFixed(2)}`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
       setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Vendor price — ${parts.join(' · ')}` });
+      const changedIds: string[] = Array.isArray(d.results) ? d.results.filter((x: any) => x?.outcome === 'updated').map((x: any) => String(x.id)) : [];
+      if (changedIds.length) addOverrides(changedIds, { vendorCost: Number(d.vendorCost) });
       exitSelect();
       refreshList();
     } catch { setActionMsg({ status: 'error', msg: 'Price — couldn’t reach the server. Try again.' }); }
@@ -390,6 +406,8 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
       if (!r.ok) { setActionMsg({ status: 'error', msg: `Due date — ${d.error || 'failed.'}` }); return; }
       const parts = [`${d.updated} set to ${d.dueDate}`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
       setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Due date — ${parts.join(' · ')}` });
+      const changedIds: string[] = Array.isArray(d.results) ? d.results.filter((x: any) => x?.outcome === 'updated').map((x: any) => String(x.id)) : [];
+      if (changedIds.length) addOverrides(changedIds, { dueDate: String(d.dueDate) });
       exitSelect();
       refreshList();
     } catch { setActionMsg({ status: 'error', msg: 'Due date — couldn’t reach the server. Try again.' }); }
