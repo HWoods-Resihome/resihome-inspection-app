@@ -287,6 +287,14 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
 
   const [reassignVendor, setReassignVendor] = useState('');
   const [reassignQuery, setReassignQuery] = useState('');
+  // Bulk actions dropdown + the per-action input sheets (price / due date / note).
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [priceOpen, setPriceOpen] = useState(false);
+  const [dueDateOpen, setDueDateOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [bulkVendorCost, setBulkVendorCost] = useState('');
+  const [bulkDueDate, setBulkDueDate] = useState('');
+  const [bulkNote, setBulkNote] = useState('');
   // Optimistic vendor overlay: after a bulk reassign, HubSpot's search index (and
   // the 30s server-side list cache) can lag, so an immediate SSR re-fetch may still
   // return the OLD vendor. Overlay the new name locally per-id so the card updates
@@ -306,7 +314,7 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
   const canSelect = isAdmin && live;
   const isSelectable = (s: ServiceRecord) => canSelect && !['completed', 'canceled'].includes(s.status);
   const toggleSelect = (id: string) => setSelectedIds((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const exitSelect = () => { setSelectMode(false); setSelectedIds(new Set()); setReassignOpen(false); };
+  const exitSelect = () => { setSelectMode(false); setSelectedIds(new Set()); setReassignOpen(false); setActionMenuOpen(false); setPriceOpen(false); setDueDateOpen(false); setNoteOpen(false); };
   const enterSelectWith = (id: string, selectable: boolean) => { if (!canSelect) return; try { navigator.vibrate?.(15); } catch { /* n/a */ } setSelectMode(true); setSelectedIds(selectable ? new Set([id]) : new Set()); };
 
   const handleBulkCancel = async () => {
@@ -348,6 +356,61 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
       exitSelect();
       refreshList();
     } catch { setActionMsg({ status: 'error', msg: 'Reassign — couldn’t reach the server. Try again.' }); }
+    finally { setActionBusy(false); }
+  };
+
+  const applyBulkPrice = async () => {
+    const vc = Number(bulkVendorCost);
+    if (!selectedIds.size || !Number.isFinite(vc) || vc < 0 || actionBusy) return;
+    setActionBusy(true); setActionMsg(null);
+    try {
+      const r = await fetch('/api/services/bulk-price', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds), vendorCost: vc }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setActionMsg({ status: 'error', msg: `Price — ${d.error || 'failed.'}` }); return; }
+      const parts = [`${d.updated} updated to $${Number(d.vendorCost).toFixed(2)}`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
+      setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Vendor price — ${parts.join(' · ')}` });
+      exitSelect();
+      refreshList();
+    } catch { setActionMsg({ status: 'error', msg: 'Price — couldn’t reach the server. Try again.' }); }
+    finally { setActionBusy(false); }
+  };
+
+  const applyBulkDueDate = async () => {
+    if (!selectedIds.size || !/^\d{4}-\d{2}-\d{2}$/.test(bulkDueDate) || actionBusy) return;
+    setActionBusy(true); setActionMsg(null);
+    try {
+      const r = await fetch('/api/services/bulk-due-date', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds), dueDate: bulkDueDate }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setActionMsg({ status: 'error', msg: `Due date — ${d.error || 'failed.'}` }); return; }
+      const parts = [`${d.updated} set to ${d.dueDate}`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
+      setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Due date — ${parts.join(' · ')}` });
+      exitSelect();
+      refreshList();
+    } catch { setActionMsg({ status: 'error', msg: 'Due date — couldn’t reach the server. Try again.' }); }
+    finally { setActionBusy(false); }
+  };
+
+  const applyBulkNote = async () => {
+    if (!selectedIds.size || !bulkNote.trim() || actionBusy) return;
+    setActionBusy(true); setActionMsg(null);
+    try {
+      const r = await fetch('/api/services/bulk-note', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds), text: bulkNote.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setActionMsg({ status: 'error', msg: `Note — ${d.error || 'failed.'}` }); return; }
+      const parts = [`${d.added} note${d.added === 1 ? '' : 's'} added`]; if (d.notified) parts.push(`${d.notified} emailed`); if (d.failed) parts.push(`${d.failed} failed`);
+      setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Vendor note — ${parts.join(' · ')}` });
+      exitSelect();
+      refreshList();
+    } catch { setActionMsg({ status: 'error', msg: 'Note — couldn’t reach the server. Try again.' }); }
     finally { setActionBusy(false); }
   };
 
@@ -695,8 +758,10 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
         )}
 
         {/* Select-mode action bar (press-and-hold a card, or gear → Select Services).
-            Acts on the whole selection: Reassign Vendor (opens a picker) or Move to
-            Cancelled. Reassign only touches Assigned services; the rest are skipped. */}
+            One "Actions" dropdown bulk-edits the whole selection: reassign vendor,
+            change vendor price / due date, leave a vendor note, or move to
+            cancelled. Each action self-gates server-side (e.g. reassign & due date
+            only touch pre-submission orders); the rest are skipped and reported. */}
         {selectMode && (
           <div className="mb-3 bg-white border-2 border-brand rounded-xl px-3 py-2.5 shadow-md sticky top-2 z-20">
             <div className="flex items-center gap-2">
@@ -704,13 +769,33 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
               <div className="flex-1" />
               <button type="button" onClick={exitSelect} className="text-[12px] font-heading font-semibold text-gray-500 hover:text-brand underline">Done</button>
             </div>
-            <div className="flex items-center gap-2 mt-2">
-              <button type="button" disabled={!selectedIds.size || actionBusy} onClick={() => { setReassignVendor(''); setReassignQuery(''); setReassignOpen(true); }}
-                className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-brand text-white disabled:bg-gray-200 disabled:text-gray-400">Reassign Vendor</button>
-              <button type="button" disabled={!selectedIds.size || actionBusy} onClick={handleBulkCancel}
-                className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-white text-red-600 border border-red-300 disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200">{actionBusy ? '…' : 'Move to Cancelled'}</button>
+            <div className="relative mt-2">
+              <button type="button" disabled={!selectedIds.size || actionBusy} onClick={() => setActionMenuOpen((v) => !v)}
+                aria-expanded={actionMenuOpen}
+                className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-brand text-white disabled:bg-gray-200 disabled:text-gray-400">
+                {actionBusy ? '…' : 'Actions'}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${actionMenuOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+              </button>
+              {actionMenuOpen && (
+                <>
+                  <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setActionMenuOpen(false)} />
+                  <div className="absolute left-0 right-0 mt-1.5 z-50 rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 overflow-hidden py-1">
+                    {[
+                      { key: 'reassign', label: 'Reassign Vendor', onClick: () => { setReassignVendor(''); setReassignQuery(''); setReassignOpen(true); } },
+                      { key: 'price', label: 'Change Vendor Price', onClick: () => { setBulkVendorCost(''); setPriceOpen(true); } },
+                      { key: 'due', label: 'Change Due Date', onClick: () => { setBulkDueDate(''); setDueDateOpen(true); } },
+                      { key: 'note', label: 'Leave Vendor Note', onClick: () => { setBulkNote(''); setNoteOpen(true); } },
+                    ].map((a) => (
+                      <button key={a.key} type="button" onClick={() => { setActionMenuOpen(false); a.onClick(); }}
+                        className="w-full text-left px-3.5 py-2.5 text-sm font-heading font-semibold text-gray-700 hover:bg-gray-50 transition-colors">{a.label}</button>
+                    ))}
+                    <button type="button" onClick={() => { setActionMenuOpen(false); void handleBulkCancel(); }}
+                      className="w-full text-left px-3.5 py-2.5 text-sm font-heading font-semibold text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100">Move to Cancelled</button>
+                  </div>
+                </>
+              )}
             </div>
-            <p className="text-[11px] text-gray-400 mt-1.5">Tap services to select — <b>Completed</b> and <b>Cancelled</b> services are final and can&apos;t be selected. Reassign applies to <b>Assigned</b> services in the selection; others are skipped.</p>
+            <p className="text-[11px] text-gray-400 mt-1.5">Tap services to select — <b>Completed</b> and <b>Cancelled</b> services are final and can&apos;t be selected. Each action applies to the eligible services in the selection; others are skipped.</p>
           </div>
         )}
 
@@ -791,6 +876,63 @@ export default function ServicesHome({ userName, canCreate, asVendor, isVendor, 
               <button type="button" onClick={() => setReassignOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
               <button type="button" disabled={actionBusy || !reassignVendor} onClick={applyReassign}
                 className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{actionBusy ? '…' : 'Submit'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Vendor Price (select mode). Sets vendor cost on the selection;
+          each service keeps its own markup % and the client price recomputes. */}
+      {priceOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setPriceOpen(false)}>
+          <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="font-heading font-bold text-[15px] text-ink">Change Vendor Price</div>
+            <p className="text-[13px] text-gray-500 mt-1">Set the vendor cost on the <b className="text-ink">{selectedIds.size}</b> selected service{selectedIds.size > 1 ? 's' : ''}. Each keeps its own markup %; the client price recomputes. Completed / cancelled are skipped.</p>
+            <div className="relative mt-3">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+              <input type="number" inputMode="decimal" min="0" step="0.01" value={bulkVendorCost} onChange={(e) => setBulkVendorCost(e.target.value)} placeholder="0.00" autoFocus
+                className="w-full text-sm border border-gray-300 rounded-lg pl-7 pr-3 py-2.5 bg-white focus:outline-none focus:border-brand" />
+            </div>
+            <div className="flex gap-2 pt-3">
+              <button type="button" onClick={() => setPriceOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
+              <button type="button" disabled={actionBusy || !(Number(bulkVendorCost) >= 0 && bulkVendorCost !== '')} onClick={applyBulkPrice}
+                className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{actionBusy ? '…' : 'Apply'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Due Date (select mode). Only pre-submission orders (estimated /
+          pending / assigned) are changed; later statuses are skipped. */}
+      {dueDateOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDueDateOpen(false)}>
+          <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="font-heading font-bold text-[15px] text-ink">Change Due Date</div>
+            <p className="text-[13px] text-gray-500 mt-1">Set the due date on the <b className="text-ink">{selectedIds.size}</b> selected service{selectedIds.size > 1 ? 's' : ''}. Only <b>Estimated / Pending / Assigned</b> orders change; others are skipped.</p>
+            <input type="date" value={bulkDueDate} onChange={(e) => setBulkDueDate(e.target.value)} autoFocus
+              className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 mt-3 bg-white focus:outline-none focus:border-brand" />
+            <div className="flex gap-2 pt-3">
+              <button type="button" onClick={() => setDueDateOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
+              <button type="button" disabled={actionBusy || !/^\d{4}-\d{2}-\d{2}$/.test(bulkDueDate)} onClick={applyBulkDueDate}
+                className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{actionBusy ? '…' : 'Apply'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Leave Vendor Note (select mode). Appends the note to each service's
+          thread and emails each assigned vendor. */}
+      {noteOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setNoteOpen(false)}>
+          <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="font-heading font-bold text-[15px] text-ink">Leave Vendor Note</div>
+            <p className="text-[13px] text-gray-500 mt-1">Add this note to the <b className="text-ink">{selectedIds.size}</b> selected service{selectedIds.size > 1 ? 's' : ''} and email each assigned vendor.</p>
+            <textarea value={bulkNote} onChange={(e) => setBulkNote(e.target.value)} rows={4} placeholder="Type your note to the vendor(s)…" autoFocus
+              className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 mt-3 bg-white focus:outline-none focus:border-brand resize-none" />
+            <div className="flex gap-2 pt-3">
+              <button type="button" onClick={() => setNoteOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
+              <button type="button" disabled={actionBusy || !bulkNote.trim()} onClick={applyBulkNote}
+                className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{actionBusy ? '…' : 'Send'}</button>
             </div>
           </div>
         </div>
