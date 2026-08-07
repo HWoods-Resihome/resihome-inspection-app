@@ -5,8 +5,8 @@ import { isExternalEmail, EXTERNAL_TEMPLATE } from '@/lib/userAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { canViewInsights } from '@/lib/insightsAccess';
-import { isResiwalkActive, inspectionsEnabled, inspectionAccessLevel } from '@/lib/userManagement';
-import { vendorInspectionLevel } from '@/lib/inspectionGuard';
+import { isResiwalkActive, inspectionsEnabled, type InspectionAccessLevel } from '@/lib/userManagement';
+import { externalLevel } from '@/lib/inspectionGuard';
 import { warnOnBootIfMisconfigured } from '@/lib/configValidation';
 
 // Cheap, env-only, once-per-cold-instance: log a warning if a required env var
@@ -29,13 +29,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
   const external = isExternalEmail(user.email);
   const isAdmin = await isAppAdmin(user.email);
-  // Effective inspections LEVEL: a vendor's tri-state (Vendor Management) or a
-  // per-user override (User Management) can grant FULL — "everything, any type,
-  // like an internal user". Only below-full external users keep the 1099-only
-  // template restriction; domain alone no longer decides it.
-  const level = user.vendor
-    ? ((await vendorInspectionLevel(user.email).catch(() => null)) ?? 'limited')
-    : await inspectionAccessLevel(user.email).catch(() => (external ? 'limited' as const : 'full' as const));
+  // Effective inspections LEVEL — resolved by EMAIL via the same canonical
+  // resolver the server write-guards use (externalLevel): a vendor's tri-state
+  // (Vendor Management) or a per-user override (User Management) can grant FULL
+  // ("everything, any type, like an internal user"). Resolving by email (not the
+  // session's `vendor` flag) is what makes admin "View As <vendor>" match the
+  // vendor's real access — the impersonation session carries the vendor's email
+  // but no vendor flag, so the old flag-gated branch mis-scored them as limited.
+  const levelFallback: InspectionAccessLevel = external ? 'limited' : 'full';
+  const { level } = await externalLevel(user.email).catch(() => ({ level: levelFallback, vendor: false }));
   const externalRestricted = external && level !== 'full';
   return res.status(200).json({
     authenticated: true,

@@ -37,7 +37,7 @@ export async function vendorInspectionAccess(email: string | null | undefined): 
  *  defaults to full, external to limited — both overridable, so an internal or
  *  allowlisted user set to Limited genuinely gets the 1099-style rules). The
  *  override map is cached 60s, so the fast path (full) stays cheap. */
-async function externalLevel(email: string | null | undefined): Promise<{ level: InspectionAccessLevel; vendor: boolean }> {
+export async function externalLevel(email: string | null | undefined): Promise<{ level: InspectionAccessLevel; vendor: boolean }> {
   const vLvl = await vendorInspectionLevel(email);
   if (vLvl !== null) return { level: vLvl, vendor: true };
   return { level: await inspectionAccessLevel(email).catch(() => isExternalEmail(email) ? 'limited' as const : 'full' as const), vendor: false };
